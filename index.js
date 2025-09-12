@@ -1,7 +1,8 @@
 // 必要なモジュールをインポート
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 const crypto = require('crypto');
+const { execSync } = require('child_process');
 require('dotenv').config(); // .env ファイルから環境変数を読み込む
 
 // Discordクライアントのインスタンスを作成
@@ -16,6 +17,10 @@ const client = new Client({
 // Expressアプリのインスタンスを作成
 const app = express();
 const PORT = process.env.PORT || 3000; // Koyebが指定するポート、またはローカル用の3000番ポート
+
+// /cronymous のユーザーごとのクールダウン管理（30秒）
+const CRONYMOUS_COOLDOWN_MS = 30 * 1000;
+const cronymousCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
@@ -66,6 +71,48 @@ client.once('ready', async () => {
   } catch (error) {
     console.error('スラッシュコマンドの登録に失敗しました:', error);
   }
+
+  // 再起動通知を送信
+  try {
+    const notifyChannelId = '1415336647284883528';
+    const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
+    if (channel) {
+      // Git情報を取得
+      let commitSha = 'unknown';
+      let commitAuthor = 'unknown';
+      let commitDate = 'unknown';
+      let commitMessage = 'N/A';
+      try {
+        commitSha = execSync('git rev-parse --short HEAD').toString().trim();
+        commitAuthor = execSync('git log -1 --pretty=%an').toString().trim();
+        commitDate = execSync('git log -1 --pretty=%ad --date=iso').toString().trim();
+        commitMessage = execSync('git log -1 --pretty=%B').toString().trim();
+      } catch (_) {}
+
+      // 文字数制限対策でコミットメッセージを短縮
+      const commitMessageShort = commitMessage.length > 1000
+        ? commitMessage.slice(0, 997) + '...'
+        : commitMessage;
+
+      const embed = new EmbedBuilder()
+        .setTitle('🥸再起動しました。確認してください。')
+        .setColor(0x5865F2)
+        .setDescription(commitMessageShort || 'コミットメッセージはありません。')
+        .addFields(
+          { name: 'Commit', value: '`' + commitSha + '`', inline: true },
+          { name: 'Author', value: commitAuthor, inline: true },
+          { name: 'Date', value: commitDate, inline: true },
+        )
+        .setTimestamp(new Date())
+        .setFooter({ text: client.user.tag, iconURL: client.user.displayAvatarURL() });
+
+      await channel.send({ embeds: [embed] });
+    } else {
+      console.warn('再起動通知先チャンネルの取得に失敗しました。');
+    }
+  } catch (e) {
+    console.error('再起動通知の送信に失敗しました:', e);
+  }
 });
 
 // スラッシュコマンドの処理
@@ -73,6 +120,15 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'cronymous') {
+    // ユーザーごとのクールダウンチェック
+    const now = Date.now();
+    const lastUsed = cronymousCooldowns.get(interaction.user.id) || 0;
+    const elapsed = now - lastUsed;
+    if (elapsed < CRONYMOUS_COOLDOWN_MS) {
+      const remainSec = Math.ceil((CRONYMOUS_COOLDOWN_MS - elapsed) / 1000);
+      return interaction.reply({ content: `エラー: クールダウン中です。${remainSec}秒後に再度お試しください。`, ephemeral: true });
+    }
+
     const content = interaction.options.getString('内容');
     
     // メッセージの検証
@@ -122,6 +178,9 @@ client.on('interactionCreate', async interaction => {
         });
       }
       
+      // 成功: クールダウン開始
+      cronymousCooldowns.set(interaction.user.id, Date.now());
+
       // ユーザーに成功メッセージを送信（一時的）
       await interaction.reply({ content: '匿名メッセージを送信しました。', ephemeral: true });
       
