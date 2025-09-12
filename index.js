@@ -77,14 +77,12 @@ client.once('ready', async () => {
     const notifyChannelId = '1415336647284883528';
     const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
     if (channel) {
-      // Git情報を取得
+      // Git情報を取得（Authorは含めない）
       let commitSha = 'unknown';
-      let commitAuthor = 'unknown';
       let commitDate = 'unknown';
       let commitMessage = 'N/A';
       try {
         commitSha = execSync('git rev-parse --short HEAD').toString().trim();
-        commitAuthor = execSync('git log -1 --pretty=%an').toString().trim();
         commitDate = execSync('git log -1 --pretty=%ad --date=iso').toString().trim();
         commitMessage = execSync('git log -1 --pretty=%B').toString().trim();
       } catch (_) {}
@@ -100,7 +98,6 @@ client.once('ready', async () => {
         .setDescription(commitMessageShort || 'コミットメッセージはありません。')
         .addFields(
           { name: 'Commit', value: '`' + commitSha + '`', inline: true },
-          { name: 'Author', value: commitAuthor, inline: true },
           { name: 'Date', value: commitDate, inline: true },
         )
         .setTimestamp(new Date())
