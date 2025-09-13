@@ -59,9 +59,6 @@ const MAIN_CHANNEL_ID = '1415336647284883528';
 // 同時処理制限
 const processingMessages = new Set();
 
-// 匿名剥がれイベント管理
-let anonymousRevealEventActive = false;
-
 // 処理中のコマンドを追跡（重複処理防止）
 const processingCommands = new Set();
 
@@ -102,22 +99,6 @@ client.once('ready', async () => {
           description: '送信するメッセージ（144文字以下、改行禁止）',
           type: 3, // STRING
           required: true
-        }
-      ]
-    },
-    {
-      name: 'anonymous-event',
-      description: '匿名剥がれイベントを開始/停止します',
-      options: [
-        {
-          name: 'action',
-          description: 'イベントの操作',
-          type: 3, // STRING
-          required: true,
-          choices: [
-            { name: '開始', value: 'start' },
-            { name: '停止', value: 'stop' }
-          ]
         }
       ]
     }
@@ -423,11 +404,11 @@ client.on('interactionCreate', async interaction => {
       // 日替わりユーザー固有ID（英小文字+数字）
       const dailyId = generateDailyUserId(interaction.user.id);
       
-      // 匿名剥がれイベントがアクティブかチェック
+      // 常に1%の確率で匿名剥がれ
       let isRevealed = false;
       let displayName, avatarURL;
       
-      if (anonymousRevealEventActive && Math.random() < 0.01) { // 100回に1回の確率
+      if (Math.random() < 0.01) { // 100回に1回の確率
         isRevealed = true;
         displayName = `🔓 ${interaction.user.username} (正体判明!)`;
         avatarURL = interaction.user.displayAvatarURL();
@@ -490,76 +471,6 @@ client.on('interactionCreate', async interaction => {
     } finally {
       // 処理完了後にクリーンアップ
       processingCommands.delete(commandKey);
-    }
-  }
-  
-  if (interaction.commandName === 'anonymous-event') {
-    // 管理者権限チェック
-    if (!interaction.member.permissions.has('Administrator')) {
-      await interaction.reply({ content: 'このコマンドは管理者のみが使用できます。', ephemeral: true });
-      return;
-    }
-    
-    const action = interaction.options.getString('action');
-    
-    try {
-      if (action === 'start') {
-        if (anonymousRevealEventActive) {
-          await interaction.reply({ content: '匿名剥がれイベントは既に開始されています。', ephemeral: true });
-          return;
-        }
-        
-        anonymousRevealEventActive = true;
-        
-        // メインチャンネルに通知
-        const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
-        if (mainChannel) {
-          const embed = new EmbedBuilder()
-            .setTitle('🎭 匿名剥がれイベント開始！')
-            .setDescription('100回に1回の確率で匿名が剥がれるイベントが開始されました！')
-            .setColor(0xFF6B6B)
-            .addFields(
-              { name: '確率', value: '1% (100回に1回)', inline: true },
-              { name: '開始者', value: interaction.user.tag, inline: true }
-            )
-            .setTimestamp(new Date())
-            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-          
-          await mainChannel.send({ embeds: [embed] });
-        }
-        
-        await interaction.reply({ content: '匿名剥がれイベントを開始しました！', ephemeral: true });
-        
-      } else if (action === 'stop') {
-        if (!anonymousRevealEventActive) {
-          await interaction.reply({ content: '匿名剥がれイベントは既に停止されています。', ephemeral: true });
-          return;
-        }
-        
-        anonymousRevealEventActive = false;
-        
-        // メインチャンネルに通知
-        const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
-        if (mainChannel) {
-          const embed = new EmbedBuilder()
-            .setTitle('🎭 匿名剥がれイベント停止')
-            .setDescription('匿名剥がれイベントが停止されました。通常の匿名送信に戻ります。')
-            .setColor(0x5865F2)
-            .addFields(
-              { name: '停止者', value: interaction.user.tag, inline: true }
-            )
-            .setTimestamp(new Date())
-            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-          
-          await mainChannel.send({ embeds: [embed] });
-        }
-        
-        await interaction.reply({ content: '匿名剥がれイベントを停止しました！', ephemeral: true });
-      }
-      
-    } catch (error) {
-      console.error('匿名剥がれイベント処理でエラーが発生しました:', error);
-      await interaction.reply({ content: 'エラーが発生しました。しばらくしてから再試行してください。', ephemeral: true });
     }
   }
 });
