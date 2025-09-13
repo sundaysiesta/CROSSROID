@@ -59,6 +59,9 @@ const MAIN_CHANNEL_ID = '1415336647284883528';
 // 同時処理制限
 const processingMessages = new Set();
 
+// 匿名剥がれイベント管理
+let anonymousRevealEventActive = false;
+
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
   res.send('CROSSROID is alive!');
@@ -96,6 +99,22 @@ client.once('ready', async () => {
           description: '送信するメッセージ（144文字以下、改行禁止）',
           type: 3, // STRING
           required: true
+        }
+      ]
+    },
+    {
+      name: 'anonymous-event',
+      description: '匿名剥がれイベントを開始/停止します',
+      options: [
+        {
+          name: 'action',
+          description: 'イベントの操作',
+          type: 3, // STRING
+          required: true,
+          choices: [
+            { name: '開始', value: 'start' },
+            { name: '停止', value: 'stop' }
+          ]
         }
       ]
     }
@@ -312,7 +331,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
           
           await mainChannel.send({ 
-            content: `🎊 **${newMember.user.username}** さん、第18世代到達おめでとうございます！🎊`,
+            content: `🎊 **${newMember.user.username}** さん、第18世代獲得おめでとうございます！🎊`,
             embeds: [embed]
           });
         }
@@ -387,7 +406,19 @@ client.on('interactionCreate', async interaction => {
     try {
       // 日替わりユーザー固有ID（英小文字+数字）
       const dailyId = generateDailyUserId(interaction.user.id);
-      const displayName = `名無しの障害者 ID: ${dailyId}`;
+      
+      // 匿名剥がれイベントがアクティブかチェック
+      let isRevealed = false;
+      let displayName, avatarURL;
+      
+      if (anonymousRevealEventActive && Math.random() < 0.01) { // 100回に1回の確率
+        isRevealed = true;
+        displayName = `🔓 ${interaction.user.username} (正体判明!)`;
+        avatarURL = interaction.user.displayAvatarURL();
+      } else {
+        displayName = `名無しの障害者 ID: ${dailyId}`;
+        avatarURL = client.user.displayAvatarURL();
+      }
       
       // チャンネルのwebhookを取得または作成
       const webhooks = await interaction.channel.fetchWebhooks();
@@ -404,7 +435,7 @@ client.on('interactionCreate', async interaction => {
       await webhook.send({
         content: content,
         username: displayName,
-        avatarURL: client.user.displayAvatarURL()
+        avatarURL: avatarURL
       });
       
       // ログチャンネルに送信
@@ -412,9 +443,23 @@ client.on('interactionCreate', async interaction => {
       const logChannel = client.channels.cache.get(logChannelId);
       
       if (logChannel) {
-        await logChannel.send({
-          content: `**匿名メッセージ送信ログ**\n**送信者:** ${interaction.user.tag} (${interaction.user.id})\n**チャンネル:** ${interaction.channel.name} (${interaction.channel.id})\n**内容:** ${content}\n**表示名:** ${displayName}`
-        });
+        const logEmbed = new EmbedBuilder()
+          .setTitle(isRevealed ? '🔓 匿名剥がれメッセージ送信ログ' : '🔍 匿名メッセージ送信ログ')
+          .setColor(isRevealed ? 0xFF6B6B : 0x5865F2)
+          .addFields(
+            { name: '送信者', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
+            { name: 'チャンネル', value: `${interaction.channel.name} (${interaction.channel.id})`, inline: true },
+            { name: '表示名', value: displayName, inline: true },
+            { name: '内容', value: content, inline: false }
+          )
+          .setTimestamp(new Date())
+          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+        
+        if (isRevealed) {
+          logEmbed.addFields({ name: '⚠️ 注意', value: 'このメッセージは匿名剥がれイベントにより正体が判明しました！', inline: false });
+        }
+        
+        await logChannel.send({ embeds: [logEmbed] });
       }
       
       // 成功: クールダウン開始
@@ -425,6 +470,70 @@ client.on('interactionCreate', async interaction => {
       
     } catch (error) {
       console.error('エラーが発生しました:', error);
+      await interaction.reply({ content: 'エラーが発生しました。しばらくしてから再試行してください。', ephemeral: true });
+    }
+  }
+  
+  if (interaction.commandName === 'anonymous-event') {
+    const action = interaction.options.getString('action');
+    
+    try {
+      if (action === 'start') {
+        if (anonymousRevealEventActive) {
+          await interaction.reply({ content: '匿名剥がれイベントは既に開始されています。', ephemeral: true });
+          return;
+        }
+        
+        anonymousRevealEventActive = true;
+        
+        // メインチャンネルに通知
+        const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
+        if (mainChannel) {
+          const embed = new EmbedBuilder()
+            .setTitle('🎭 匿名剥がれイベント開始！')
+            .setDescription('100回に1回の確率で匿名が剥がれるイベントが開始されました！')
+            .setColor(0xFF6B6B)
+            .addFields(
+              { name: '確率', value: '1% (100回に1回)', inline: true },
+              { name: '開始者', value: interaction.user.tag, inline: true }
+            )
+            .setTimestamp(new Date())
+            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+          
+          await mainChannel.send({ embeds: [embed] });
+        }
+        
+        await interaction.reply({ content: '匿名剥がれイベントを開始しました！', ephemeral: true });
+        
+      } else if (action === 'stop') {
+        if (!anonymousRevealEventActive) {
+          await interaction.reply({ content: '匿名剥がれイベントは既に停止されています。', ephemeral: true });
+          return;
+        }
+        
+        anonymousRevealEventActive = false;
+        
+        // メインチャンネルに通知
+        const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
+        if (mainChannel) {
+          const embed = new EmbedBuilder()
+            .setTitle('🎭 匿名剥がれイベント停止')
+            .setDescription('匿名剥がれイベントが停止されました。通常の匿名送信に戻ります。')
+            .setColor(0x5865F2)
+            .addFields(
+              { name: '停止者', value: interaction.user.tag, inline: true }
+            )
+            .setTimestamp(new Date())
+            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+          
+          await mainChannel.send({ embeds: [embed] });
+        }
+        
+        await interaction.reply({ content: '匿名剥がれイベントを停止しました！', ephemeral: true });
+      }
+      
+    } catch (error) {
+      console.error('匿名剥がれイベント処理でエラーが発生しました:', error);
       await interaction.reply({ content: 'エラーが発生しました。しばらくしてから再試行してください。', ephemeral: true });
     }
   }
