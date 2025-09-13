@@ -192,6 +192,8 @@ client.on('messageCreate', async message => {
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
     
+    console.log(`代行投稿処理開始: ${originalAuthor.tag} (${originalAuthor.id})`);
+    
     // 元のメッセージを先に削除
     try {
       await message.delete();
@@ -202,10 +204,12 @@ client.on('messageCreate', async message => {
     }
     
     // チャンネルのwebhookを取得または作成
+    console.log('webhookを取得中...');
     const webhooks = await message.channel.fetchWebhooks();
     let webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
     
     if (!webhook) {
+      console.log('webhookを作成中...');
       webhook = await message.channel.createWebhook({
         name: 'CROSSROID Proxy',
         avatar: originalAuthor.displayAvatarURL()
@@ -217,6 +221,8 @@ client.on('messageCreate', async message => {
       attachment: attachment.url,
       name: attachment.name
     }));
+    
+    console.log(`添付ファイル数: ${files.length}`);
     
     // 削除ボタンを準備
     const deleteButton = {
@@ -233,6 +239,7 @@ client.on('messageCreate', async message => {
     };
     
     // webhookでメッセージを送信（元のユーザー名とアイコンを使用、削除ボタン付き）
+    console.log('webhookでメッセージを送信中...');
     const webhookMessage = await webhook.send({
       content: originalContent,
       username: originalAuthor.username,
@@ -241,15 +248,7 @@ client.on('messageCreate', async message => {
       components: [actionRow]
     });
     
-    // ログチャンネルに送信
-    const logChannelId = '1369643068118274211';
-    const logChannel = client.channels.cache.get(logChannelId);
-    
-    if (logChannel) {
-      await logChannel.send({
-        content: `**メディア代行投稿ログ**\n**元の送信者:** ${originalAuthor.tag} (${originalAuthor.id})\n**チャンネル:** ${message.channel.name} (${message.channel.id})\n**内容:** ${originalContent || 'なし'}\n**添付ファイル数:** ${originalAttachments.length}`
-      });
-    }
+    console.log(`代行投稿完了: ${webhookMessage.id}`);
     
   } catch (error) {
     console.error('メディア代行投稿でエラーが発生しました:', error);
