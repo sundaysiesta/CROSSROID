@@ -205,24 +205,40 @@ client.on('messageCreate', async message => {
     
     // チャンネルのwebhookを取得または作成
     console.log('webhookを取得中...');
-    const webhooks = await message.channel.fetchWebhooks();
-    let webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
+    let webhook;
     
-    if (!webhook) {
-      console.log('webhookを作成中...');
-      webhook = await message.channel.createWebhook({
-        name: 'CROSSROID Proxy',
-        avatar: originalAuthor.displayAvatarURL()
-      });
+    try {
+      const webhooks = await message.channel.fetchWebhooks();
+      webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
+      
+      if (!webhook) {
+        console.log('webhookを作成中...');
+        webhook = await message.channel.createWebhook({
+          name: 'CROSSROID Proxy',
+          avatar: originalAuthor.displayAvatarURL()
+        });
+        console.log('webhookを作成しました');
+      } else {
+        console.log('既存のwebhookを使用します');
+      }
+    } catch (webhookError) {
+      console.error('webhookの取得/作成に失敗しました:', webhookError);
+      throw webhookError;
     }
     
     // 添付ファイルを準備
-    const files = originalAttachments.map(attachment => ({
-      attachment: attachment.url,
-      name: attachment.name
-    }));
-    
-    console.log(`添付ファイル数: ${files.length}`);
+    let files = [];
+    try {
+      files = originalAttachments.map(attachment => ({
+        attachment: attachment.url,
+        name: attachment.name
+      }));
+      console.log(`添付ファイル数: ${files.length}`);
+    } catch (fileError) {
+      console.error('添付ファイルの準備に失敗しました:', fileError);
+      // 添付ファイルがなくても処理を続行
+      files = [];
+    }
     
     // 削除ボタンを準備
     const deleteButton = {
@@ -240,18 +256,54 @@ client.on('messageCreate', async message => {
     
     // webhookでメッセージを送信（元のユーザー名とアイコンを使用、削除ボタン付き）
     console.log('webhookでメッセージを送信中...');
-    const webhookMessage = await webhook.send({
-      content: originalContent,
-      username: originalAuthor.username,
-      avatarURL: originalAuthor.displayAvatarURL(),
-      files: files,
-      components: [actionRow]
-    });
     
-    console.log(`代行投稿完了: ${webhookMessage.id}`);
+    // リトライ機能付きでwebhook送信
+    let webhookMessage;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        webhookMessage = await webhook.send({
+          content: originalContent,
+          username: originalAuthor.username,
+          avatarURL: originalAuthor.displayAvatarURL(),
+          files: files,
+          components: [actionRow]
+        });
+        console.log(`代行投稿完了: ${webhookMessage.id}`);
+        break; // 成功したらループを抜ける
+      } catch (error) {
+        retryCount++;
+        console.error(`webhook送信エラー (試行 ${retryCount}/${maxRetries}):`, error.message);
+        
+        if (retryCount >= maxRetries) {
+          console.error('webhook送信が最大試行回数に達しました。');
+          throw error;
+        }
+        
+        // リトライ前に少し待機
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+      }
+    }
     
   } catch (error) {
     console.error('メディア代行投稿でエラーが発生しました:', error);
+    console.error('エラーの詳細:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    
+    // エラーが発生した場合でも、元のメッセージが削除されている可能性があるため
+    // 簡単なメッセージを送信してユーザーに通知
+    try {
+      await message.channel.send({
+        content: `⚠️ メディアの代行投稿中にエラーが発生しました。しばらくしてから再試行してください。\nエラー: ${error.message}`
+      });
+    } catch (notifyError) {
+      console.error('エラー通知の送信に失敗しました:', notifyError);
+    }
   }
 });
 
