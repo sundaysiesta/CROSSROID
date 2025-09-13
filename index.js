@@ -475,6 +475,12 @@ client.on('interactionCreate', async interaction => {
   }
   
   if (interaction.commandName === 'anonymous-event') {
+    // 管理者権限チェック
+    if (!interaction.member.permissions.has('Administrator')) {
+      await interaction.reply({ content: 'このコマンドは管理者のみが使用できます。', ephemeral: true });
+      return;
+    }
+    
     const action = interaction.options.getString('action');
     
     try {
