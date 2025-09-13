@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3000; // Koyebが指定するポート、また
 const CRONYMOUS_COOLDOWN_MS = 30 * 1000;
 const cronymousCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
-// 特定のロールIDのリスト
+// 特定のロールIDのリスト（代行投稿をスキップするロール）
 const ALLOWED_ROLE_IDS = [
   '1401922708442320916',
   '1369627265528496198',
@@ -43,6 +43,9 @@ const ALLOWED_ROLE_IDS = [
   '1369627288903225406',
   '1369627290597724181'
 ];
+
+// 強制代行投稿ロールID（このロールを持っている人は代行投稿される）
+const FORCE_PROXY_ROLE_ID = '1416291713009582172';
 
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
@@ -140,6 +143,12 @@ function hasAllowedRole(member) {
   return member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
 }
 
+// 強制代行投稿ロールチェック機能
+function hasForceProxyRole(member) {
+  if (!member) return false;
+  return member.roles.cache.has(FORCE_PROXY_ROLE_ID);
+}
+
 // 画像・動画ファイルの拡張子をチェック
 function isImageOrVideo(attachment) {
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg'];
@@ -163,8 +172,13 @@ client.on('messageCreate', async message => {
   // メンバー情報を取得
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   
-  // 特定のロールを持っている場合は無視
-  if (hasAllowedRole(member)) return;
+  // 強制代行投稿ロールを持っている場合は代行投稿を実行
+  if (hasForceProxyRole(member)) {
+    // 強制代行投稿の場合は処理を続行
+  } else if (hasAllowedRole(member)) {
+    // 特定のロールを持っている場合は無視
+    return;
+  }
   
   // ボットの権限をチェック
   if (!message.guild.members.me.permissions.has('ManageMessages')) {
@@ -204,20 +218,12 @@ client.on('messageCreate', async message => {
       name: attachment.name
     }));
     
-    // webhookでメッセージを送信（元のユーザー名とアイコンを使用）
-    const webhookMessage = await webhook.send({
-      content: originalContent,
-      username: originalAuthor.username,
-      avatarURL: originalAuthor.displayAvatarURL(),
-      files: files
-    });
-    
-    // 削除ボタン付きのメッセージを送信
+    // 削除ボタンを準備
     const deleteButton = {
       type: 2, // BUTTON
       style: 4, // DANGER (赤色)
       label: '削除',
-      custom_id: `delete_${webhookMessage.id}`,
+      custom_id: `delete_${originalAuthor.id}_${Date.now()}`,
       emoji: '🗑️'
     };
     
@@ -226,7 +232,12 @@ client.on('messageCreate', async message => {
       components: [deleteButton]
     };
     
-    await webhookMessage.edit({
+    // webhookでメッセージを送信（元のユーザー名とアイコンを使用、削除ボタン付き）
+    const webhookMessage = await webhook.send({
+      content: originalContent,
+      username: originalAuthor.username,
+      avatarURL: originalAuthor.displayAvatarURL(),
+      files: files,
       components: [actionRow]
     });
     
@@ -249,12 +260,18 @@ client.on('messageCreate', async message => {
 client.on('interactionCreate', async interaction => {
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('delete_')) {
-      const messageId = interaction.customId.replace('delete_', '');
+      const customIdParts = interaction.customId.replace('delete_', '').split('_');
+      const authorId = customIdParts[0];
+      
+      // 投稿者本人のみが削除できるようにチェック
+      if (interaction.user.id !== authorId) {
+        await interaction.reply({ content: 'このメッセージは投稿者本人のみが削除できます。', ephemeral: true });
+        return;
+      }
       
       try {
         // メッセージを削除
-        const message = await interaction.channel.messages.fetch(messageId);
-        await message.delete();
+        await interaction.message.delete();
         
         // 削除完了の応答
         await interaction.reply({ content: 'メッセージを削除しました。', ephemeral: true });
