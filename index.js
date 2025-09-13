@@ -62,6 +62,9 @@ const processingMessages = new Set();
 // 匿名剥がれイベント管理
 let anonymousRevealEventActive = false;
 
+// 処理中のコマンドを追跡（重複処理防止）
+const processingCommands = new Set();
+
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
   res.send('CROSSROID is alive!');
@@ -378,12 +381,22 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'cronymous') {
+    // 重複処理防止チェック
+    const commandKey = `cronymous_${interaction.user.id}_${interaction.id}`;
+    if (processingCommands.has(commandKey)) {
+      return interaction.reply({ content: 'このコマンドは既に処理中です。', ephemeral: true });
+    }
+    
+    // 処理中としてマーク
+    processingCommands.add(commandKey);
+    
     // ユーザーごとのクールダウンチェック
     const now = Date.now();
     const lastUsed = cronymousCooldowns.get(interaction.user.id) || 0;
     const elapsed = now - lastUsed;
     if (elapsed < CRONYMOUS_COOLDOWN_MS) {
       const remainSec = Math.ceil((CRONYMOUS_COOLDOWN_MS - elapsed) / 1000);
+      processingCommands.delete(commandKey);
       return interaction.reply({ content: `エラー: クールダウン中です。${remainSec}秒後に再度お試しください。`, ephemeral: true });
     }
 
@@ -391,15 +404,18 @@ client.on('interactionCreate', async interaction => {
     
     // メッセージの検証
     if (content.includes('\n')) {
+      processingCommands.delete(commandKey);
       return interaction.reply({ content: 'エラー: 改行は使用できません。', ephemeral: true });
     }
     
     if (content.length > 144) {
+      processingCommands.delete(commandKey);
       return interaction.reply({ content: 'エラー: メッセージは144文字以下である必要があります。', ephemeral: true });
     }
     
     // @everyoneや@hereなどのメンションをチェック
     if (content.includes('@everyone') || content.includes('@here') || content.includes('<@&')) {
+      processingCommands.delete(commandKey);
       return interaction.reply({ content: 'エラー: @everyoneや@hereなどのメンションは使用できません。', ephemeral: true });
     }
 
@@ -471,6 +487,9 @@ client.on('interactionCreate', async interaction => {
     } catch (error) {
       console.error('エラーが発生しました:', error);
       await interaction.reply({ content: 'エラーが発生しました。しばらくしてから再試行してください。', ephemeral: true });
+    } finally {
+      // 処理完了後にクリーンアップ
+      processingCommands.delete(commandKey);
     }
   }
   
