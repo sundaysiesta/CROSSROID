@@ -47,6 +47,15 @@ const ALLOWED_ROLE_IDS = [
 // 強制代行投稿ロールID（このロールを持っている人は代行投稿される）
 const FORCE_PROXY_ROLE_ID = '1416291713009582172';
 
+// レベル10ロールID
+const LEVEL_10_ROLE_ID = '1369627346201481239';
+
+// 現在の世代ロールID
+const CURRENT_GENERATION_ROLE_ID = '1401922708442320916';
+
+// メインチャンネルID
+const MAIN_CHANNEL_ID = '1415336647284883528';
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -266,6 +275,53 @@ client.on('messageCreate', async message => {
   } finally {
     // 処理完了後にメッセージIDをクリーンアップ
     processingMessages.delete(message.id);
+  }
+});
+
+// レベル10ロール取得時の世代ロール付与処理
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  try {
+    // レベル10ロールが新しく追加されたかチェック
+    const hadLevel10Role = oldMember.roles.cache.has(LEVEL_10_ROLE_ID);
+    const hasLevel10Role = newMember.roles.cache.has(LEVEL_10_ROLE_ID);
+    
+    // レベル10ロールが新しく追加された場合
+    if (!hadLevel10Role && hasLevel10Role) {
+      // 既に世代ロールを持っているかチェック
+      const hasGenerationRole = newMember.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+      
+      // 世代ロールを持っていない場合のみ付与
+      if (!hasGenerationRole) {
+        // 現在の世代ロールを付与
+        await newMember.roles.add(CURRENT_GENERATION_ROLE_ID);
+        
+        // メインチャンネルに通知
+        const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
+        if (mainChannel) {
+          const embed = new EmbedBuilder()
+            .setTitle('🎉 第18世代おめでとうございます！')
+            .setDescription(`**${newMember.user.username}** さんがレベル10に到達し、第18世代ロールを獲得しました！`)
+            .setColor(0xFFD700) // 金色
+            .setThumbnail(newMember.user.displayAvatarURL())
+            .addFields(
+              { name: '獲得したロール', value: `<@&${CURRENT_GENERATION_ROLE_ID}>`, inline: true },
+              { name: '世代', value: '第18世代', inline: true },
+              { name: 'レベル', value: '10', inline: true }
+            )
+            .setTimestamp(new Date())
+            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+          
+          await mainChannel.send({ 
+            content: `🎊 **${newMember.user.username}** さん、第18世代到達おめでとうございます！🎊`,
+            embeds: [embed]
+          });
+        }
+        
+        console.log(`世代ロールを付与しました: ${newMember.user.tag} (${newMember.user.id})`);
+      }
+    }
+  } catch (error) {
+    console.error('世代ロール付与処理でエラーが発生しました:', error);
   }
 });
 
