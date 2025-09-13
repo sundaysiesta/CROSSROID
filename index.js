@@ -166,7 +166,27 @@ client.on('messageCreate', async message => {
   // 特定のロールを持っている場合は無視
   if (hasAllowedRole(member)) return;
   
+  // ボットの権限をチェック
+  if (!message.guild.members.me.permissions.has('ManageMessages')) {
+    console.log('メッセージ管理権限がありません。代行投稿をスキップします。');
+    return;
+  }
+  
   try {
+    // 元のメッセージの情報を保存
+    const originalContent = message.content || '';
+    const originalAttachments = Array.from(message.attachments.values());
+    const originalAuthor = message.author;
+    
+    // 元のメッセージを先に削除
+    try {
+      await message.delete();
+      console.log(`元のメッセージを削除しました: ${message.id}`);
+    } catch (deleteError) {
+      console.error('元のメッセージの削除に失敗しました:', deleteError);
+      return; // 削除に失敗した場合は処理を中止
+    }
+    
     // チャンネルのwebhookを取得または作成
     const webhooks = await message.channel.fetchWebhooks();
     let webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
@@ -174,21 +194,21 @@ client.on('messageCreate', async message => {
     if (!webhook) {
       webhook = await message.channel.createWebhook({
         name: 'CROSSROID Proxy',
-        avatar: message.author.displayAvatarURL()
+        avatar: originalAuthor.displayAvatarURL()
       });
     }
     
     // 添付ファイルを準備
-    const files = Array.from(message.attachments.values()).map(attachment => ({
+    const files = originalAttachments.map(attachment => ({
       attachment: attachment.url,
       name: attachment.name
     }));
     
     // webhookでメッセージを送信（元のユーザー名とアイコンを使用）
     const webhookMessage = await webhook.send({
-      content: message.content || '',
-      username: message.author.username,
-      avatarURL: message.author.displayAvatarURL(),
+      content: originalContent,
+      username: originalAuthor.username,
+      avatarURL: originalAuthor.displayAvatarURL(),
       files: files
     });
     
@@ -210,16 +230,13 @@ client.on('messageCreate', async message => {
       components: [actionRow]
     });
     
-    // 元のメッセージを削除
-    await message.delete().catch(console.error);
-    
     // ログチャンネルに送信
     const logChannelId = '1369643068118274211';
     const logChannel = client.channels.cache.get(logChannelId);
     
     if (logChannel) {
       await logChannel.send({
-        content: `**メディア代行投稿ログ**\n**元の送信者:** ${message.author.tag} (${message.author.id})\n**チャンネル:** ${message.channel.name} (${message.channel.id})\n**内容:** ${message.content || 'なし'}\n**添付ファイル数:** ${message.attachments.size}`
+        content: `**メディア代行投稿ログ**\n**元の送信者:** ${originalAuthor.tag} (${originalAuthor.id})\n**チャンネル:** ${message.channel.name} (${message.channel.id})\n**内容:** ${originalContent || 'なし'}\n**添付ファイル数:** ${originalAttachments.length}`
       });
     }
     
