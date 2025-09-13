@@ -47,6 +47,9 @@ const ALLOWED_ROLE_IDS = [
 // 強制代行投稿ロールID（このロールを持っている人は代行投稿される）
 const FORCE_PROXY_ROLE_ID = '1416291713009582172';
 
+// 同時処理制限
+const processingMessages = new Set();
+
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
   res.send('CROSSROID is alive!');
@@ -169,6 +172,11 @@ client.on('messageCreate', async message => {
   const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
   if (!hasMedia) return;
   
+  // 同時処理制限チェック
+  if (processingMessages.has(message.id)) {
+    return;
+  }
+  
   // メンバー情報を取得
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   
@@ -182,9 +190,11 @@ client.on('messageCreate', async message => {
   
   // ボットの権限をチェック
   if (!message.guild.members.me.permissions.has('ManageMessages')) {
-    console.log('メッセージ管理権限がありません。代行投稿をスキップします。');
     return;
   }
+  
+  // 処理中としてマーク
+  processingMessages.add(message.id);
   
   try {
     // 元のメッセージの情報を保存
@@ -192,19 +202,15 @@ client.on('messageCreate', async message => {
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
     
-    console.log(`代行投稿処理開始: ${originalAuthor.tag} (${originalAuthor.id})`);
-    
     // 元のメッセージを先に削除
     try {
       await message.delete();
-      console.log(`元のメッセージを削除しました: ${message.id}`);
     } catch (deleteError) {
       console.error('元のメッセージの削除に失敗しました:', deleteError);
       return; // 削除に失敗した場合は処理を中止
     }
     
     // チャンネルのwebhookを取得または作成
-    console.log('webhookを取得中...');
     let webhook;
     
     try {
@@ -212,33 +218,21 @@ client.on('messageCreate', async message => {
       webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
       
       if (!webhook) {
-        console.log('webhookを作成中...');
         webhook = await message.channel.createWebhook({
           name: 'CROSSROID Proxy',
           avatar: originalAuthor.displayAvatarURL()
         });
-        console.log('webhookを作成しました');
-      } else {
-        console.log('既存のwebhookを使用します');
       }
     } catch (webhookError) {
       console.error('webhookの取得/作成に失敗しました:', webhookError);
       throw webhookError;
     }
     
-    // 添付ファイルを準備
-    let files = [];
-    try {
-      files = originalAttachments.map(attachment => ({
-        attachment: attachment.url,
-        name: attachment.name
-      }));
-      console.log(`添付ファイル数: ${files.length}`);
-    } catch (fileError) {
-      console.error('添付ファイルの準備に失敗しました:', fileError);
-      // 添付ファイルがなくても処理を続行
-      files = [];
-    }
+    // 添付ファイルを準備（メモリ効率を考慮）
+    const files = originalAttachments.map(attachment => ({
+      attachment: attachment.url,
+      name: attachment.name
+    }));
     
     // 削除ボタンを準備
     const deleteButton = {
@@ -254,13 +248,10 @@ client.on('messageCreate', async message => {
       components: [deleteButton]
     };
     
-    // webhookでメッセージを送信（元のユーザー名とアイコンを使用、削除ボタン付き）
-    console.log('webhookでメッセージを送信中...');
-    
-    // リトライ機能付きでwebhook送信
+    // webhookでメッセージを送信（リトライ機能付き）
     let webhookMessage;
     let retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 2; // リトライ回数を削減
     
     while (retryCount < maxRetries) {
       try {
@@ -271,39 +262,24 @@ client.on('messageCreate', async message => {
           files: files,
           components: [actionRow]
         });
-        console.log(`代行投稿完了: ${webhookMessage.id}`);
         break; // 成功したらループを抜ける
       } catch (error) {
         retryCount++;
-        console.error(`webhook送信エラー (試行 ${retryCount}/${maxRetries}):`, error.message);
         
         if (retryCount >= maxRetries) {
-          console.error('webhook送信が最大試行回数に達しました。');
           throw error;
         }
         
-        // リトライ前に少し待機
-        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        // リトライ前に待機
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
     
   } catch (error) {
-    console.error('メディア代行投稿でエラーが発生しました:', error);
-    console.error('エラーの詳細:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    });
-    
-    // エラーが発生した場合でも、元のメッセージが削除されている可能性があるため
-    // 簡単なメッセージを送信してユーザーに通知
-    try {
-      await message.channel.send({
-        content: `⚠️ メディアの代行投稿中にエラーが発生しました。しばらくしてから再試行してください。\nエラー: ${error.message}`
-      });
-    } catch (notifyError) {
-      console.error('エラー通知の送信に失敗しました:', notifyError);
-    }
+    console.error('メディア代行投稿でエラーが発生しました:', error.message);
+  } finally {
+    // 処理完了後にメッセージIDをクリーンアップ
+    processingMessages.delete(message.id);
   }
 });
 
