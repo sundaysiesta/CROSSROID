@@ -220,8 +220,11 @@ client.on('messageCreate', async message => {
       throw webhookError;
     }
     
-    // 添付ファイルを準備（URLを直接使用）
-    const files = originalAttachments.map(attachment => attachment.url);
+    // 添付ファイルを準備
+    const files = originalAttachments.map(attachment => ({
+      attachment: attachment.url,
+      name: attachment.name
+    }));
     
     // 削除ボタンを準備
     const deleteButton = {
@@ -240,24 +243,13 @@ client.on('messageCreate', async message => {
     // webhookでメッセージを送信
     console.log('webhookでメッセージを送信中...');
     
-    // まずテキストメッセージを送信
     const webhookMessage = await webhook.send({
       content: originalContent,
       username: originalAuthor.username,
       avatarURL: originalAuthor.displayAvatarURL(),
+      files: files,
       components: [actionRow]
     });
-    
-    // 添付ファイルがある場合は個別に送信
-    if (files.length > 0) {
-      try {
-        await webhook.send({
-          files: files
-        });
-      } catch (fileError) {
-        console.error('添付ファイルの送信に失敗しました:', fileError);
-      }
-    }
     
     console.log('代行投稿完了');
     
