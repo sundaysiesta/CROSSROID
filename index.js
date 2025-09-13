@@ -22,6 +22,28 @@ const PORT = process.env.PORT || 3000; // Koyebが指定するポート、また
 const CRONYMOUS_COOLDOWN_MS = 30 * 1000;
 const cronymousCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
+// 特定のロールIDのリスト
+const ALLOWED_ROLE_IDS = [
+  '1401922708442320916',
+  '1369627265528496198',
+  '1369627266354516123',
+  '1369627267487240275',
+  '1369627268691005472',
+  '1369627270205014169',
+  '1369627271433945132',
+  '1369627272469807195',
+  '1369627273447215124',
+  '1369627274067841087',
+  '1369627282284613753',
+  '1369627283563872399',
+  '1369627284251873301',
+  '1369627285367427134',
+  '1369627286944354314',
+  '1369627288211165204',
+  '1369627288903225406',
+  '1369627290597724181'
+];
+
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
   res.send('CROSSROID is alive!');
@@ -109,6 +131,123 @@ client.once('ready', async () => {
     }
   } catch (e) {
     console.error('再起動通知の送信に失敗しました:', e);
+  }
+});
+
+// ロールチェック機能
+function hasAllowedRole(member) {
+  if (!member) return false;
+  return member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+}
+
+// 画像・動画ファイルの拡張子をチェック
+function isImageOrVideo(attachment) {
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg'];
+  const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
+  const extension = attachment.name.toLowerCase().substring(attachment.name.lastIndexOf('.'));
+  return imageExtensions.includes(extension) || videoExtensions.includes(extension);
+}
+
+// メッセージイベントリスナー
+client.on('messageCreate', async message => {
+  // ボットのメッセージは無視
+  if (message.author.bot) return;
+  
+  // 添付ファイルがない場合は無視
+  if (!message.attachments || message.attachments.size === 0) return;
+  
+  // 画像・動画ファイルがあるかチェック
+  const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
+  if (!hasMedia) return;
+  
+  // メンバー情報を取得
+  const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+  
+  // 特定のロールを持っている場合は無視
+  if (hasAllowedRole(member)) return;
+  
+  try {
+    // チャンネルのwebhookを取得または作成
+    const webhooks = await message.channel.fetchWebhooks();
+    let webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
+    
+    if (!webhook) {
+      webhook = await message.channel.createWebhook({
+        name: 'CROSSROID Proxy',
+        avatar: message.author.displayAvatarURL()
+      });
+    }
+    
+    // 添付ファイルを準備
+    const files = Array.from(message.attachments.values()).map(attachment => ({
+      attachment: attachment.url,
+      name: attachment.name
+    }));
+    
+    // webhookでメッセージを送信（元のユーザー名とアイコンを使用）
+    const webhookMessage = await webhook.send({
+      content: message.content || '',
+      username: message.author.username,
+      avatarURL: message.author.displayAvatarURL(),
+      files: files
+    });
+    
+    // 削除ボタン付きのメッセージを送信
+    const deleteButton = {
+      type: 2, // BUTTON
+      style: 4, // DANGER (赤色)
+      label: '削除',
+      custom_id: `delete_${webhookMessage.id}`,
+      emoji: '🗑️'
+    };
+    
+    const actionRow = {
+      type: 1, // ACTION_ROW
+      components: [deleteButton]
+    };
+    
+    await webhookMessage.edit({
+      components: [actionRow]
+    });
+    
+    // 元のメッセージを削除
+    await message.delete().catch(console.error);
+    
+    // ログチャンネルに送信
+    const logChannelId = '1369643068118274211';
+    const logChannel = client.channels.cache.get(logChannelId);
+    
+    if (logChannel) {
+      await logChannel.send({
+        content: `**メディア代行投稿ログ**\n**元の送信者:** ${message.author.tag} (${message.author.id})\n**チャンネル:** ${message.channel.name} (${message.channel.id})\n**内容:** ${message.content || 'なし'}\n**添付ファイル数:** ${message.attachments.size}`
+      });
+    }
+    
+  } catch (error) {
+    console.error('メディア代行投稿でエラーが発生しました:', error);
+  }
+});
+
+// ボタンインタラクションの処理
+client.on('interactionCreate', async interaction => {
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith('delete_')) {
+      const messageId = interaction.customId.replace('delete_', '');
+      
+      try {
+        // メッセージを削除
+        const message = await interaction.channel.messages.fetch(messageId);
+        await message.delete();
+        
+        // 削除完了の応答
+        await interaction.reply({ content: 'メッセージを削除しました。', ephemeral: true });
+        
+      } catch (error) {
+        console.error('メッセージ削除でエラーが発生しました:', error);
+        await interaction.reply({ content: 'メッセージの削除に失敗しました。', ephemeral: true });
+      }
+      return;
+    }
   }
 });
 
