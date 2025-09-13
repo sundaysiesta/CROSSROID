@@ -202,14 +202,6 @@ client.on('messageCreate', async message => {
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
     
-    // 元のメッセージを先に削除
-    try {
-      await message.delete();
-    } catch (deleteError) {
-      console.error('元のメッセージの削除に失敗しました:', deleteError);
-      return; // 削除に失敗した場合は処理を中止
-    }
-    
     // チャンネルのwebhookを取得または作成
     let webhook;
     
@@ -228,7 +220,7 @@ client.on('messageCreate', async message => {
       throw webhookError;
     }
     
-    // 添付ファイルを準備（メモリ効率を考慮）
+    // 添付ファイルを準備
     const files = originalAttachments.map(attachment => ({
       attachment: attachment.url,
       name: attachment.name
@@ -248,31 +240,23 @@ client.on('messageCreate', async message => {
       components: [deleteButton]
     };
     
-    // webhookでメッセージを送信（リトライ機能付き）
-    let webhookMessage;
-    let retryCount = 0;
-    const maxRetries = 2; // リトライ回数を削減
+    // webhookでメッセージを送信
+    console.log('webhookでメッセージを送信中...');
+    const webhookMessage = await webhook.send({
+      content: originalContent,
+      username: originalAuthor.username,
+      avatarURL: originalAuthor.displayAvatarURL(),
+      files: files,
+      components: [actionRow]
+    });
+    console.log('代行投稿完了');
     
-    while (retryCount < maxRetries) {
-      try {
-        webhookMessage = await webhook.send({
-          content: originalContent,
-          username: originalAuthor.username,
-          avatarURL: originalAuthor.displayAvatarURL(),
-          files: files,
-          components: [actionRow]
-        });
-        break; // 成功したらループを抜ける
-      } catch (error) {
-        retryCount++;
-        
-        if (retryCount >= maxRetries) {
-          throw error;
-        }
-        
-        // リトライ前に待機
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+    // 代行投稿が成功したら元のメッセージを削除
+    try {
+      await message.delete();
+    } catch (deleteError) {
+      console.error('元のメッセージの削除に失敗しました:', deleteError);
+      // 削除に失敗しても処理は続行
     }
     
   } catch (error) {
