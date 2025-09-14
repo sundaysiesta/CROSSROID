@@ -252,15 +252,22 @@ client.on('messageCreate', async message => {
       components: [deleteButton]
     };
     
+    // メンションを無効化
+    const sanitizedContent = originalContent
+      .replace(/@everyone/g, '@\u200beveryone')
+      .replace(/@here/g, '@\u200bhere')
+      .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
+    
     // webhookでメッセージを送信
     console.log('webhookでメッセージを送信中...');
     
     const webhookMessage = await webhook.send({
-      content: originalContent,
+      content: sanitizedContent,
       username: originalAuthor.username,
       avatarURL: originalAuthor.displayAvatarURL(),
       files: files,
-      components: [actionRow]
+      components: [actionRow],
+      allowedMentions: { parse: [] } // すべてのメンションを無効化
     });
     
     console.log('代行投稿完了');
@@ -428,11 +435,18 @@ client.on('interactionCreate', async interaction => {
         });
       }
       
+      // メンションを無効化
+      const sanitizedContent = content
+        .replace(/@everyone/g, '@\u200beveryone')
+        .replace(/@here/g, '@\u200bhere')
+        .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
+      
       // webhookでメッセージを送信
       await webhook.send({
-        content: content,
+        content: sanitizedContent,
         username: displayName,
-        avatarURL: avatarURL
+        avatarURL: avatarURL,
+        allowedMentions: { parse: [] } // すべてのメンションを無効化
       });
       
       // ログチャンネルに送信
