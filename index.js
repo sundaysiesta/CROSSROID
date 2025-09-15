@@ -23,6 +23,10 @@ const PORT = process.env.PORT || 3000; // Koyebが指定するポート、また
 const CRONYMOUS_COOLDOWN_MS = 30 * 1000;
 const cronymousCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
+// 自動代行投稿（メディア）のユーザーごとのクールダウン管理（30秒）
+const AUTO_PROXY_COOLDOWN_MS = 30 * 1000;
+const autoProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
+
 // 特定のロールIDのリスト（代行投稿をスキップするロール）
 const ALLOWED_ROLE_IDS = [
   '1401922708442320916',
@@ -204,6 +208,13 @@ client.on('messageCreate', async message => {
   const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
   if (!hasMedia) return;
   
+  // ユーザー別クールダウン（自動代行投稿）
+  const userId = message.author.id;
+  const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
+  if (Date.now() - lastAutoProxyAt < AUTO_PROXY_COOLDOWN_MS) {
+    return;
+  }
+  
   // 同時処理制限チェック
   if (processingMessages.has(message.id)) {
     return;
@@ -291,6 +302,9 @@ client.on('messageCreate', async message => {
     });
     
     console.log('代行投稿完了');
+    
+    // クールダウン開始（自動代行投稿）
+    autoProxyCooldowns.set(userId, Date.now());
     
     // 代行投稿が成功したら元のメッセージを削除
     try {
