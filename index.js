@@ -1,5 +1,5 @@
 // 必要なモジュールをインポート
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
@@ -11,6 +11,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -68,19 +69,20 @@ app.get('/', (req, res) => {
 });
 
 // ユーザーごと日替わりの英数字IDを生成（UTC日基準、英小文字+数字）
-function generateDailyUserId(userId) {
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
+function generateDailyUserIdForDate(userId, dateUtc) {
+  const y = dateUtc.getUTCFullYear();
+  const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dateUtc.getUTCDate()).padStart(2, '0');
   const dayKey = `${y}${m}${d}`;
   const hash = crypto.createHash('sha256').update(`${userId}:${dayKey}`).digest('hex');
-  // 先頭の一部を使用して衝突率を抑えつつ短縮（16進→10進→36進）
-  const segment = hash.slice(0, 10); // 40bit ≒ 1兆通り
+  const segment = hash.slice(0, 10);
   const num = parseInt(segment, 16);
   const id36 = num.toString(36).toLowerCase();
-  // 最低6桁、最大8桁程度に整形
   return id36.slice(0, 8).padStart(6, '0');
+}
+
+function generateDailyUserId(userId) {
+  return generateDailyUserIdForDate(userId, new Date());
 }
 
 // ボットが準備完了したときに一度だけ実行されるイベント
@@ -99,6 +101,24 @@ client.once('ready', async () => {
           description: '送信するメッセージ（144文字以下、改行禁止）',
           type: 3, // STRING
           required: true
+        }
+      ]
+    },
+    {
+      name: 'cronymous_resolve',
+      description: '匿名IDから送信者を特定（運営専用）',
+      options: [
+        {
+          name: '匿名id',
+          description: '表示名に含まれる匿名ID（例: a1b2c3）',
+          type: 3,
+          required: true
+        },
+        {
+          name: '日付',
+          description: 'UTC日付 YYYY-MM-DD（省略時は当日）',
+          type: 3,
+          required: false
         }
       ]
     }
@@ -449,29 +469,7 @@ client.on('interactionCreate', async interaction => {
         allowedMentions: { parse: [] } // すべてのメンションを無効化
       });
       
-      // ログチャンネルに送信
-      const logChannelId = '1369643068118274211';
-      const logChannel = client.channels.cache.get(logChannelId);
-      
-      if (logChannel) {
-        const logEmbed = new EmbedBuilder()
-          .setTitle(isRevealed ? '🔓 匿名剥がれメッセージ送信ログ' : '🔍 匿名メッセージ送信ログ')
-          .setColor(isRevealed ? 0xFF6B6B : 0x5865F2)
-          .addFields(
-            { name: '送信者', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
-            { name: 'チャンネル', value: `${interaction.channel.name} (${interaction.channel.id})`, inline: true },
-            { name: '表示名', value: displayName, inline: true },
-            { name: '内容', value: content, inline: false }
-          )
-          .setTimestamp(new Date())
-          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-        
-        if (isRevealed) {
-          logEmbed.addFields({ name: '⚠️ 注意', value: 'このメッセージは匿名剥がれイベントにより正体が判明しました！', inline: false });
-        }
-        
-        await logChannel.send({ embeds: [logEmbed] });
-      }
+      // 匿名機能のログ送信は無効化（要望により送信しない）
       
       // 成功: クールダウン開始
       cronymousCooldowns.set(interaction.user.id, Date.now());
@@ -485,6 +483,54 @@ client.on('interactionCreate', async interaction => {
     } finally {
       // 処理完了後にクリーンアップ
       processingCommands.delete(commandKey);
+    }
+  }
+  
+  if (interaction.commandName === 'cronymous_resolve') {
+    try {
+      // 管理者限定チェック（サーバー管理権限）
+      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: 'このコマンドは運営専用です。', ephemeral: true });
+      }
+
+      const idArg = interaction.options.getString('匿名id');
+      const dateArg = interaction.options.getString('日付');
+      let targetDate;
+      if (dateArg) {
+        const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(dateArg);
+        if (!m) {
+          return interaction.reply({ content: '日付は YYYY-MM-DD (UTC) 形式で指定してください。', ephemeral: true });
+        }
+        targetDate = new Date(Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)));
+      } else {
+        targetDate = new Date();
+      }
+
+      // 全メンバーを走査して一致するIDを探索（ユーザー数が多い場合は負荷に注意）
+      await interaction.deferReply({ ephemeral: true });
+      const members = await interaction.guild.members.fetch();
+      const matches = [];
+      members.forEach(guildMember => {
+        const uid = guildMember.user.id;
+        const did = generateDailyUserIdForDate(uid, targetDate);
+        if (did.toLowerCase() === idArg.toLowerCase()) {
+          matches.push(guildMember);
+        }
+      });
+
+      if (matches.length === 0) {
+        return interaction.editReply({ content: '一致するユーザーは見つかりませんでした。' });
+      }
+
+      const list = matches.map(m => `${m.user.tag} (${m.user.id})`).join('\n');
+      return interaction.editReply({ content: `一致ユーザー:\n${list}` });
+    } catch (e) {
+      console.error('cronymous_resolve エラー:', e);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
     }
   }
 });
