@@ -61,6 +61,19 @@ const CURRENT_GENERATION_ROLE_ID = '1401922708442320916';
 // メインチャンネルID
 const MAIN_CHANNEL_ID = '1415336647284883528';
 
+// 部活カテゴリID
+const CLUB_CATEGORY_IDS = [
+  '1417350444619010110',
+  '1369627451801604106', 
+  '1396724037048078470'
+];
+
+// VCカテゴリID
+const VC_CATEGORY_ID = '1369659877735137342';
+
+// 案内板チャンネルID
+const GUIDE_BOARD_CHANNEL_ID = '1417353618910216192';
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -87,6 +100,227 @@ function generateDailyUserIdForDate(userId, dateUtc) {
 
 function generateDailyUserId(userId) {
   return generateDailyUserIdForDate(userId, new Date());
+}
+
+// アクティブチャンネル検出機能
+async function getActiveChannels() {
+  try {
+    const guild = client.guilds.cache.first();
+    if (!guild) return { clubChannels: [], vcChannels: [], highlights: [], topSpeaker: null };
+
+    const now = Date.now();
+    const oneHourAgo = now - (60 * 60 * 1000); // 1時間前
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // 部活カテゴリからアクティブなチャンネルを検出
+    const clubChannels = [];
+    for (const categoryId of CLUB_CATEGORY_IDS) {
+      const category = guild.channels.cache.get(categoryId);
+      if (!category || category.type !== 4) continue; // カテゴリでない場合はスキップ
+
+      const channels = category.children.cache.filter(ch => 
+        ch.type === 0 && // テキストチャンネル
+        ch.permissionsFor(guild.members.me).has('ViewChannel')
+      );
+
+      for (const channel of channels.values()) {
+        try {
+          const messages = await channel.messages.fetch({ limit: 10 });
+          const recentMessage = messages.find(msg => 
+            !msg.author.bot && 
+            msg.createdTimestamp > oneHourAgo
+          );
+          
+          if (recentMessage) {
+            clubChannels.push({
+              channel: channel,
+              lastActivity: recentMessage.createdTimestamp,
+              messageCount: messages.filter(msg => 
+                !msg.author.bot && 
+                msg.createdTimestamp > oneHourAgo
+              ).size
+            });
+          }
+        } catch (error) {
+          console.error(`チャンネル ${channel.name} の取得に失敗:`, error);
+        }
+      }
+    }
+
+    // VCカテゴリからアクティブなボイスチャンネルを検出
+    const vcChannels = [];
+    const vcCategory = guild.channels.cache.get(VC_CATEGORY_ID);
+    if (vcCategory && vcCategory.type === 4) {
+      const voiceChannels = vcCategory.children.cache.filter(ch => 
+        ch.type === 2 && // ボイスチャンネル
+        ch.members && ch.members.size > 0
+      );
+
+      for (const vc of voiceChannels.values()) {
+        vcChannels.push({
+          channel: vc,
+          memberCount: vc.members.size,
+          members: Array.from(vc.members.values()).map(member => member.user.username)
+        });
+      }
+    }
+
+    // ハイライト投稿を検出（リアクション数が多い投稿）
+    const highlights = [];
+    for (const channelData of clubChannels) {
+      try {
+        const messages = await channelData.channel.messages.fetch({ limit: 50 });
+        const highlightMessages = messages.filter(msg => 
+          !msg.author.bot && 
+          msg.reactions.cache.size > 0 &&
+          msg.createdTimestamp > oneHourAgo
+        );
+
+        for (const msg of highlightMessages.values()) {
+          const totalReactions = Array.from(msg.reactions.cache.values())
+            .reduce((sum, reaction) => sum + reaction.count, 0);
+          
+          if (totalReactions >= 3) { // 3つ以上のリアクション
+            highlights.push({
+              message: msg,
+              channel: channelData.channel,
+              reactionCount: totalReactions
+            });
+          }
+        }
+      } catch (error) {
+        console.error(`ハイライト検出でエラー:`, error);
+      }
+    }
+
+    // 今日一番発言した人を検出
+    const userMessageCounts = new Map();
+    for (const channelData of clubChannels) {
+      try {
+        const messages = await channelData.channel.messages.fetch({ limit: 100 });
+        const todayMessages = messages.filter(msg => 
+          !msg.author.bot && 
+          msg.createdTimestamp > todayStart.getTime()
+        );
+
+        for (const msg of todayMessages.values()) {
+          const count = userMessageCounts.get(msg.author.id) || 0;
+          userMessageCounts.set(msg.author.id, count + 1);
+        }
+      } catch (error) {
+        console.error(`メッセージ数カウントでエラー:`, error);
+      }
+    }
+
+    let topSpeaker = null;
+    if (userMessageCounts.size > 0) {
+      const sortedUsers = Array.from(userMessageCounts.entries())
+        .sort((a, b) => b[1] - a[1]);
+      const [userId, count] = sortedUsers[0];
+      const user = await client.users.fetch(userId).catch(() => null);
+      if (user) {
+        topSpeaker = { user, count };
+      }
+    }
+
+    return { clubChannels, vcChannels, highlights, topSpeaker };
+  } catch (error) {
+    console.error('アクティブチャンネル検出でエラー:', error);
+    return { clubChannels: [], vcChannels: [], highlights: [], topSpeaker: null };
+  }
+}
+
+// 案内板を更新する機能
+async function updateGuideBoard() {
+  try {
+    const { clubChannels, vcChannels, highlights, topSpeaker } = await getActiveChannels();
+    
+    const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
+    if (!guideChannel) {
+      console.error('案内板チャンネルが見つかりません');
+      return;
+    }
+
+    // 既存の案内板メッセージを削除
+    const messages = await guideChannel.messages.fetch({ limit: 10 });
+    const botMessages = messages.filter(msg => msg.author.id === client.user.id);
+    for (const msg of botMessages.values()) {
+      try {
+        await msg.delete();
+      } catch (error) {
+        console.error('古い案内板メッセージの削除に失敗:', error);
+      }
+    }
+
+    // 新しい案内板を作成
+    const embed = new EmbedBuilder()
+      .setTitle('📋 アクティブチャンネル案内板')
+      .setColor(0x5865F2)
+      .setTimestamp(new Date())
+      .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+
+    // 部活チャンネル情報
+    if (clubChannels.length > 0) {
+      const clubList = clubChannels
+        .sort((a, b) => b.lastActivity - a.lastActivity)
+        .slice(0, 10) // 最大10個
+        .map(data => 
+          `💬 ${data.channel} (${data.messageCount}件)`
+        ).join('\n');
+      
+      embed.addFields({
+        name: '🏫 アクティブな部活チャンネル',
+        value: clubList || 'アクティブなチャンネルはありません',
+        inline: false
+      });
+    }
+
+    // VC情報
+    if (vcChannels.length > 0) {
+      const vcList = vcChannels
+        .sort((a, b) => b.memberCount - a.memberCount)
+        .map(data => 
+          `🔊 ${data.channel} (${data.memberCount}人)`
+        ).join('\n');
+      
+      embed.addFields({
+        name: '🎤 アクティブなボイスチャンネル',
+        value: vcList,
+        inline: false
+      });
+    }
+
+    // ハイライト投稿
+    if (highlights.length > 0) {
+      const highlightList = highlights
+        .sort((a, b) => b.reactionCount - a.reactionCount)
+        .slice(0, 3) // 最大3個
+        .map(data => 
+          `⭐ ${data.channel}: ${data.message.content.slice(0, 50)}... (${data.reactionCount}リアクション)`
+        ).join('\n');
+      
+      embed.addFields({
+        name: '✨ ハイライト投稿',
+        value: highlightList,
+        inline: false
+      });
+    }
+
+    // 今日のトップスピーカー
+    if (topSpeaker) {
+      embed.addFields({
+        name: '🏆 今日のトップスピーカー',
+        value: `${topSpeaker.user.username} (${topSpeaker.count}件)`,
+        inline: false
+      });
+    }
+
+    await guideChannel.send({ embeds: [embed] });
+    console.log('案内板を更新しました');
+  } catch (error) {
+    console.error('案内板更新でエラー:', error);
+  }
 }
 
 // ボットが準備完了したときに一度だけ実行されるイベント
@@ -125,6 +359,10 @@ client.once('ready', async () => {
           required: false
         }
       ]
+    },
+    {
+      name: 'update_guide',
+      description: '案内板を手動更新（運営専用）'
     }
   ];
 
@@ -174,6 +412,24 @@ client.once('ready', async () => {
   } catch (e) {
     console.error('再起動通知の送信に失敗しました:', e);
   }
+
+  // 案内板の定期更新（5分間隔）
+  setInterval(async () => {
+    try {
+      await updateGuideBoard();
+    } catch (error) {
+      console.error('定期案内板更新でエラー:', error);
+    }
+  }, 5 * 60 * 1000); // 5分 = 300,000ms
+
+  // 初回案内板更新
+  setTimeout(async () => {
+    try {
+      await updateGuideBoard();
+    } catch (error) {
+      console.error('初回案内板更新でエラー:', error);
+    }
+  }, 10000); // 10秒後に初回実行
 });
 
 // ロールチェック機能
@@ -541,6 +797,26 @@ client.on('interactionCreate', async interaction => {
       return interaction.editReply({ content: `一致ユーザー:\n${list}` });
     } catch (e) {
       console.error('cronymous_resolve エラー:', e);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+    }
+  }
+  
+  if (interaction.commandName === 'update_guide') {
+    try {
+      // 管理者限定チェック
+      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: 'このコマンドは運営専用です。', ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      await updateGuideBoard();
+      await interaction.editReply({ content: '案内板を更新しました。' });
+    } catch (error) {
+      console.error('手動案内板更新でエラー:', error);
       if (interaction.deferred || interaction.replied) {
         return interaction.editReply({ content: 'エラーが発生しました。' });
       }
