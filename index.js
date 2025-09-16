@@ -156,18 +156,35 @@ async function getActiveChannels() {
           );
           
           if (recentMessage) {
-            const messageCount = messages.filter(msg => 
+            // スパム対策: 5分間隔でのメッセージ数集計
+            const todayMessages = messages.filter(msg => 
               !msg.author.bot && 
               msg.createdTimestamp > todayStartTime
-            ).size;
+            );
+            
+            // ユーザーごとの最後のメッセージ時刻を記録
+            const userLastMessage = new Map();
+            let timeBasedMessageCount = 0;
+            
+            for (const msg of todayMessages.values()) {
+              const userId = msg.author.id;
+              const lastTime = userLastMessage.get(userId) || 0;
+              const timeDiff = msg.createdTimestamp - lastTime;
+              
+              // 5分（300秒）以上間隔があいた場合のみカウント
+              if (timeDiff >= 300000 || lastTime === 0) {
+                timeBasedMessageCount++;
+                userLastMessage.set(userId, msg.createdTimestamp);
+              }
+            }
             
             clubChannels.push({
               channel: channel,
               lastActivity: recentMessage.createdTimestamp,
-              messageCount: messageCount
+              messageCount: timeBasedMessageCount
             });
             
-            console.log(`アクティブチャンネル追加: ${channel.name} (${messageCount}件)`);
+            console.log(`アクティブチャンネル追加: ${channel.name} (時間区切り${timeBasedMessageCount}件, 総メッセージ${todayMessages.length}件)`);
           } else {
             console.log(`非アクティブ: ${channel.name} (今日のメッセージなし)`);
           }
@@ -232,8 +249,9 @@ async function getActiveChannels() {
       }
     }
 
-    // 今日一番発言した人を検出（上位3名）
+    // 今日一番発言した人を検出（上位3名）- スパム対策: 5分間隔での集計
     const userMessageCounts = new Map();
+    const userLastMessageTimes = new Map(); // ユーザーごとの最後のメッセージ時刻
     console.log(`テキストトップスピーカー集計開始: ${clubChannels.length}個のアクティブチャンネル`);
     
     for (const channelData of clubChannels) {
@@ -247,8 +265,16 @@ async function getActiveChannels() {
         console.log(`チャンネル ${channelData.channel.name}: 今日のメッセージ数 ${todayMessages.length}`);
 
         for (const msg of todayMessages.values()) {
-          const count = userMessageCounts.get(msg.author.id) || 0;
-          userMessageCounts.set(msg.author.id, count + 1);
+          const userId = msg.author.id;
+          const lastTime = userLastMessageTimes.get(userId) || 0;
+          const timeDiff = msg.createdTimestamp - lastTime;
+          
+          // 5分（300秒）以上間隔があいた場合のみカウント
+          if (timeDiff >= 300000 || lastTime === 0) {
+            const count = userMessageCounts.get(userId) || 0;
+            userMessageCounts.set(userId, count + 1);
+            userLastMessageTimes.set(userId, msg.createdTimestamp);
+          }
         }
       } catch (error) {
         console.error(`メッセージ数カウントでエラー (${channelData.channel.name}):`, error.message);
@@ -322,7 +348,7 @@ async function updateGuideBoard() {
     // 新しい案内板を作成
     const embed = new EmbedBuilder()
       .setTitle('📋 アクティブチャンネル案内板')
-      .setDescription('**集計期間**: 今日0時〜現在（すべての統計）')
+      .setDescription('**集計期間**: 今日0時〜現在（すべての統計）\n**スパム対策**: 同一ユーザーの5分間隔以内のメッセージは1件として集計')
       .setColor(0x5865F2)
       .setTimestamp(new Date())
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
