@@ -342,8 +342,35 @@ async function getActiveChannels() {
 }
 
 // Botコメント風のエモいまとめを生成
-function generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs) {
+function generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs) {
   const comments = [];
+  const random = Math.random();
+  
+  // 静かな夜のコメント（低活動時）
+  if (clubChannels.length === 0 || (clubChannels.length > 0 && clubChannels[0].activityScore < 10)) {
+    if (dormantClubs.length > 0 && random < 0.3) {
+      const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
+      const dormantName = randomDormant.name.replace(/[｜|]/g, '').trim();
+      comments.push(`「今日は静かな夜…穴場は${randomDormant}」`);
+    } else {
+      comments.push('「今日は静かな夜…🌙」');
+    }
+    return comments.join(' ');
+  }
+  
+  // 部長ランキングのコメント
+  if (clubChannels.length > 0 && random < 0.2) {
+    const topClub = clubChannels[0];
+    const clubName = topClub.channel.name.replace(/[｜|]/g, '').trim();
+    comments.push(`「部長ランキングTOPは${clubName}」`);
+  }
+  
+  // 復活予感のコメント
+  if (dormantClubs.length > 0 && random < 0.15) {
+    const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
+    const dormantName = randomDormant.name.replace(/[｜|]/g, '').trim();
+    comments.push(`「${randomDormant}がそろそろ復活しそう？」`);
+  }
   
   // 部活の盛り上がり具合に基づくコメント
   if (clubChannels.length > 0) {
@@ -537,35 +564,53 @@ async function updateGuideBoard() {
       });
     }
 
-    // 休止中の部活（ランダムに1つ）
+    // 休止中の部活（ランダムに1つ、最終活動日時を表示）
     if (dormantClubs.length > 0) {
       const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
+      
+      // 最終活動日時を計算
+      const now = new Date();
+      const lastActivity = new Date(randomDormant.lastMessageAt || randomDormant.createdTimestamp);
+      const daysDiff = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
+      
+      let activityText;
+      if (daysDiff === 0) {
+        activityText = '今日';
+      } else if (daysDiff === 1) {
+        activityText = '昨日';
+      } else if (daysDiff < 7) {
+        activityText = `${daysDiff}日前`;
+      } else if (daysDiff < 30) {
+        activityText = `${Math.floor(daysDiff / 7)}週間前`;
+      } else {
+        activityText = `${Math.floor(daysDiff / 30)}ヶ月前`;
+      }
+      
       embed.addFields({
         name: '🛌 休止中の部活',
-        value: `→ ${randomDormant}`,
+        value: `${randomDormant} — 最終活動: ${activityText}`,
         inline: false
       });
     }
 
-    // ハイライト投稿（上位3件まで）
+    // ハイライト投稿（引用風、上位3件まで）
     if (highlights.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉'];
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
         .slice(0, 3) // 上位3件まで
-        .map((data, index) => 
-          `${rankEmojis[index]} ⭐ ${data.channel}: ${data.message.content.slice(0, 30)}... — ${data.reactionCount}👍 - ${data.message.author}`
+        .map((data) => 
+          `${data.channel} — 「${data.message.content.slice(0, 40)}${data.message.content.length > 40 ? '...' : ''}」 - ${data.message.author} ${data.reactionCount}👍`
         ).join('\n');
       
       embed.addFields({
-        name: '✨ ハイライト投稿',
+        name: '✨ ハイライト',
         value: highlightList,
         inline: false
       });
     }
 
     // Botコメント風のエモいまとめ
-    const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs);
+    const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs);
     if (botComments) {
       embed.addFields({
         name: '📝 本日の一言',
