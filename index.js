@@ -83,6 +83,10 @@ const todayGenerationWinners = new Set();
 // 前回の部活データを保存（急上昇ランキング用）
 let previousClubData = new Map();
 
+// ログイン機能のデータ
+let todayLoginMembers = new Set(); // 今日ログインしたメンバー
+let consecutiveLogins = new Map(); // 連続ログイン日数 (userId -> {count, lastDate})
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -477,6 +481,54 @@ async function updateGuideBoard() {
       });
     }
 
+    // 今日ログインしたメンバー
+    if (todayLoginMembers.size > 0) {
+      const loginMembersList = [];
+      for (const userId of todayLoginMembers) {
+        try {
+          const user = await client.users.fetch(userId);
+          loginMembersList.push(user.toString());
+        } catch (error) {
+          console.error(`ログインメンバー取得エラー: ${userId}`, error);
+        }
+      }
+      
+      if (loginMembersList.length > 0) {
+        const displayList = loginMembersList.length > 10 
+          ? loginMembersList.slice(0, 10).join(', ') + ` ... 他${loginMembersList.length - 10}人`
+          : loginMembersList.join(', ');
+        
+        embed.addFields({
+          name: `🗓️ 今日ログインしたメンバー (${loginMembersList.length}人)`,
+          value: `→ ${displayList}`,
+          inline: false
+        });
+      }
+    }
+
+    // 連続ログインランキング
+    const consecutiveRanking = getConsecutiveLoginRanking();
+    if (consecutiveRanking.length > 0) {
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+      const rankingList = await Promise.all(
+        consecutiveRanking.map(async ([userId, data], index) => {
+          try {
+            const user = await client.users.fetch(userId);
+            return `${rankEmojis[index]} ${user} — ${data.count}日`;
+          } catch (error) {
+            console.error(`連続ログインランキング取得エラー: ${userId}`, error);
+            return `${rankEmojis[index]} 不明なユーザー — ${data.count}日`;
+          }
+        })
+      );
+      
+      embed.addFields({
+        name: '🔥 連続ログインランキング',
+        value: rankingList.join('\n'),
+        inline: false
+      });
+    }
+
     // 部活チャンネル情報（上位5位まで）
     if (clubChannels.length > 0) {
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
@@ -788,6 +840,48 @@ client.once('ready', async () => {
     }, 24 * 60 * 60 * 1000);
   }, msUntilMidnight);
 });
+
+// ログイン機能の関数
+function checkAndProcessLogin(userId) {
+  const today = new Date().toDateString();
+  
+  // 今日初回ログインかチェック
+  if (!todayLoginMembers.has(userId)) {
+    todayLoginMembers.add(userId);
+    
+    // 連続ログイン日数を更新
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toDateString();
+    
+    const userData = consecutiveLogins.get(userId) || { count: 0, lastDate: null };
+    
+    if (userData.lastDate === yesterdayStr) {
+      // 連続ログイン
+      userData.count += 1;
+    } else if (userData.lastDate !== today) {
+      // 連続が途切れた
+      userData.count = 1;
+    }
+    
+    userData.lastDate = today;
+    consecutiveLogins.set(userId, userData);
+    
+    return true; // 初回ログイン
+  }
+  
+  return false; // 既にログイン済み
+}
+
+// 連続ログインランキングを取得
+function getConsecutiveLoginRanking() {
+  const ranking = Array.from(consecutiveLogins.entries())
+    .filter(([userId, data]) => data.lastDate === new Date().toDateString()) // 今日ログインした人のみ
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 10); // 上位10位まで
+  
+  return ranking;
+}
 
 // ロールチェック機能
 function hasAllowedRole(member) {
@@ -1233,6 +1327,50 @@ client.on('interactionCreate', async interaction => {
     }
   }
 });
+
+// メッセージ作成時のログインチェック
+client.on('messageCreate', async (message) => {
+  // botのメッセージは無視
+  if (message.author.bot) return;
+  
+  // メインチャンネルでのみログインチェック
+  if (message.channel.id === MAIN_CHANNEL_ID) {
+    const isFirstLogin = checkAndProcessLogin(message.author.id);
+    
+    if (isFirstLogin) {
+      try {
+        // 連続ログイン日数を取得
+        const userData = consecutiveLogins.get(message.author.id);
+        const consecutiveDays = userData ? userData.count : 1;
+        
+        // ログインメッセージを送信
+        let loginMessage = `🎉 ${message.author} さん、おはようございます！`;
+        
+        if (consecutiveDays > 1) {
+          loginMessage += `\n🔥 連続ログイン ${consecutiveDays}日目です！`;
+        } else {
+          loginMessage += `\n✨ 今日の初回ログインです！`;
+        }
+        
+        await message.reply(loginMessage);
+      } catch (error) {
+        console.error('ログインメッセージ送信エラー:', error);
+      }
+    }
+  }
+});
+
+// 朝6時のリセット機能
+setInterval(() => {
+  const now = new Date();
+  const jstTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  
+  // 朝6時（JST）にリセット
+  if (jstTime.getHours() === 6 && jstTime.getMinutes() === 0) {
+    todayLoginMembers.clear();
+    console.log('ログインメンバーリストをリセットしました（朝6時）');
+  }
+}, 60000); // 1分ごとにチェック
 
 // Discordボットとしてログイン
 client.login(process.env.DISCORD_TOKEN);
