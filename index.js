@@ -87,6 +87,10 @@ let previousClubData = new Map();
 let todayLoginMembers = new Set(); // 今日ログインしたメンバー
 let consecutiveLogins = new Map(); // 連続ログイン日数 (userId -> {count, lastDate})
 
+// bumpコマンドのクールダウン管理
+let bumpCooldowns = new Map(); // userId -> lastBumpTime
+const BUMP_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2時間
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -509,7 +513,7 @@ async function updateGuideBoard() {
     // 連続ログインランキング
     const consecutiveRanking = getConsecutiveLoginRanking();
     if (consecutiveRanking.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const rankingList = await Promise.all(
         consecutiveRanking.map(async ([userId, data], index) => {
           try {
@@ -738,6 +742,10 @@ client.once('ready', async () => {
     {
       name: 'update_guide',
       description: '案内板を手動更新（運営専用）'
+    },
+    {
+      name: 'bump',
+      description: '部活チャンネルを宣伝します（2時間に1回まで）'
     }
   ];
 
@@ -878,7 +886,7 @@ function getConsecutiveLoginRanking() {
   const ranking = Array.from(consecutiveLogins.entries())
     .filter(([userId, data]) => data.lastDate === new Date().toDateString()) // 今日ログインした人のみ
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 10); // 上位10位まで
+    .slice(0, 5); // 上位5位まで
   
   return ranking;
 }
@@ -1326,12 +1334,104 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
     }
   }
+  
+  if (interaction.commandName === 'bump') {
+    try {
+      // 部活チャンネルかチェック
+      const channel = interaction.channel;
+      const isClubChannel = CLUB_CATEGORY_IDS.some(categoryId => {
+        const category = interaction.guild.channels.cache.get(categoryId);
+        return category && category.children.cache.has(channel.id);
+      });
+      
+      if (!isClubChannel) {
+        return interaction.reply({ 
+          content: 'このコマンドは部活チャンネルでのみ使用できます。', 
+          ephemeral: true 
+        });
+      }
+      
+      // クールダウンチェック
+      const userId = interaction.user.id;
+      const lastBump = bumpCooldowns.get(userId);
+      const now = Date.now();
+      
+      if (lastBump && (now - lastBump) < BUMP_COOLDOWN_MS) {
+        const remainingTime = Math.ceil((BUMP_COOLDOWN_MS - (now - lastBump)) / (1000 * 60));
+        return interaction.reply({ 
+          content: `⏰ クールダウン中です。あと${remainingTime}分後に使用できます。`, 
+          ephemeral: true 
+        });
+      }
+      
+      // クールダウンを設定
+      bumpCooldowns.set(userId, now);
+      
+      // 通知チャンネルに埋め込みを送信
+      const notifyChannel = interaction.guild.channels.cache.get('1415336647284883528');
+      if (notifyChannel) {
+        const bumpEmbed = new EmbedBuilder()
+          .setColor(0xff6b6b)
+          .setTitle('📢 部活宣伝！')
+          .setDescription(`${channel} が宣伝されました！`)
+          .addFields(
+            { name: '🏫 部活名', value: channel.name, inline: true },
+            { name: '👤 宣伝者', value: interaction.user.toString(), inline: true },
+            { name: '📅 宣伝日時', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
+          );
+        
+        // チャンネルトピックがある場合は追加
+        if (channel.topic) {
+          bumpEmbed.addFields({
+            name: '📝 チャンネル説明',
+            value: channel.topic.length > 1024 ? channel.topic.slice(0, 1021) + '...' : channel.topic,
+            inline: false
+          });
+        }
+        
+        // メンバー数を追加
+        if (channel.members) {
+          bumpEmbed.addFields({
+            name: '👥 メンバー数',
+            value: `${channel.members.size}人`,
+            inline: true
+          });
+        }
+        
+        bumpEmbed
+          .setThumbnail(interaction.guild.iconURL())
+          .setTimestamp()
+          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+        
+        await notifyChannel.send({ embeds: [bumpEmbed] });
+      }
+      
+      // 成功メッセージを返信
+      await interaction.reply({ 
+        content: '✅ 部活の宣伝が完了しました！', 
+        ephemeral: true 
+      });
+      
+    } catch (error) {
+      console.error('bumpコマンドでエラー:', error);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+    }
+  }
 });
 
 // メッセージ作成時のログインチェック
 client.on('messageCreate', async (message) => {
   // botのメッセージは無視
   if (message.author.bot) return;
+  
+  // サーバー参加通知を除外（システムメッセージ）
+  if (message.type === 7) return; // USER_JOIN
+  
+  // 自己紹介チャンネルを除外
+  if (message.channel.id === '1369660410008965203') return;
   
   // メインチャンネルでのみログインチェック
   if (message.channel.id === MAIN_CHANNEL_ID) {
@@ -1343,16 +1443,37 @@ client.on('messageCreate', async (message) => {
         const userData = consecutiveLogins.get(message.author.id);
         const consecutiveDays = userData ? userData.count : 1;
         
-        // ログインメッセージを送信
-        let loginMessage = `🎉 ${message.author} さん、おはようございます！`;
+        // 埋め込み形式でログインメッセージを送信
+        const loginEmbed = new EmbedBuilder()
+          .setColor(0x00ff00)
+          .setTitle('🎉 ログイン完了！')
+          .setDescription(`${message.author} さん、おはようございます！`)
+          .setThumbnail(message.author.displayAvatarURL())
+          .setTimestamp(new Date())
+          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
         
         if (consecutiveDays > 1) {
-          loginMessage += `\n🔥 連続ログイン ${consecutiveDays}日目です！`;
+          loginEmbed.addFields({
+            name: '🔥 連続ログイン',
+            value: `${consecutiveDays}日目です！`,
+            inline: true
+          });
         } else {
-          loginMessage += `\n✨ 今日の初回ログインです！`;
+          loginEmbed.addFields({
+            name: '✨ 初回ログイン',
+            value: '今日の初回ログインです！',
+            inline: true
+          });
         }
         
-        await message.reply(loginMessage);
+        // 今日のログインメンバー数を追加
+        loginEmbed.addFields({
+          name: '📊 今日のログインメンバー',
+          value: `${todayLoginMembers.size}人`,
+          inline: true
+        });
+        
+        await message.reply({ embeds: [loginEmbed] });
       } catch (error) {
         console.error('ログインメッセージ送信エラー:', error);
       }
