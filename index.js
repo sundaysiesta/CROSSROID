@@ -222,8 +222,10 @@ async function getActiveChannels() {
         const messages = await channelData.channel.messages.fetch({ limit: 200 }); // 取得数をさらに増やす
         const todayMessages = messages.filter(msg => 
           !msg.author.bot && 
-          msg.createdTimestamp > todayStart.getTime()
+          msg.createdTimestamp > todayStartTime
         );
+
+        console.log(`チャンネル ${channelData.channel.name}: 今日のメッセージ数 ${todayMessages.length}`);
 
         for (const msg of todayMessages.values()) {
           const count = userMessageCounts.get(msg.author.id) || 0;
@@ -240,12 +242,17 @@ async function getActiveChannels() {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3); // 上位3名
       
+      console.log(`テキストトップスピーカー候補: ${sortedUsers.length}人`);
+      
       for (const [userId, count] of sortedUsers) {
         const user = await client.users.fetch(userId).catch(() => null);
         if (user) {
           topSpeakers.push({ user, count });
+          console.log(`- ${user.username}: ${count}件`);
         }
       }
+    } else {
+      console.log('テキストトップスピーカー: データなし');
     }
 
     // VCトップスピーカーを検出（滞在時間ベース、今日0時から現在）
@@ -253,14 +260,26 @@ async function getActiveChannels() {
     
     for (const vcData of vcChannels) {
       try {
+        let activeMembers = 0;
+        let mutedMembers = 0;
+        
         // 現在VCにいるメンバーの滞在時間を集計
         for (const member of vcData.channel.members.values()) {
           if (!member.user.bot) {
-            // 簡易的な滞在時間計算（実際の参加時間は取得できないため、現在時刻を基準）
-            const stayTime = vcUserStayTimes.get(member.user.id) || 0;
-            vcUserStayTimes.set(member.user.id, stayTime + 1); // 1分単位で集計
+            // ミュート状態をチェック（サーバーミュートまたはボイスチャンネルミュート）
+            const isMuted = member.voice?.mute || member.voice?.serverMute;
+            if (!isMuted) {
+              activeMembers++;
+              // 簡易的な滞在時間計算（実際の参加時間は取得できないため、現在時刻を基準）
+              const stayTime = vcUserStayTimes.get(member.user.id) || 0;
+              vcUserStayTimes.set(member.user.id, stayTime + 1); // 1分単位で集計
+            } else {
+              mutedMembers++;
+            }
           }
         }
+        
+        console.log(`VC ${vcData.channel.name}: アクティブ ${activeMembers}人, ミュート ${mutedMembers}人`);
       } catch (error) {
         console.error(`VC滞在時間カウントでエラー:`, error);
       }
@@ -272,12 +291,17 @@ async function getActiveChannels() {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3); // 上位3名
       
+      console.log(`VCトップスピーカー候補: ${sortedVcUsers.length}人`);
+      
       for (const [userId, stayTime] of sortedVcUsers) {
         const user = await client.users.fetch(userId).catch(() => null);
         if (user) {
           vcTopSpeakers.push({ user, stayTime });
+          console.log(`- ${user.username}: ${stayTime}分`);
         }
       }
+    } else {
+      console.log('VCトップスピーカー: データなし');
     }
 
     return { 
@@ -645,6 +669,7 @@ client.on('messageCreate', async message => {
   
   // 同時処理制限チェック
   if (processingMessages.has(message.id)) {
+    console.log(`メッセージ ${message.id} は既に処理中です`);
     return;
   }
   
@@ -672,15 +697,6 @@ client.on('messageCreate', async message => {
     const originalContent = message.content || '';
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
-    
-    // 先に元のメッセージを削除（重複防止）
-    try {
-      await message.delete();
-    } catch (deleteError) {
-      console.error('元のメッセージの削除に失敗しました:', deleteError);
-      // 削除に失敗した場合は処理を中止
-      return;
-    }
     
     // チャンネルのwebhookを取得または作成
     let webhook;
@@ -746,6 +762,21 @@ client.on('messageCreate', async message => {
     
     // クールダウン開始（自動代行投稿）
     autoProxyCooldowns.set(userId, Date.now());
+    
+    // 代行投稿が成功したら元のメッセージを削除
+    try {
+      // メッセージがまだ存在するかチェック
+      const messageExists = await message.fetch().catch(() => null);
+      if (messageExists) {
+        await message.delete();
+        console.log('元のメッセージを削除しました');
+      } else {
+        console.log('元のメッセージは既に削除されています');
+      }
+    } catch (deleteError) {
+      console.error('元のメッセージの削除に失敗しました:', deleteError);
+      // 削除に失敗しても処理は続行
+    }
     
   } catch (error) {
     console.error('メディア代行投稿でエラーが発生しました:', error.message);
