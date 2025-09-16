@@ -1535,8 +1535,16 @@ client.on('messageCreate', async (message) => {
           .setTimestamp()
           .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
         
-        // 本人のみに見える返信として送信
-        await message.reply({ embeds: [loginEmbed], ephemeral: true });
+        // 本人のみにDMで送信（プライベートな返信）
+        try {
+          await message.author.send({ embeds: [loginEmbed] });
+          // DM送信成功時はログイン証拠の絵文字を付ける
+          await message.react('✅');
+        } catch (dmError) {
+          // DMが送信できない場合は、ログイン証拠の絵文字のみを付ける
+          console.log('DM送信に失敗、ログイン証拠の絵文字のみを付けます:', dmError.message);
+          await message.react('✅');
+        }
       } catch (error) {
         console.error('ログインメッセージ送信エラー:', error);
       }
