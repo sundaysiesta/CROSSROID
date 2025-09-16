@@ -80,6 +80,9 @@ let guideBoardMessageId = null;
 // 今日世代を獲得した人を追跡
 const todayGenerationWinners = new Set();
 
+// 前回の部活データを保存（急上昇ランキング用）
+let previousClubData = new Map();
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -189,20 +192,32 @@ async function getActiveChannels() {
     const vcChannels = [];
     const vcCategory = guild.channels.cache.get(VC_CATEGORY_ID);
     
+    console.log(`VCカテゴリ検索: ${VC_CATEGORY_ID}, 見つかった: ${vcCategory ? 'はい' : 'いいえ'}`);
+    
     if (vcCategory && vcCategory.type === 4) {
       const voiceChannels = vcCategory.children.cache.filter(ch => 
         ch.type === 2 && // ボイスチャンネル
         ch.members && ch.members.size > 0
       );
 
+      console.log(`VCカテゴリ内のボイスチャンネル数: ${vcCategory.children.cache.size}`);
+      console.log(`アクティブなボイスチャンネル数: ${voiceChannels.size}`);
+
       for (const vc of voiceChannels.values()) {
+        const memberList = Array.from(vc.members.values()).map(member => member.user.username);
+        console.log(`VC ${vc.name}: ${vc.members.size}人 (${memberList.join(', ')})`);
+        
         vcChannels.push({
           channel: vc,
           memberCount: vc.members.size,
-          members: Array.from(vc.members.values()).map(member => member.user.username)
+          members: memberList
         });
       }
+    } else {
+      console.log('VCカテゴリが見つからないか、カテゴリではありません');
     }
+    
+    console.log(`最終的なVCチャンネル数: ${vcChannels.length}`);
 
     // ハイライト投稿を検出（リアクション数が多い投稿）
     const highlights = [];
@@ -266,12 +281,51 @@ async function getActiveChannels() {
     }
 
 
+    // 急上昇ランキング用のデータを計算
+    const trendingClubs = [];
+    const dormantClubs = [];
+    
+    // 前回のデータと比較して急上昇を検出
+    for (const clubData of clubChannels) {
+      const channelId = clubData.channel.id;
+      const previousScore = previousClubData.get(channelId) || 0;
+      const currentScore = clubData.activityScore;
+      const scoreIncrease = currentScore - previousScore;
+      
+      if (scoreIncrease > 0) {
+        trendingClubs.push({
+          ...clubData,
+          scoreIncrease: scoreIncrease
+        });
+      }
+    }
+    
+    // 急上昇ランキングをスコア増加量でソート
+    trendingClubs.sort((a, b) => b.scoreIncrease - a.scoreIncrease);
+    
+    // 休止中の部活を検出（過去24時間で0件の部活）
+    for (const channel of allClubChannels) {
+      const isActive = clubChannels.some(active => active.channel.id === channel.id);
+      if (!isActive) {
+        dormantClubs.push(channel);
+      }
+    }
+    
+    // 今回のデータを次回用に保存
+    const currentClubData = new Map();
+    for (const clubData of clubChannels) {
+      currentClubData.set(clubData.channel.id, clubData.activityScore);
+    }
+    previousClubData = currentClubData;
+
     return { 
       clubChannels, 
       vcChannels, 
       highlights, 
       topSpeakers, 
-      newClubs 
+      newClubs,
+      trendingClubs,
+      dormantClubs
     };
   } catch (error) {
     console.error('アクティブチャンネル検出でエラー:', error);
@@ -280,15 +334,74 @@ async function getActiveChannels() {
       vcChannels: [], 
       highlights: [], 
       topSpeakers: [], 
-      newClubs: []
+      newClubs: [],
+      trendingClubs: [],
+      dormantClubs: []
     };
   }
+}
+
+// Botコメント風のエモいまとめを生成
+function generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs) {
+  const comments = [];
+  
+  // 部活の盛り上がり具合に基づくコメント
+  if (clubChannels.length > 0) {
+    const topClub = clubChannels[0];
+    const clubName = topClub.channel.name.replace(/[｜|]/g, '').trim();
+    if (topClub.activityScore > 50) {
+      comments.push(`「${clubName}が今日も圧倒的！` + (topClub.activityScore > 100 ? '🔥」' : '」'));
+    } else if (topClub.activityScore > 20) {
+      comments.push(`「${clubName}も勢いアリ！` + (topClub.activityScore > 40 ? '✨」' : '」'));
+    }
+  }
+  
+  // 急上昇部活のコメント
+  if (trendingClubs.length > 0) {
+    const topTrending = trendingClubs[0];
+    const trendingName = topTrending.channel.name.replace(/[｜|]/g, '').trim();
+    comments.push(`「${trendingName}が急上昇中！📈」`);
+  }
+  
+  // VCの盛り上がり具合
+  if (vcChannels.length > 0) {
+    const topVC = vcChannels[0];
+    const vcName = topVC.channel.name.replace(/[｜|]/g, '').trim();
+    if (topVC.memberCount > 5) {
+      comments.push(`「${vcName}で大盛り上がり！🎤」`);
+    } else if (topVC.memberCount > 2) {
+      comments.push(`「${vcName}も賑やか！💬」`);
+    }
+  }
+  
+  // テキストスピーカーのコメント
+  if (topSpeakers.length > 0) {
+    const topSpeaker = topSpeakers[0];
+    const speakerName = topSpeaker.user.username;
+    if (topSpeaker.count > 20) {
+      comments.push(`「${speakerName}さんが今日も大活躍！💪」`);
+    } else if (topSpeaker.count > 10) {
+      comments.push(`「${speakerName}さんも頑張ってる！👏」`);
+    }
+  }
+  
+  // 全体的なコメント
+  if (comments.length === 0) {
+    comments.push('「今日もみんなお疲れ様！🌙」');
+  } else if (comments.length === 1) {
+    // 1つだけの場合はそのまま
+  } else {
+    // 複数ある場合は最初の2つを組み合わせ
+    comments.splice(2);
+  }
+  
+  return comments.join(' ');
 }
 
 // 案内板を更新する機能
 async function updateGuideBoard() {
   try {
-    const { clubChannels, vcChannels, highlights, topSpeakers, newClubs } = await getActiveChannels();
+    const { clubChannels, vcChannels, highlights, topSpeakers, newClubs, trendingClubs, dormantClubs } = await getActiveChannels();
     
     const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
     if (!guideChannel) {
@@ -399,6 +512,32 @@ async function updateGuideBoard() {
       });
     }
 
+    // 急上昇ランキング（上位3位まで）
+    if (trendingClubs.length > 0) {
+      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
+      const trendingList = trendingClubs
+        .slice(0, 3) // 上位3位まで
+        .map((data, index) => 
+          `${rankEmojis[index]} ${data.channel} (+${data.scoreIncrease}pt)`
+        ).join('\n');
+      
+      embed.addFields({
+        name: '📈 急上昇部活',
+        value: trendingList,
+        inline: false
+      });
+    }
+
+    // 休止中の部活（ランダムに1つ）
+    if (dormantClubs.length > 0) {
+      const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
+      embed.addFields({
+        name: '🛌 休止中の部活',
+        value: `→ ${randomDormant}`,
+        inline: false
+      });
+    }
+
     // ハイライト投稿（上位3件まで）
     if (highlights.length > 0) {
       const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
@@ -416,7 +555,15 @@ async function updateGuideBoard() {
       });
     }
 
-
+    // Botコメント風のエモいまとめ
+    const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs);
+    if (botComments) {
+      embed.addFields({
+        name: '📝 本日の一言',
+        value: botComments,
+        inline: false
+      });
+    }
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
     if (guideBoardMessageId) {
