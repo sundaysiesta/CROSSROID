@@ -3,6 +3,8 @@ const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require
 const express = require('express');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config(); // .env ファイルから環境変数を読み込む
 
 // Discordクライアントのインスタンスを作成
@@ -90,6 +92,55 @@ let consecutiveLogins = new Map(); // 連続ログイン日数 (userId -> {count
 // bumpコマンドのクールダウン管理
 let bumpCooldowns = new Map(); // userId -> lastBumpTime
 const BUMP_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2時間
+
+// データ永続化のためのファイルパス
+const DATA_DIR = path.join(__dirname, 'data');
+const LOGIN_DATA_FILE = path.join(DATA_DIR, 'login_data.json');
+
+// データディレクトリを作成
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// ログインデータの保存・読み込み関数
+function saveLoginData() {
+  try {
+    const data = {
+      todayLoginMembers: Array.from(todayLoginMembers),
+      consecutiveLogins: Array.from(consecutiveLogins.entries()),
+      lastSaveDate: new Date().toDateString()
+    };
+    fs.writeFileSync(LOGIN_DATA_FILE, JSON.stringify(data, null, 2));
+    console.log('ログインデータを保存しました');
+  } catch (error) {
+    console.error('ログインデータの保存に失敗:', error);
+  }
+}
+
+function loadLoginData() {
+  try {
+    if (fs.existsSync(LOGIN_DATA_FILE)) {
+      const data = JSON.parse(fs.readFileSync(LOGIN_DATA_FILE, 'utf8'));
+      const today = new Date().toDateString();
+      
+      // 今日のデータのみ復元
+      if (data.lastSaveDate === today) {
+        todayLoginMembers = new Set(data.todayLoginMembers || []);
+        consecutiveLogins = new Map(data.consecutiveLogins || []);
+        console.log('ログインデータを復元しました');
+      } else {
+        console.log('日付が変わったため、ログインデータをリセットします');
+        todayLoginMembers.clear();
+        // 連続ログインは保持（日付チェックは別途行う）
+        consecutiveLogins = new Map(data.consecutiveLogins || []);
+      }
+    }
+  } catch (error) {
+    console.error('ログインデータの読み込みに失敗:', error);
+    todayLoginMembers.clear();
+    consecutiveLogins.clear();
+  }
+}
 
 // 同時処理制限
 const processingMessages = new Set();
@@ -707,6 +758,9 @@ client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   console.log(`CROSSROID, ready for duty.`);
   
+  // ログインデータを読み込み
+  loadLoginData();
+  
   // スラッシュコマンドを登録
   const commands = [
     {
@@ -805,6 +859,11 @@ client.once('ready', async () => {
     }
   }, 5 * 60 * 1000); // 5分 = 300,000ms
 
+  // ログインデータの定期保存（1分間隔）
+  setInterval(() => {
+    saveLoginData();
+  }, 60 * 1000); // 1分 = 60,000ms
+
   // 初回案内板更新（既存メッセージを検出）
   setTimeout(async () => {
     try {
@@ -874,6 +933,9 @@ function checkAndProcessLogin(userId) {
     
     userData.lastDate = today;
     consecutiveLogins.set(userId, userData);
+    
+    // データを即座に保存
+    saveLoginData();
     
     return true; // 初回ログイン
   }
@@ -1490,6 +1552,7 @@ setInterval(() => {
   if (jstTime.getHours() === 6 && jstTime.getMinutes() === 0) {
     todayLoginMembers.clear();
     console.log('ログインメンバーリストをリセットしました（朝6時）');
+    saveLoginData(); // リセット後もデータを保存
   }
 }, 60000); // 1分ごとにチェック
 
