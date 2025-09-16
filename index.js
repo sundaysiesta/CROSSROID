@@ -1434,36 +1434,18 @@ client.on('interactionCreate', async interaction => {
       if (notifyChannel) {
         const bumpEmbed = new EmbedBuilder()
           .setColor(0xff6b6b)
-          .setTitle('📢 部活宣伝！')
-          .setDescription(`${channel} が宣伝されました！`)
-          .addFields(
-            { name: '🏫 部活名', value: channel.name, inline: true },
-            { name: '👤 宣伝者', value: interaction.user.toString(), inline: true },
-            { name: '📅 宣伝日時', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
-          );
+          .setTitle('📢 部活宣伝')
+          .setDescription(`${channel} - ${interaction.user}`)
+          .setTimestamp();
         
         // チャンネルトピックがある場合は追加
         if (channel.topic) {
           bumpEmbed.addFields({
-            name: '📝 チャンネル説明',
-            value: channel.topic.length > 1024 ? channel.topic.slice(0, 1021) + '...' : channel.topic,
+            name: '📝 説明',
+            value: channel.topic.length > 200 ? channel.topic.slice(0, 197) + '...' : channel.topic,
             inline: false
           });
         }
-        
-        // メンバー数を追加
-        if (channel.members) {
-          bumpEmbed.addFields({
-            name: '👥 メンバー数',
-            value: `${channel.members.size}人`,
-            inline: true
-          });
-        }
-        
-        bumpEmbed
-          .setThumbnail(interaction.guild.iconURL())
-          .setTimestamp()
-          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
         
         await notifyChannel.send({ embeds: [bumpEmbed] });
       }
@@ -1505,37 +1487,14 @@ client.on('messageCreate', async (message) => {
         const userData = consecutiveLogins.get(message.author.id);
         const consecutiveDays = userData ? userData.count : 1;
         
-        // 埋め込み形式でログインメッセージを送信
-        const loginEmbed = new EmbedBuilder()
-          .setColor(0x00ff00)
-          .setTitle('🎉 ログイン完了！')
-          .setDescription(`${message.author} さん、おはようございます！`)
-          .setThumbnail(message.author.displayAvatarURL())
-          .setTimestamp(new Date())
-          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+        // 簡略化されたログインメッセージを送信
+        let loginMessage = `🎉 ${message.author} おはよう！`;
         
         if (consecutiveDays > 1) {
-          loginEmbed.addFields({
-            name: '🔥 連続ログイン',
-            value: `${consecutiveDays}日目です！`,
-            inline: true
-          });
-        } else {
-          loginEmbed.addFields({
-            name: '✨ 初回ログイン',
-            value: '今日の初回ログインです！',
-            inline: true
-          });
+          loginMessage += ` (${consecutiveDays}日連続)`;
         }
         
-        // 今日のログインメンバー数を追加
-        loginEmbed.addFields({
-          name: '📊 今日のログインメンバー',
-          value: `${todayLoginMembers.size}人`,
-          inline: true
-        });
-        
-        await message.reply({ embeds: [loginEmbed] });
+        await message.reply(loginMessage);
       } catch (error) {
         console.error('ログインメッセージ送信エラー:', error);
       }
