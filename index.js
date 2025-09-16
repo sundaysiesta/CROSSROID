@@ -720,6 +720,9 @@ client.on('messageCreate', async message => {
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
     
+    // 表示名を事前に取得（重複取得を防ぐ）
+    const displayName = member?.nickname || originalAuthor.displayName;
+    
     // チャンネルのwebhookを取得または作成
     let webhook;
     
@@ -775,13 +778,16 @@ client.on('messageCreate', async message => {
     console.log('webhookでメッセージを送信中...');
     console.log(`送信内容: ${sanitizedContent}`);
     console.log(`添付ファイル数: ${files.length}`);
-    
-    // サーバーのニックネームを取得（なければ表示名）
-    const member = await message.guild.members.fetch(originalAuthor.id).catch(() => null);
-    const displayName = member?.nickname || originalAuthor.displayName;
     console.log(`表示名: ${displayName}`);
     
     try {
+      // メッセージがまだ存在するかチェック（重複防止）
+      const messageExists = await message.fetch().catch(() => null);
+      if (!messageExists) {
+        console.log('メッセージが既に削除されているため、webhook送信をスキップします');
+        return;
+      }
+      
       const webhookMessage = await webhook.send({
         content: sanitizedContent,
         username: displayName,
