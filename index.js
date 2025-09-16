@@ -420,13 +420,21 @@ async function updateGuideBoard() {
     console.log(`案内板更新: VCチャンネル数 ${vcChannels.length}`);
     if (vcChannels.length > 0) {
       const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-      const vcList = vcChannels
-        .sort((a, b) => b.memberCount - a.memberCount)
+      const sortedVcChannels = vcChannels.sort((a, b) => b.memberCount - a.memberCount);
+      
+      console.log(`ソート後のVCチャンネル:`);
+      sortedVcChannels.forEach((data, index) => {
+        console.log(`  ${index + 1}位: ${data.channel.name} (${data.memberCount}人)`);
+      });
+      
+      const vcList = sortedVcChannels
         .map((data, index) => 
           `${rankEmojis[index] || `${index + 1}位.`} 🔊 ${data.channel} (${data.memberCount}人)`
         ).join('\n');
       
-      console.log(`VCランキング表示: ${vcList}`);
+      console.log(`VCランキング表示文字数: ${vcList.length}`);
+      console.log(`VCランキング表示内容:`);
+      console.log(vcList);
       
       embed.addFields({
         name: '🎤 アクティブなボイスチャンネルランキング',
@@ -469,6 +477,18 @@ async function updateGuideBoard() {
       });
     }
 
+
+    // 埋め込みメッセージのサイズをチェック
+    const embedJson = JSON.stringify(embed);
+    console.log(`埋め込みメッセージサイズ: ${embedJson.length}文字`);
+    console.log(`埋め込みフィールド数: ${embed.data.fields ? embed.data.fields.length : 0}`);
+    
+    // 各フィールドのサイズをチェック
+    if (embed.data.fields) {
+      embed.data.fields.forEach((field, index) => {
+        console.log(`フィールド${index + 1} (${field.name}): ${field.value.length}文字`);
+      });
+    }
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
     if (guideBoardMessageId) {
