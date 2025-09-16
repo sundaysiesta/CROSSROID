@@ -421,11 +421,19 @@ async function updateGuideBoard() {
     }
 
     // 新しい案内板を作成
+    const now = new Date();
+    const timeString = now.toLocaleString('ja-JP', { 
+      month: '2-digit', 
+      day: '2-digit', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+    
     const embed = new EmbedBuilder()
-      .setTitle('📋 サーバー活動案内板')
+      .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
       .setDescription('**リアルタイム更新** - 5分ごとに自動更新')
       .setColor(0x5865F2)
-      .setTimestamp(new Date())
+      .setTimestamp(now)
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
 
     // 世代獲得者セクション（重要情報として上部に配置）
@@ -443,7 +451,7 @@ async function updateGuideBoard() {
 
     // 部活チャンネル情報（上位5位まで）
     if (clubChannels.length > 0) {
-      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const clubList = await Promise.all(
         clubChannels
           .sort((a, b) => b.activityScore - a.activityScore)
@@ -469,7 +477,7 @@ async function updateGuideBoard() {
               }
             }
             
-            return `${rankEmojis[index]} ${data.channel} (${data.activityScore}pt) 部員:${data.uniqueSpeakers}人 ${clubLeader ? `部長:${clubLeader}` : ''}`;
+            return `${rankEmojis[index]} ${data.channel} — ${data.activityScore}pt ${clubLeader ? `部長:${clubLeader}` : ''}`;
           })
       );
       
@@ -482,12 +490,12 @@ async function updateGuideBoard() {
 
     // VC情報（上位5位まで）
     if (vcChannels.length > 0) {
-      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const vcList = vcChannels
         .sort((a, b) => b.memberCount - a.memberCount)
         .slice(0, 5) // 上位5位まで
         .map((data, index) => 
-          `${rankEmojis[index]} 🔊 ${data.channel} (${data.memberCount}人)`
+          `${rankEmojis[index]} 🔊 ${data.channel} — ${data.memberCount}人`
         ).join('\n');
       
       embed.addFields({
@@ -499,10 +507,10 @@ async function updateGuideBoard() {
 
     // テキストトップスピーカー（直近100メッセージ）
     if (topSpeakers.length > 0) {
-      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
+      const rankEmojis = ['🥇', '🥈', '🥉'];
       const topSpeakerList = topSpeakers
         .map((speaker, index) => 
-          `${rankEmojis[index]} ${speaker.user} (${speaker.count}件)`
+          `${rankEmojis[index]} ${speaker.user} — ${speaker.count}件`
         ).join('\n');
       
       embed.addFields({
@@ -514,11 +522,11 @@ async function updateGuideBoard() {
 
     // 急上昇ランキング（上位3位まで）
     if (trendingClubs.length > 0) {
-      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
+      const rankEmojis = ['🥇', '🥈', '🥉'];
       const trendingList = trendingClubs
         .slice(0, 3) // 上位3位まで
         .map((data, index) => 
-          `${rankEmojis[index]} ${data.channel} (+${data.scoreIncrease}pt)`
+          `${rankEmojis[index]} ${data.channel} — +${data.scoreIncrease}pt`
         ).join('\n');
       
       embed.addFields({
@@ -540,12 +548,12 @@ async function updateGuideBoard() {
 
     // ハイライト投稿（上位3件まで）
     if (highlights.length > 0) {
-      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
+      const rankEmojis = ['🥇', '🥈', '🥉'];
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
         .slice(0, 3) // 上位3件まで
         .map((data, index) => 
-          `${rankEmojis[index]} ⭐ ${data.channel}: ${data.message.content.slice(0, 30)}... (${data.reactionCount}👍) - ${data.message.author}`
+          `${rankEmojis[index]} ⭐ ${data.channel}: ${data.message.content.slice(0, 30)}... — ${data.reactionCount}👍 - ${data.message.author}`
         ).join('\n');
       
       embed.addFields({
