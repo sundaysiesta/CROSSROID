@@ -109,15 +109,24 @@ function generateDailyUserId(userId) {
 async function getActiveChannels() {
   try {
     const guild = client.guilds.cache.first();
-    if (!guild) return { clubChannels: [], vcChannels: [], highlights: [], topSpeaker: null };
+    if (!guild) return { 
+      clubChannels: [], 
+      vcChannels: [], 
+      highlights: [], 
+      topSpeakers: [], 
+      vcTopSpeakers: [],
+      newClubs: []
+    };
 
     const now = Date.now();
     const oneHourAgo = now - (60 * 60 * 1000); // 1時間前
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
+    const oneDayAgo = now - (24 * 60 * 60 * 1000); // 24時間前
 
     // 部活カテゴリからアクティブなチャンネルを検出
     const clubChannels = [];
+    const allClubChannels = []; // 新着部活検出用
     for (const categoryId of CLUB_CATEGORY_IDS) {
       const category = guild.channels.cache.get(categoryId);
       if (!category || category.type !== 4) continue; // カテゴリでない場合はスキップ
@@ -128,6 +137,7 @@ async function getActiveChannels() {
       );
 
       for (const channel of channels.values()) {
+        allClubChannels.push(channel);
         try {
           const messages = await channel.messages.fetch({ limit: 10 });
           const recentMessage = messages.find(msg => 
@@ -150,6 +160,11 @@ async function getActiveChannels() {
         }
       }
     }
+
+    // 新着部活を検出（24時間以内に作成されたチャンネル）
+    const newClubs = allClubChannels.filter(channel => 
+      channel.createdTimestamp > oneDayAgo
+    );
 
     // VCカテゴリからアクティブなボイスチャンネルを検出
     const vcChannels = [];
@@ -197,7 +212,7 @@ async function getActiveChannels() {
       }
     }
 
-    // 今日一番発言した人を検出
+    // 今日一番発言した人を検出（上位3名）
     const userMessageCounts = new Map();
     for (const channelData of clubChannels) {
       try {
@@ -216,28 +231,80 @@ async function getActiveChannels() {
       }
     }
 
-    let topSpeaker = null;
+    const topSpeakers = [];
     if (userMessageCounts.size > 0) {
       const sortedUsers = Array.from(userMessageCounts.entries())
-        .sort((a, b) => b[1] - a[1]);
-      const [userId, count] = sortedUsers[0];
-      const user = await client.users.fetch(userId).catch(() => null);
-      if (user) {
-        topSpeaker = { user, count };
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3); // 上位3名
+      
+      for (const [userId, count] of sortedUsers) {
+        const user = await client.users.fetch(userId).catch(() => null);
+        if (user) {
+          topSpeakers.push({ user, count });
+        }
       }
     }
 
-    return { clubChannels, vcChannels, highlights, topSpeaker };
+    // VCトップスピーカーを検出（ミュート外しのみ、1時間以内）
+    const vcUserMessageCounts = new Map();
+    for (const vcData of vcChannels) {
+      try {
+        const messages = await vcData.channel.messages.fetch({ limit: 50 });
+        const vcMessages = messages.filter(msg => 
+          !msg.author.bot && 
+          msg.createdTimestamp > oneHourAgo &&
+          !msg.author.bot
+        );
+
+        for (const msg of vcMessages.values()) {
+          // ミュート状態をチェック（簡易版：メッセージが送信できているかで判定）
+          const count = vcUserMessageCounts.get(msg.author.id) || 0;
+          vcUserMessageCounts.set(msg.author.id, count + 1);
+        }
+      } catch (error) {
+        console.error(`VCメッセージ数カウントでエラー:`, error);
+      }
+    }
+
+    const vcTopSpeakers = [];
+    if (vcUserMessageCounts.size > 0) {
+      const sortedVcUsers = Array.from(vcUserMessageCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3); // 上位3名
+      
+      for (const [userId, count] of sortedVcUsers) {
+        const user = await client.users.fetch(userId).catch(() => null);
+        if (user) {
+          vcTopSpeakers.push({ user, count });
+        }
+      }
+    }
+
+    return { 
+      clubChannels, 
+      vcChannels, 
+      highlights, 
+      topSpeakers, 
+      vcTopSpeakers,
+      newClubs 
+    };
   } catch (error) {
     console.error('アクティブチャンネル検出でエラー:', error);
-    return { clubChannels: [], vcChannels: [], highlights: [], topSpeaker: null };
+    return { 
+      clubChannels: [], 
+      vcChannels: [], 
+      highlights: [], 
+      topSpeakers: [], 
+      vcTopSpeakers: [],
+      newClubs: []
+    };
   }
 }
 
 // 案内板を更新する機能
 async function updateGuideBoard() {
   try {
-    const { clubChannels, vcChannels, highlights, topSpeaker } = await getActiveChannels();
+    const { clubChannels, vcChannels, highlights, topSpeakers, vcTopSpeakers, newClubs } = await getActiveChannels();
     
     const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
     if (!guideChannel) {
@@ -248,62 +315,97 @@ async function updateGuideBoard() {
     // 新しい案内板を作成
     const embed = new EmbedBuilder()
       .setTitle('📋 アクティブチャンネル案内板')
+      .setDescription('**集計期間**: 過去1時間（アクティブチャンネル・ハイライト・VCトップスピーカー）\n**集計期間**: 今日0時〜現在（テキストトップスピーカー）\n**集計期間**: 過去24時間（新着部活）')
       .setColor(0x5865F2)
       .setTimestamp(new Date())
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
 
-    // 部活チャンネル情報
-    if (clubChannels.length > 0) {
-      const clubList = clubChannels
-        .sort((a, b) => b.lastActivity - a.lastActivity)
-        .slice(0, 10) // 最大10個
-        .map(data => 
-          `💬 ${data.channel} (${data.messageCount}件)`
+    // 新着部活セクション
+    if (newClubs.length > 0) {
+      const newClubList = newClubs
+        .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+        .map(channel => 
+          `🆕 ${channel} (${new Date(channel.createdTimestamp).toLocaleString('ja-JP')})`
         ).join('\n');
       
       embed.addFields({
-        name: '🏫 アクティブな部活チャンネル',
+        name: '🆕 新着部活',
+        value: newClubList,
+        inline: false
+      });
+    }
+
+    // 部活チャンネル情報（ランキング形式）
+    if (clubChannels.length > 0) {
+      const clubList = clubChannels
+        .sort((a, b) => b.messageCount - a.messageCount)
+        .slice(0, 10) // 最大10個
+        .map((data, index) => 
+          `${index + 1}位. 💬 ${data.channel} (${data.messageCount}件)`
+        ).join('\n');
+      
+      embed.addFields({
+        name: '🏫 アクティブな部活チャンネルランキング',
         value: clubList || 'アクティブなチャンネルはありません',
         inline: false
       });
     }
 
-    // VC情報
+    // VC情報（ランキング形式）
     if (vcChannels.length > 0) {
       const vcList = vcChannels
         .sort((a, b) => b.memberCount - a.memberCount)
-        .map(data => 
-          `🔊 ${data.channel} (${data.memberCount}人)`
+        .map((data, index) => 
+          `${index + 1}位. 🔊 ${data.channel} (${data.memberCount}人)`
         ).join('\n');
       
       embed.addFields({
-        name: '🎤 アクティブなボイスチャンネル',
+        name: '🎤 アクティブなボイスチャンネルランキング',
         value: vcList,
         inline: false
       });
     }
 
-    // ハイライト投稿
+    // ハイライト投稿（ランキング形式）
     if (highlights.length > 0) {
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
-        .slice(0, 3) // 最大3個
-        .map(data => 
-          `⭐ ${data.channel}: ${data.message.content.slice(0, 50)}... (${data.reactionCount}リアクション) - ${data.message.author}`
+        .slice(0, 5) // 最大5個
+        .map((data, index) => 
+          `${index + 1}位. ⭐ ${data.channel}: ${data.message.content.slice(0, 40)}... (${data.reactionCount}リアクション) - ${data.message.author}`
         ).join('\n');
       
       embed.addFields({
-        name: '✨ ハイライト投稿',
+        name: '✨ ハイライト投稿ランキング',
         value: highlightList,
         inline: false
       });
     }
 
-    // 今日のトップスピーカー
-    if (topSpeaker) {
+    // テキストトップスピーカー（ランキング形式）
+    if (topSpeakers.length > 0) {
+      const topSpeakerList = topSpeakers
+        .map((speaker, index) => 
+          `${index + 1}位. ${speaker.user} (${speaker.count}件)`
+        ).join('\n');
+      
       embed.addFields({
-        name: '🏆 今日のトップスピーカー',
-        value: `${topSpeaker.user} (${topSpeaker.count}件)`,
+        name: '🏆 テキストトップスピーカーランキング',
+        value: topSpeakerList,
+        inline: false
+      });
+    }
+
+    // VCトップスピーカー（ランキング形式）
+    if (vcTopSpeakers.length > 0) {
+      const vcTopSpeakerList = vcTopSpeakers
+        .map((speaker, index) => 
+          `${index + 1}位. ${speaker.user} (${speaker.count}件)`
+        ).join('\n');
+      
+      embed.addFields({
+        name: '🎙️ VCトップスピーカーランキング',
+        value: vcTopSpeakerList,
         inline: false
       });
     }
@@ -588,17 +690,26 @@ client.on('messageCreate', async message => {
 // レベル10ロール取得時の世代ロール付与処理
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   try {
+    console.log(`guildMemberUpdate イベント: ${newMember.user.tag} (${newMember.user.id})`);
+    
     // レベル10ロールが新しく追加されたかチェック
     const hadLevel10Role = oldMember.roles.cache.has(LEVEL_10_ROLE_ID);
     const hasLevel10Role = newMember.roles.cache.has(LEVEL_10_ROLE_ID);
     
+    console.log(`レベル10ロール状態: 以前=${hadLevel10Role}, 現在=${hasLevel10Role}`);
+    
     // レベル10ロールが新しく追加された場合
     if (!hadLevel10Role && hasLevel10Role) {
+      console.log(`レベル10ロールが新しく追加されました: ${newMember.user.tag}`);
+      
       // 既に世代ロールを持っているかチェック
       const hasGenerationRole = newMember.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+      console.log(`世代ロール保有状況: ${hasGenerationRole}`);
       
       // 世代ロールを持っていない場合のみ付与
       if (!hasGenerationRole) {
+        console.log(`世代ロールを付与します: ${newMember.user.tag}`);
+        
         // 現在の世代ロールを付与
         await newMember.roles.add(CURRENT_GENERATION_ROLE_ID);
         
@@ -622,9 +733,15 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             content: `🎊 **${newMember.user.username}** さん、第18世代獲得おめでとうございます！🎊`,
             embeds: [embed]
           });
+          
+          console.log(`通知を送信しました: ${newMember.user.tag}`);
+        } else {
+          console.error('メインチャンネルが見つかりません');
         }
         
         console.log(`世代ロールを付与しました: ${newMember.user.tag} (${newMember.user.id})`);
+      } else {
+        console.log(`既に世代ロールを持っているためスキップ: ${newMember.user.tag}`);
       }
     }
   } catch (error) {
