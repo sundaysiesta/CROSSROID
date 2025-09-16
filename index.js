@@ -77,6 +77,9 @@ const GUIDE_BOARD_CHANNEL_ID = '1417353618910216192';
 // 案内板メッセージIDを保存
 let guideBoardMessageId = null;
 
+// 今日世代を獲得した人を追跡
+const todayGenerationWinners = new Set();
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -119,9 +122,9 @@ async function getActiveChannels() {
     };
 
     const now = Date.now();
-    const oneHourAgo = now - (60 * 60 * 1000); // 1時間前
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
+    const todayStartTime = todayStart.getTime();
     const oneDayAgo = now - (24 * 60 * 60 * 1000); // 24時間前
 
     // 部活カテゴリからアクティブなチャンネルを検出
@@ -142,7 +145,7 @@ async function getActiveChannels() {
           const messages = await channel.messages.fetch({ limit: 10 });
           const recentMessage = messages.find(msg => 
             !msg.author.bot && 
-            msg.createdTimestamp > oneHourAgo
+            msg.createdTimestamp > todayStartTime
           );
           
           if (recentMessage) {
@@ -151,7 +154,7 @@ async function getActiveChannels() {
               lastActivity: recentMessage.createdTimestamp,
               messageCount: messages.filter(msg => 
                 !msg.author.bot && 
-                msg.createdTimestamp > oneHourAgo
+                msg.createdTimestamp > todayStartTime
               ).size
             });
           }
@@ -192,7 +195,7 @@ async function getActiveChannels() {
         const highlightMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.reactions.cache.size > 0 &&
-          msg.createdTimestamp > oneHourAgo
+          msg.createdTimestamp > todayStartTime
         );
 
         for (const msg of highlightMessages.values()) {
@@ -245,19 +248,28 @@ async function getActiveChannels() {
       }
     }
 
-    // VCトップスピーカーを検出（ミュート外しのみ、1時間以内）
+    // VCトップスピーカーを検出（ミュート外しのみ、今日0時から現在）
     const vcUserMessageCounts = new Map();
+    const vcUserStayTimes = new Map(); // 滞在時間集計用
+    
     for (const vcData of vcChannels) {
       try {
+        // 現在VCにいるメンバーの滞在時間を集計
+        for (const member of vcData.channel.members.values()) {
+          if (!member.user.bot) {
+            // 簡易的な滞在時間計算（実際の参加時間は取得できないため、現在時刻を基準）
+            const stayTime = vcUserStayTimes.get(member.user.id) || 0;
+            vcUserStayTimes.set(member.user.id, stayTime + 1); // 1分単位で集計
+          }
+        }
+        
         const messages = await vcData.channel.messages.fetch({ limit: 50 });
         const vcMessages = messages.filter(msg => 
           !msg.author.bot && 
-          msg.createdTimestamp > oneHourAgo &&
-          !msg.author.bot
+          msg.createdTimestamp > todayStartTime
         );
 
         for (const msg of vcMessages.values()) {
-          // ミュート状態をチェック（簡易版：メッセージが送信できているかで判定）
           const count = vcUserMessageCounts.get(msg.author.id) || 0;
           vcUserMessageCounts.set(msg.author.id, count + 1);
         }
@@ -312,13 +324,37 @@ async function updateGuideBoard() {
       return;
     }
 
+    // 今日の世代獲得者を取得
+    const generationWinnersList = [];
+    for (const userId of todayGenerationWinners) {
+      try {
+        const user = await client.users.fetch(userId);
+        generationWinnersList.push(user);
+      } catch (error) {
+        console.error(`世代獲得者の取得に失敗: ${userId}`, error);
+      }
+    }
+
     // 新しい案内板を作成
     const embed = new EmbedBuilder()
       .setTitle('📋 アクティブチャンネル案内板')
-      .setDescription('**集計期間**: 過去1時間（アクティブチャンネル・ハイライト・VCトップスピーカー）\n**集計期間**: 今日0時〜現在（テキストトップスピーカー）\n**集計期間**: 過去24時間（新着部活）')
+      .setDescription('**集計期間**: 今日0時〜現在（すべての統計）')
       .setColor(0x5865F2)
       .setTimestamp(new Date())
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+
+    // 世代獲得者セクション
+    if (generationWinnersList.length > 0) {
+      const generationList = generationWinnersList
+        .map(user => `🎉 ${user}`)
+        .join('\n');
+      
+      embed.addFields({
+        name: '🎉 今日の世代獲得者',
+        value: generationList,
+        inline: false
+      });
+    }
 
     // 新着部活セクション
     if (newClubs.length > 0) {
@@ -337,11 +373,12 @@ async function updateGuideBoard() {
 
     // 部活チャンネル情報（ランキング形式）
     if (clubChannels.length > 0) {
+      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
       const clubList = clubChannels
         .sort((a, b) => b.messageCount - a.messageCount)
         .slice(0, 10) // 最大10個
         .map((data, index) => 
-          `${index + 1}位. 💬 ${data.channel} (${data.messageCount}件)`
+          `${rankEmojis[index] || `${index + 1}位.`} 💬 ${data.channel} (${data.messageCount}件)`
         ).join('\n');
       
       embed.addFields({
@@ -353,10 +390,11 @@ async function updateGuideBoard() {
 
     // VC情報（ランキング形式）
     if (vcChannels.length > 0) {
+      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
       const vcList = vcChannels
         .sort((a, b) => b.memberCount - a.memberCount)
         .map((data, index) => 
-          `${index + 1}位. 🔊 ${data.channel} (${data.memberCount}人)`
+          `${rankEmojis[index] || `${index + 1}位.`} 🔊 ${data.channel} (${data.memberCount}人)`
         ).join('\n');
       
       embed.addFields({
@@ -368,11 +406,12 @@ async function updateGuideBoard() {
 
     // ハイライト投稿（ランキング形式）
     if (highlights.length > 0) {
+      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
         .slice(0, 5) // 最大5個
         .map((data, index) => 
-          `${index + 1}位. ⭐ ${data.channel}: ${data.message.content.slice(0, 40)}... (${data.reactionCount}リアクション) - ${data.message.author}`
+          `${rankEmojis[index]} ⭐ ${data.channel}: ${data.message.content.slice(0, 40)}... (${data.reactionCount}リアクション) - ${data.message.author}`
         ).join('\n');
       
       embed.addFields({
@@ -384,9 +423,10 @@ async function updateGuideBoard() {
 
     // テキストトップスピーカー（ランキング形式）
     if (topSpeakers.length > 0) {
+      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
       const topSpeakerList = topSpeakers
         .map((speaker, index) => 
-          `${index + 1}位. ${speaker.user} (${speaker.count}件)`
+          `${rankEmojis[index]} ${speaker.user} (${speaker.count}件)`
         ).join('\n');
       
       embed.addFields({
@@ -398,9 +438,10 @@ async function updateGuideBoard() {
 
     // VCトップスピーカー（ランキング形式）
     if (vcTopSpeakers.length > 0) {
+      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
       const vcTopSpeakerList = vcTopSpeakers
         .map((speaker, index) => 
-          `${index + 1}位. ${speaker.user} (${speaker.count}件)`
+          `${rankEmojis[index]} ${speaker.user} (${speaker.count}件)`
         ).join('\n');
       
       embed.addFields({
@@ -539,6 +580,24 @@ client.once('ready', async () => {
       console.error('初回案内板更新でエラー:', error);
     }
   }, 10000); // 10秒後に初回実行
+
+  // 日付が変わったときに世代獲得者リストをリセット（毎日0時に実行）
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  const msUntilMidnight = tomorrow.getTime() - now.getTime();
+  
+  setTimeout(() => {
+    todayGenerationWinners.clear();
+    console.log('世代獲得者リストをリセットしました');
+    
+    // その後は24時間ごとにリセット
+    setInterval(() => {
+      todayGenerationWinners.clear();
+      console.log('世代獲得者リストをリセットしました');
+    }, 24 * 60 * 60 * 1000);
+  }, msUntilMidnight);
 });
 
 // ロールチェック機能
@@ -713,12 +772,15 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         // 現在の世代ロールを付与
         await newMember.roles.add(CURRENT_GENERATION_ROLE_ID);
         
+        // 今日の世代獲得者に追加
+        todayGenerationWinners.add(newMember.user.id);
+        
         // メインチャンネルに通知
         const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
         if (mainChannel) {
           const embed = new EmbedBuilder()
             .setTitle('🎉 第18世代おめでとうございます！')
-            .setDescription(`**${newMember.user.username}** さんがレベル10に到達し、第18世代ロールを獲得しました！`)
+            .setDescription(`${newMember.user} さんがレベル10に到達し、第18世代ロールを獲得しました！`)
             .setColor(0xFFD700) // 金色
             .setThumbnail(newMember.user.displayAvatarURL())
             .addFields(
@@ -730,7 +792,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
           
           await mainChannel.send({ 
-            content: `🎊 **${newMember.user.username}** さん、第18世代獲得おめでとうございます！🎊`,
+            content: `🎊 ${newMember.user} さん、第18世代獲得おめでとうございます！🎊`,
             embeds: [embed]
           });
           
