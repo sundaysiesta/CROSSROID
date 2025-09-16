@@ -85,94 +85,11 @@ const todayGenerationWinners = new Set();
 // 前回の部活データを保存（急上昇ランキング用）
 let previousClubData = new Map();
 
-// ログイン機能のデータ
-let todayLoginMembers = new Set(); // 今日ログインしたメンバー
-let consecutiveLogins = new Map(); // 連続ログイン日数 (userId -> {count, lastDate})
 
 // bumpコマンドのクールダウン管理
 let bumpCooldowns = new Map(); // userId -> lastBumpTime
 const BUMP_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2時間
 
-// データ永続化のためのファイルパス（Koyeb対応）
-const DATA_DIR = path.join(__dirname, 'data');
-const LOGIN_DATA_FILE = path.join(DATA_DIR, 'login_data.json');
-
-// データディレクトリを作成
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-// ログインデータの保存・読み込み関数（Koyeb対応版）
-function saveLoginData() {
-  try {
-    const data = {
-      todayLoginMembers: Array.from(todayLoginMembers),
-      consecutiveLogins: Array.from(consecutiveLogins.entries()),
-      lastSaveDate: new Date().toDateString(),
-      lastSaveTime: Date.now()
-    };
-    
-    // ファイルに保存
-    fs.writeFileSync(LOGIN_DATA_FILE, JSON.stringify(data, null, 2));
-    
-    // 環境変数にも保存（Koyebでの永続化対策）
-    process.env.LOGIN_DATA = JSON.stringify(data);
-    
-    console.log('ログインデータを保存しました（ファイル + 環境変数）');
-  } catch (error) {
-    console.error('ログインデータの保存に失敗:', error);
-  }
-}
-
-function loadLoginData() {
-  try {
-    let data = null;
-    
-    // まず環境変数から読み込み
-    if (process.env.LOGIN_DATA) {
-      try {
-        data = JSON.parse(process.env.LOGIN_DATA);
-        console.log('環境変数からログインデータを読み込みました');
-      } catch (envError) {
-        console.error('環境変数からのデータ読み込みに失敗:', envError);
-      }
-    }
-    
-    // 環境変数にデータがない場合はファイルから読み込み
-    if (!data && fs.existsSync(LOGIN_DATA_FILE)) {
-      try {
-        data = JSON.parse(fs.readFileSync(LOGIN_DATA_FILE, 'utf8'));
-        console.log('ファイルからログインデータを読み込みました');
-      } catch (fileError) {
-        console.error('ファイルからのデータ読み込みに失敗:', fileError);
-      }
-    }
-    
-    if (data) {
-      const today = new Date().toDateString();
-      
-      // 今日のデータのみ復元
-      if (data.lastSaveDate === today) {
-        todayLoginMembers = new Set(data.todayLoginMembers || []);
-        consecutiveLogins = new Map(data.consecutiveLogins || []);
-        console.log(`ログインデータを復元しました（今日のログイン者: ${todayLoginMembers.size}人）`);
-      } else {
-        console.log('日付が変わったため、ログインデータをリセットします');
-        todayLoginMembers.clear();
-        // 連続ログインは保持（日付チェックは別途行う）
-        consecutiveLogins = new Map(data.consecutiveLogins || []);
-      }
-    } else {
-      console.log('ログインデータが見つからないため、新規初期化します');
-      todayLoginMembers.clear();
-      consecutiveLogins.clear();
-    }
-  } catch (error) {
-    console.error('ログインデータの読み込みに失敗:', error);
-    todayLoginMembers.clear();
-    consecutiveLogins.clear();
-  }
-}
 
 // 同時処理制限
 const processingMessages = new Set();
@@ -568,53 +485,6 @@ async function updateGuideBoard() {
       });
     }
 
-    // 今日ログインしたメンバー
-    if (todayLoginMembers.size > 0) {
-      const loginMembersList = [];
-      for (const userId of todayLoginMembers) {
-        try {
-          const user = await client.users.fetch(userId);
-          loginMembersList.push(user.toString());
-        } catch (error) {
-          console.error(`ログインメンバー取得エラー: ${userId}`, error);
-        }
-      }
-      
-      if (loginMembersList.length > 0) {
-        const displayList = loginMembersList.length > 10 
-          ? loginMembersList.slice(0, 10).join(', ') + ` ... 他${loginMembersList.length - 10}人`
-          : loginMembersList.join(', ');
-        
-        embed.addFields({
-          name: `🗓️ 今日ログインしたメンバー (${loginMembersList.length}人)`,
-          value: `→ ${displayList}`,
-          inline: false
-        });
-      }
-    }
-
-    // 連続ログインランキング
-    const consecutiveRanking = getConsecutiveLoginRanking();
-    if (consecutiveRanking.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-      const rankingList = await Promise.all(
-        consecutiveRanking.map(async ([userId, data], index) => {
-          try {
-            const user = await client.users.fetch(userId);
-            return `${rankEmojis[index]} ${user} — ${data.count}日`;
-          } catch (error) {
-            console.error(`連続ログインランキング取得エラー: ${userId}`, error);
-            return `${rankEmojis[index]} 不明なユーザー — ${data.count}日`;
-          }
-        })
-      );
-      
-      embed.addFields({
-        name: '🔥 連続ログインランキング',
-        value: rankingList.join('\n'),
-        inline: false
-      });
-    }
 
     // 部活チャンネル情報（上位5位まで）
     if (clubChannels.length > 0) {
@@ -790,10 +660,6 @@ client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   console.log(`CROSSROID, ready for duty.`);
   
-  // ログインデータを読み込み（Koyeb対応）
-  console.log('ログインデータの読み込みを開始...');
-  loadLoginData();
-  console.log(`ログインデータ読み込み完了: 今日のログイン者 ${todayLoginMembers.size}人, 連続ログイン記録 ${consecutiveLogins.size}人`);
   
   // スラッシュコマンドを登録
   const commands = [
@@ -893,10 +759,6 @@ client.once('ready', async () => {
     }
   }, 5 * 60 * 1000); // 5分 = 300,000ms
 
-  // ログインデータの定期保存（30秒間隔でKoyeb対応）
-  setInterval(() => {
-    saveLoginData();
-  }, 30 * 1000); // 30秒 = 30,000ms
 
   // 初回案内板更新（既存メッセージを検出）
   setTimeout(async () => {
@@ -942,50 +804,6 @@ client.once('ready', async () => {
   }, msUntilMidnight);
 });
 
-// ログイン機能の関数
-function checkAndProcessLogin(userId) {
-  const today = new Date().toDateString();
-  
-  // 今日初回ログインかチェック
-  if (!todayLoginMembers.has(userId)) {
-    todayLoginMembers.add(userId);
-    
-    // 連続ログイン日数を更新
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toDateString();
-    
-    const userData = consecutiveLogins.get(userId) || { count: 0, lastDate: null };
-    
-    if (userData.lastDate === yesterdayStr) {
-      // 連続ログイン
-      userData.count += 1;
-    } else if (userData.lastDate !== today) {
-      // 連続が途切れた
-      userData.count = 1;
-    }
-    
-    userData.lastDate = today;
-    consecutiveLogins.set(userId, userData);
-    
-    // データを即座に保存（Koyeb対応）
-    saveLoginData();
-    
-    return true; // 初回ログイン
-  }
-  
-  return false; // 既にログイン済み
-}
-
-// 連続ログインランキングを取得
-function getConsecutiveLoginRanking() {
-  const ranking = Array.from(consecutiveLogins.entries())
-    .filter(([userId, data]) => data.lastDate === new Date().toDateString()) // 今日ログインした人のみ
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 5); // 上位5位まで
-  
-  return ranking;
-}
 
 // ロールチェック機能
 function hasAllowedRole(member) {
@@ -1500,70 +1318,7 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// メッセージ作成時のログインチェック
-client.on('messageCreate', async (message) => {
-  // botのメッセージは無視
-  if (message.author.bot) return;
-  
-  // サーバー参加通知を除外（システムメッセージ）
-  if (message.type === 7) return; // USER_JOIN
-  
-  // 自己紹介チャンネルを除外
-  if (message.channel.id === '1369660410008965203') return;
-  
-  // メインチャンネルでのみログインチェック
-  if (message.channel.id === MAIN_CHANNEL_ID) {
-    const isFirstLogin = checkAndProcessLogin(message.author.id);
-    
-    if (isFirstLogin) {
-      try {
-        // 連続ログイン日数を取得
-        const userData = consecutiveLogins.get(message.author.id);
-        const consecutiveDays = userData ? userData.count : 1;
-        
-        // 詳細なログイン情報を本人のみに送信（ephemeral）
-        const loginEmbed = new EmbedBuilder()
-          .setTitle('🎉 ログイン完了！')
-          .setColor(0x00FF00)
-          .setDescription(`おはようございます、${message.author}さん！`)
-          .addFields(
-            { name: '📅 ログイン日時', value: new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }), inline: true },
-            { name: '🔥 連続ログイン', value: `${consecutiveDays}日連続`, inline: true },
-            { name: '📊 今日のログイン者数', value: `${todayLoginMembers.size}人`, inline: true }
-          )
-          .setThumbnail(message.author.displayAvatarURL())
-          .setTimestamp()
-          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-        
-        // 本人のみにDMで送信（プライベートな返信）
-        try {
-          await message.author.send({ embeds: [loginEmbed] });
-          // DM送信成功時はログイン証拠の絵文字を付ける
-          await message.react('✅');
-        } catch (dmError) {
-          // DMが送信できない場合は、ログイン証拠の絵文字のみを付ける
-          console.log('DM送信に失敗、ログイン証拠の絵文字のみを付けます:', dmError.message);
-          await message.react('✅');
-        }
-      } catch (error) {
-        console.error('ログインメッセージ送信エラー:', error);
-      }
-    }
-  }
-});
 
-// 朝6時のリセット機能
-setInterval(() => {
-  const now = new Date();
-  const jstTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-  
-  // 朝6時（JST）にリセット
-  if (jstTime.getHours() === 6 && jstTime.getMinutes() === 0) {
-    todayLoginMembers.clear();
-    console.log('ログインメンバーリストをリセットしました（朝6時）');
-    saveLoginData(); // リセット後もデータを保存
-  }
-}, 60000); // 1分ごとにチェック
 
 // Discordボットとしてログイン
 client.login(process.env.DISCORD_TOKEN);
