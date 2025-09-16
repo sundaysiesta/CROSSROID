@@ -423,6 +423,7 @@ async function updateGuideBoard() {
     // 新しい案内板を作成
     const now = new Date();
     const timeString = now.toLocaleString('ja-JP', { 
+      timeZone: 'Asia/Tokyo',
       month: '2-digit', 
       day: '2-digit', 
       hour: '2-digit', 
