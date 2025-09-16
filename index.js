@@ -142,7 +142,7 @@ async function getActiveChannels() {
       for (const channel of channels.values()) {
         allClubChannels.push(channel);
         try {
-          const messages = await channel.messages.fetch({ limit: 10 });
+          const messages = await channel.messages.fetch({ limit: 100 }); // 取得数を増やす
           const recentMessage = messages.find(msg => 
             !msg.author.bot && 
             msg.createdTimestamp > todayStartTime
@@ -191,7 +191,7 @@ async function getActiveChannels() {
     const highlights = [];
     for (const channelData of clubChannels) {
       try {
-        const messages = await channelData.channel.messages.fetch({ limit: 50 });
+        const messages = await channelData.channel.messages.fetch({ limit: 100 }); // 取得数を増やす
         const highlightMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.reactions.cache.size > 0 &&
@@ -219,7 +219,7 @@ async function getActiveChannels() {
     const userMessageCounts = new Map();
     for (const channelData of clubChannels) {
       try {
-        const messages = await channelData.channel.messages.fetch({ limit: 100 });
+        const messages = await channelData.channel.messages.fetch({ limit: 200 }); // 取得数をさらに増やす
         const todayMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.createdTimestamp > todayStart.getTime()
@@ -263,7 +263,7 @@ async function getActiveChannels() {
           }
         }
         
-        const messages = await vcData.channel.messages.fetch({ limit: 50 });
+        const messages = await vcData.channel.messages.fetch({ limit: 100 }); // 取得数を増やす
         const vcMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.createdTimestamp > todayStartTime
@@ -572,9 +572,25 @@ client.once('ready', async () => {
     }
   }, 5 * 60 * 1000); // 5分 = 300,000ms
 
-  // 初回案内板更新
+  // 初回案内板更新（既存メッセージを検出）
   setTimeout(async () => {
     try {
+      // 既存の案内板メッセージを検索
+      const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
+      if (guideChannel) {
+        const messages = await guideChannel.messages.fetch({ limit: 20 });
+        const existingGuideMessage = messages.find(msg => 
+          msg.author.id === client.user.id && 
+          msg.embeds.length > 0 && 
+          msg.embeds[0].title === '📋 アクティブチャンネル案内板'
+        );
+        
+        if (existingGuideMessage) {
+          guideBoardMessageId = existingGuideMessage.id;
+          console.log('既存の案内板メッセージを発見しました');
+        }
+      }
+      
       await updateGuideBoard();
     } catch (error) {
       console.error('初回案内板更新でエラー:', error);
@@ -716,9 +732,13 @@ client.on('messageCreate', async message => {
     // webhookでメッセージを送信
     console.log('webhookでメッセージを送信中...');
     
+    // サーバーのニックネームを取得（なければ表示名）
+    const member = await message.guild.members.fetch(originalAuthor.id).catch(() => null);
+    const displayName = member?.nickname || originalAuthor.displayName;
+    
     const webhookMessage = await webhook.send({
       content: sanitizedContent,
-      username: originalAuthor.username,
+      username: displayName,
       avatarURL: originalAuthor.displayAvatarURL(),
       files: files,
       components: [actionRow],
