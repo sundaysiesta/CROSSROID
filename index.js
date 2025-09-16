@@ -238,28 +238,30 @@ async function getActiveChannels() {
       }
     }
 
-    // 今日一番発言した人を検出（上位3名）- すべての部活チャンネルから集計
+    // 今日一番発言した人を検出（上位3名）- メインチャンネルのみから集計
     const userMessageCounts = new Map();
-    console.log(`テキストトップスピーカー集計開始: ${allClubChannels.length}個の部活チャンネル`);
+    console.log(`テキストトップスピーカー集計開始: メインチャンネル`);
     
-    for (const channel of allClubChannels) {
-      try {
-        const messages = await channel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
+    try {
+      const mainChannel = guild.channels.cache.get(MAIN_CHANNEL_ID);
+      if (mainChannel) {
+        const messages = await mainChannel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
         const todayMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.createdTimestamp > todayStartTime
         );
 
-        console.log(`チャンネル ${channel.name}: 今日のメッセージ数 ${todayMessages.length}`);
+        console.log(`メインチャンネル: 今日のメッセージ数 ${todayMessages.length}`);
 
         for (const msg of todayMessages.values()) {
           const count = userMessageCounts.get(msg.author.id) || 0;
           userMessageCounts.set(msg.author.id, count + 1);
         }
-      } catch (error) {
-        console.error(`メッセージ数カウントでエラー (${channel.name}):`, error.message);
-        // エラーが発生しても他のチャンネルの処理は続行
+      } else {
+        console.error('メインチャンネルが見つかりません');
       }
+    } catch (error) {
+      console.error(`メインチャンネルのメッセージ数カウントでエラー:`, error.message);
     }
     
     console.log(`集計されたユーザー数: ${userMessageCounts.size}`);
@@ -374,14 +376,20 @@ async function updateGuideBoard() {
             const permissions = channel.permissionsFor(channel.guild.members.cache.get(channel.guild.ownerId));
             let clubLeader = '';
             
-            // チャンネルの管理者権限を持つ人を探す（botを除く）
+            // チャンネルのオーバーライド権限を持つ人を探す（botを除く）
             const members = await channel.guild.members.fetch();
             for (const [memberId, member] of members) {
               if (member.user.bot) continue; // botを除外
+              
+              // チャンネル固有の権限オーバーライドをチェック
               const memberPermissions = channel.permissionsFor(member);
               if (memberPermissions && memberPermissions.has('ManageChannels')) {
-                clubLeader = member.toString();
-                break;
+                // サーバー全体の権限ではなく、チャンネル固有の権限かチェック
+                const channelOverwrites = channel.permissionOverwrites.cache.get(memberId);
+                if (channelOverwrites && channelOverwrites.allow.has('ManageChannels')) {
+                  clubLeader = member.toString();
+                  break;
+                }
               }
             }
             
