@@ -575,9 +575,13 @@ async function updateGuideBoard() {
     }
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
+    console.log(`案内板更新: guideBoardMessageId = ${guideBoardMessageId}`);
+    
     if (guideBoardMessageId) {
       try {
+        console.log('既存の案内板メッセージを取得中...');
         const message = await guideChannel.messages.fetch(guideBoardMessageId);
+        console.log(`メッセージ取得成功: ${message.id}`);
         await message.edit({ embeds: [embed] });
         console.log('案内板を編集しました');
       } catch (error) {
@@ -587,9 +591,10 @@ async function updateGuideBoard() {
     }
     
     if (!guideBoardMessageId) {
+      console.log('新規案内板メッセージを作成中...');
       const message = await guideChannel.send({ embeds: [embed] });
       guideBoardMessageId = message.id;
-      console.log('案内板を新規作成しました');
+      console.log(`案内板を新規作成しました: ${guideBoardMessageId}`);
     }
   } catch (error) {
     console.error('案内板更新でエラー:', error);
@@ -705,7 +710,7 @@ client.once('ready', async () => {
         const existingGuideMessage = messages.find(msg => 
           msg.author.id === client.user.id && 
           msg.embeds.length > 0 && 
-          msg.embeds[0].title === '📋 アクティブチャンネル案内板'
+          msg.embeds[0].title && msg.embeds[0].title.includes('📋 サーバー活動案内板')
         );
         
         if (existingGuideMessage) {
