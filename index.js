@@ -248,8 +248,7 @@ async function getActiveChannels() {
       }
     }
 
-    // VCトップスピーカーを検出（ミュート外しのみ、今日0時から現在）
-    const vcUserMessageCounts = new Map();
+    // VCトップスピーカーを検出（滞在時間ベース、今日0時から現在）
     const vcUserStayTimes = new Map(); // 滞在時間集計用
     
     for (const vcData of vcChannels) {
@@ -262,32 +261,21 @@ async function getActiveChannels() {
             vcUserStayTimes.set(member.user.id, stayTime + 1); // 1分単位で集計
           }
         }
-        
-        const messages = await vcData.channel.messages.fetch({ limit: 100 }); // 取得数を増やす
-        const vcMessages = messages.filter(msg => 
-          !msg.author.bot && 
-          msg.createdTimestamp > todayStartTime
-        );
-
-        for (const msg of vcMessages.values()) {
-          const count = vcUserMessageCounts.get(msg.author.id) || 0;
-          vcUserMessageCounts.set(msg.author.id, count + 1);
-        }
       } catch (error) {
-        console.error(`VCメッセージ数カウントでエラー:`, error);
+        console.error(`VC滞在時間カウントでエラー:`, error);
       }
     }
 
     const vcTopSpeakers = [];
-    if (vcUserMessageCounts.size > 0) {
-      const sortedVcUsers = Array.from(vcUserMessageCounts.entries())
+    if (vcUserStayTimes.size > 0) {
+      const sortedVcUsers = Array.from(vcUserStayTimes.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3); // 上位3名
       
-      for (const [userId, count] of sortedVcUsers) {
+      for (const [userId, stayTime] of sortedVcUsers) {
         const user = await client.users.fetch(userId).catch(() => null);
         if (user) {
-          vcTopSpeakers.push({ user, count });
+          vcTopSpeakers.push({ user, stayTime });
         }
       }
     }
@@ -441,11 +429,11 @@ async function updateGuideBoard() {
       const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
       const vcTopSpeakerList = vcTopSpeakers
         .map((speaker, index) => 
-          `${rankEmojis[index]} ${speaker.user} (${speaker.count}件)`
+          `${rankEmojis[index]} ${speaker.user} (${speaker.stayTime}分)`
         ).join('\n');
       
       embed.addFields({
-        name: '🎙️ VCトップスピーカーランキング',
+        name: '🎙️ VCトップスピーカーランキング（滞在時間）',
         value: vcTopSpeakerList,
         inline: false
       });
@@ -685,6 +673,15 @@ client.on('messageCreate', async message => {
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
     
+    // 先に元のメッセージを削除（重複防止）
+    try {
+      await message.delete();
+    } catch (deleteError) {
+      console.error('元のメッセージの削除に失敗しました:', deleteError);
+      // 削除に失敗した場合は処理を中止
+      return;
+    }
+    
     // チャンネルのwebhookを取得または作成
     let webhook;
     
@@ -749,14 +746,6 @@ client.on('messageCreate', async message => {
     
     // クールダウン開始（自動代行投稿）
     autoProxyCooldowns.set(userId, Date.now());
-    
-    // 代行投稿が成功したら元のメッセージを削除
-    try {
-      await message.delete();
-    } catch (deleteError) {
-      console.error('元のメッセージの削除に失敗しました:', deleteError);
-      // 削除に失敗しても処理は続行
-    }
     
   } catch (error) {
     console.error('メディア代行投稿でエラーが発生しました:', error.message);
