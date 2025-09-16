@@ -74,6 +74,9 @@ const VC_CATEGORY_ID = '1369659877735137342';
 // 案内板チャンネルID
 const GUIDE_BOARD_CHANNEL_ID = '1417353618910216192';
 
+// 案内板メッセージIDを保存
+let guideBoardMessageId = null;
+
 // 同時処理制限
 const processingMessages = new Set();
 
@@ -242,17 +245,6 @@ async function updateGuideBoard() {
       return;
     }
 
-    // 既存の案内板メッセージを削除
-    const messages = await guideChannel.messages.fetch({ limit: 10 });
-    const botMessages = messages.filter(msg => msg.author.id === client.user.id);
-    for (const msg of botMessages.values()) {
-      try {
-        await msg.delete();
-      } catch (error) {
-        console.error('古い案内板メッセージの削除に失敗:', error);
-      }
-    }
-
     // 新しい案内板を作成
     const embed = new EmbedBuilder()
       .setTitle('📋 アクティブチャンネル案内板')
@@ -297,7 +289,7 @@ async function updateGuideBoard() {
         .sort((a, b) => b.reactionCount - a.reactionCount)
         .slice(0, 3) // 最大3個
         .map(data => 
-          `⭐ ${data.channel}: ${data.message.content.slice(0, 50)}... (${data.reactionCount}リアクション)`
+          `⭐ ${data.channel}: ${data.message.content.slice(0, 50)}... (${data.reactionCount}リアクション) - ${data.message.author}`
         ).join('\n');
       
       embed.addFields({
@@ -311,13 +303,28 @@ async function updateGuideBoard() {
     if (topSpeaker) {
       embed.addFields({
         name: '🏆 今日のトップスピーカー',
-        value: `${topSpeaker.user.username} (${topSpeaker.count}件)`,
+        value: `${topSpeaker.user} (${topSpeaker.count}件)`,
         inline: false
       });
     }
 
-    await guideChannel.send({ embeds: [embed] });
-    console.log('案内板を更新しました');
+    // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
+    if (guideBoardMessageId) {
+      try {
+        const message = await guideChannel.messages.fetch(guideBoardMessageId);
+        await message.edit({ embeds: [embed] });
+        console.log('案内板を編集しました');
+      } catch (error) {
+        console.error('案内板の編集に失敗、新規作成します:', error);
+        guideBoardMessageId = null;
+      }
+    }
+    
+    if (!guideBoardMessageId) {
+      const message = await guideChannel.send({ embeds: [embed] });
+      guideBoardMessageId = message.id;
+      console.log('案内板を新規作成しました');
+    }
   } catch (error) {
     console.error('案内板更新でエラー:', error);
   }
