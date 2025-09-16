@@ -149,7 +149,7 @@ async function getActiveChannels() {
       for (const channel of channels.values()) {
         allClubChannels.push(channel);
         try {
-          const messages = await channel.messages.fetch({ limit: 100 }); // 取得数を増やす
+          const messages = await channel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
           const recentMessage = messages.find(msg => 
             !msg.author.bot && 
             msg.createdTimestamp > todayStartTime
@@ -172,7 +172,8 @@ async function getActiveChannels() {
             console.log(`非アクティブ: ${channel.name} (今日のメッセージなし)`);
           }
         } catch (error) {
-          console.error(`チャンネル ${channel.name} の取得に失敗:`, error);
+          console.error(`チャンネル ${channel.name} の取得に失敗:`, error.message);
+          // エラーが発生しても他のチャンネルの処理は続行
         }
       }
     }
@@ -206,7 +207,7 @@ async function getActiveChannels() {
     const highlights = [];
     for (const channelData of clubChannels) {
       try {
-        const messages = await channelData.channel.messages.fetch({ limit: 100 }); // 取得数を増やす
+        const messages = await channelData.channel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
         const highlightMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.reactions.cache.size > 0 &&
@@ -226,7 +227,8 @@ async function getActiveChannels() {
           }
         }
       } catch (error) {
-        console.error(`ハイライト検出でエラー:`, error);
+        console.error(`ハイライト検出でエラー (${channelData.channel.name}):`, error.message);
+        // エラーが発生しても他のチャンネルの処理は続行
       }
     }
 
@@ -236,7 +238,7 @@ async function getActiveChannels() {
     
     for (const channelData of clubChannels) {
       try {
-        const messages = await channelData.channel.messages.fetch({ limit: 200 }); // 取得数をさらに増やす
+        const messages = await channelData.channel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
         const todayMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.createdTimestamp > todayStartTime
@@ -249,7 +251,8 @@ async function getActiveChannels() {
           userMessageCounts.set(msg.author.id, count + 1);
         }
       } catch (error) {
-        console.error(`メッセージ数カウントでエラー:`, error);
+        console.error(`メッセージ数カウントでエラー (${channelData.channel.name}):`, error.message);
+        // エラーが発生しても他のチャンネルの処理は続行
       }
     }
     
