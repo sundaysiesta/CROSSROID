@@ -194,20 +194,32 @@ async function getActiveChannels() {
     // VCカテゴリからアクティブなボイスチャンネルを検出
     const vcChannels = [];
     const vcCategory = guild.channels.cache.get(VC_CATEGORY_ID);
+    console.log(`VCカテゴリ検索: ${VC_CATEGORY_ID}, 見つかった: ${vcCategory ? 'はい' : 'いいえ'}`);
+    
     if (vcCategory && vcCategory.type === 4) {
       const voiceChannels = vcCategory.children.cache.filter(ch => 
         ch.type === 2 && // ボイスチャンネル
         ch.members && ch.members.size > 0
       );
 
+      console.log(`VCカテゴリ内のボイスチャンネル数: ${vcCategory.children.cache.size}`);
+      console.log(`アクティブなボイスチャンネル数: ${voiceChannels.size}`);
+
       for (const vc of voiceChannels.values()) {
+        const memberList = Array.from(vc.members.values()).map(member => member.user.username);
+        console.log(`VC ${vc.name}: ${vc.members.size}人 (${memberList.join(', ')})`);
+        
         vcChannels.push({
           channel: vc,
           memberCount: vc.members.size,
-          members: Array.from(vc.members.values()).map(member => member.user.username)
+          members: memberList
         });
       }
+    } else {
+      console.log('VCカテゴリが見つからないか、カテゴリではありません');
     }
+    
+    console.log(`最終的なVCチャンネル数: ${vcChannels.length}`);
 
     // ハイライト投稿を検出（リアクション数が多い投稿）
     const highlights = [];
@@ -405,6 +417,7 @@ async function updateGuideBoard() {
     }
 
     // VC情報（ランキング形式）
+    console.log(`案内板更新: VCチャンネル数 ${vcChannels.length}`);
     if (vcChannels.length > 0) {
       const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
       const vcList = vcChannels
@@ -413,11 +426,15 @@ async function updateGuideBoard() {
           `${rankEmojis[index] || `${index + 1}位.`} 🔊 ${data.channel} (${data.memberCount}人)`
         ).join('\n');
       
+      console.log(`VCランキング表示: ${vcList}`);
+      
       embed.addFields({
         name: '🎤 アクティブなボイスチャンネルランキング',
         value: vcList,
         inline: false
       });
+    } else {
+      console.log('VCランキング: 表示するデータなし');
     }
 
     // ハイライト投稿（ランキング形式）
