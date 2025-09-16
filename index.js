@@ -277,61 +277,12 @@ async function getActiveChannels() {
       console.log('テキストトップスピーカー: データなし');
     }
 
-    // VCトップスピーカーを検出（滞在時間ベース、今日0時から現在）
-    const vcUserStayTimes = new Map(); // 滞在時間集計用
-    
-    for (const vcData of vcChannels) {
-      try {
-        let activeMembers = 0;
-        let mutedMembers = 0;
-        
-        // 現在VCにいるメンバーの滞在時間を集計
-        for (const member of vcData.channel.members.values()) {
-          if (!member.user.bot) {
-            // ミュート状態をチェック（サーバーミュートまたはボイスチャンネルミュート）
-            const isMuted = member.voice?.mute || member.voice?.serverMute;
-            if (!isMuted) {
-              activeMembers++;
-              // 簡易的な滞在時間計算（実際の参加時間は取得できないため、現在時刻を基準）
-              const stayTime = vcUserStayTimes.get(member.user.id) || 0;
-              vcUserStayTimes.set(member.user.id, stayTime + 1); // 1分単位で集計
-            } else {
-              mutedMembers++;
-            }
-          }
-        }
-        
-        console.log(`VC ${vcData.channel.name}: アクティブ ${activeMembers}人, ミュート ${mutedMembers}人`);
-      } catch (error) {
-        console.error(`VC滞在時間カウントでエラー:`, error);
-      }
-    }
-
-    const vcTopSpeakers = [];
-    if (vcUserStayTimes.size > 0) {
-      const sortedVcUsers = Array.from(vcUserStayTimes.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3); // 上位3名
-      
-      console.log(`VCトップスピーカー候補: ${sortedVcUsers.length}人`);
-      
-      for (const [userId, stayTime] of sortedVcUsers) {
-        const user = await client.users.fetch(userId).catch(() => null);
-        if (user) {
-          vcTopSpeakers.push({ user, stayTime });
-          console.log(`- ${user.username}: ${stayTime}分`);
-        }
-      }
-    } else {
-      console.log('VCトップスピーカー: データなし');
-    }
 
     return { 
       clubChannels, 
       vcChannels, 
       highlights, 
       topSpeakers, 
-      vcTopSpeakers,
       newClubs 
     };
   } catch (error) {
@@ -341,7 +292,6 @@ async function getActiveChannels() {
       vcChannels: [], 
       highlights: [], 
       topSpeakers: [], 
-      vcTopSpeakers: [],
       newClubs: []
     };
   }
@@ -350,7 +300,7 @@ async function getActiveChannels() {
 // 案内板を更新する機能
 async function updateGuideBoard() {
   try {
-    const { clubChannels, vcChannels, highlights, topSpeakers, vcTopSpeakers, newClubs } = await getActiveChannels();
+    const { clubChannels, vcChannels, highlights, topSpeakers, newClubs } = await getActiveChannels();
     
     const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
     if (!guideChannel) {
@@ -470,20 +420,6 @@ async function updateGuideBoard() {
       });
     }
 
-    // VCトップスピーカー（ランキング形式）
-    if (vcTopSpeakers.length > 0) {
-      const rankEmojis = ['1️⃣', '2️⃣', '3️⃣'];
-      const vcTopSpeakerList = vcTopSpeakers
-        .map((speaker, index) => 
-          `${rankEmojis[index]} ${speaker.user} (${speaker.stayTime}分)`
-        ).join('\n');
-      
-      embed.addFields({
-        name: '🎙️ VCトップスピーカーランキング（滞在時間）',
-        value: vcTopSpeakerList,
-        inline: false
-      });
-    }
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
     if (guideBoardMessageId) {
