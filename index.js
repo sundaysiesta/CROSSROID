@@ -702,14 +702,21 @@ client.on('messageCreate', async message => {
     let webhook;
     
     try {
+      console.log('webhookを取得中...');
       const webhooks = await message.channel.fetchWebhooks();
+      console.log(`既存のwebhook数: ${webhooks.size}`);
+      
       webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
       
       if (!webhook) {
+        console.log('CROSSROID Proxy webhookが見つからないため作成します');
         webhook = await message.channel.createWebhook({
           name: 'CROSSROID Proxy',
           avatar: originalAuthor.displayAvatarURL()
         });
+        console.log('webhookを作成しました:', webhook.id);
+      } else {
+        console.log('既存のwebhookを使用します:', webhook.id);
       }
     } catch (webhookError) {
       console.error('webhookの取得/作成に失敗しました:', webhookError);
@@ -744,27 +751,36 @@ client.on('messageCreate', async message => {
     
     // webhookでメッセージを送信
     console.log('webhookでメッセージを送信中...');
+    console.log(`送信内容: ${sanitizedContent}`);
+    console.log(`添付ファイル数: ${files.length}`);
     
     // サーバーのニックネームを取得（なければ表示名）
     const member = await message.guild.members.fetch(originalAuthor.id).catch(() => null);
     const displayName = member?.nickname || originalAuthor.displayName;
+    console.log(`表示名: ${displayName}`);
     
-    const webhookMessage = await webhook.send({
-      content: sanitizedContent,
-      username: displayName,
-      avatarURL: originalAuthor.displayAvatarURL(),
-      files: files,
-      components: [actionRow],
-      allowedMentions: { parse: [] } // すべてのメンションを無効化
-    });
-    
-    console.log('代行投稿完了');
+    try {
+      const webhookMessage = await webhook.send({
+        content: sanitizedContent,
+        username: displayName,
+        avatarURL: originalAuthor.displayAvatarURL(),
+        files: files,
+        components: [actionRow],
+        allowedMentions: { parse: [] } // すべてのメンションを無効化
+      });
+      
+      console.log('代行投稿完了:', webhookMessage.id);
+    } catch (webhookError) {
+      console.error('webhook送信エラー:', webhookError);
+      throw webhookError;
+    }
     
     // クールダウン開始（自動代行投稿）
     autoProxyCooldowns.set(userId, Date.now());
     
     // 代行投稿が成功したら元のメッセージを削除
     try {
+      console.log('元のメッセージの削除を試行中...');
       // メッセージがまだ存在するかチェック
       const messageExists = await message.fetch().catch(() => null);
       if (messageExists) {
