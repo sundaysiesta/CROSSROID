@@ -163,7 +163,7 @@ async function getActiveChannels() {
             
             const messageCount = todayMessages.size;
             const uniqueSpeakers = new Set(todayMessages.map(msg => msg.author.id)).size;
-            const activityScore = messageCount * uniqueSpeakers; // メッセージ数 × 話している人数
+            const activityScore = messageCount + (uniqueSpeakers * 3); // メッセージ数 + (話している人数 × 3)
             
             clubChannels.push({
               channel: channel,
@@ -364,16 +364,33 @@ async function updateGuideBoard() {
     // 部活チャンネル情報（ランキング形式）
     if (clubChannels.length > 0) {
       const rankEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-      const clubList = clubChannels
-        .sort((a, b) => b.activityScore - a.activityScore)
-        .slice(0, 10) // 最大10個
-        .map((data, index) => 
-          `${rankEmojis[index] || `${index + 1}位.`} 💬 ${data.channel} (${data.messageCount}件 × ${data.uniqueSpeakers}人 = ${data.activityScore}点)`
-        ).join('\n');
+      const clubList = await Promise.all(
+        clubChannels
+          .sort((a, b) => b.activityScore - a.activityScore)
+          .slice(0, 10) // 最大10個
+          .map(async (data, index) => {
+            // チャンネルの権限を持つ人（部長）を取得
+            const channel = data.channel;
+            const permissions = channel.permissionsFor(channel.guild.members.cache.get(channel.guild.ownerId));
+            let clubLeader = '';
+            
+            // チャンネルの管理者権限を持つ人を探す
+            const members = await channel.guild.members.fetch();
+            for (const [memberId, member] of members) {
+              const memberPermissions = channel.permissionsFor(member);
+              if (memberPermissions && memberPermissions.has('ManageChannels')) {
+                clubLeader = member.toString();
+                break;
+              }
+            }
+            
+            return `${rankEmojis[index] || `${index + 1}位.`} 💬 ${data.channel} (${data.activityScore}pt) 部員数:${data.uniqueSpeakers}人 ${clubLeader ? `部長:${clubLeader}` : ''}`;
+          })
+      );
       
       embed.addFields({
         name: '🏫 アクティブな部活チャンネルランキング',
-        value: clubList || 'アクティブなチャンネルはありません',
+        value: clubList.join('\n') || 'アクティブなチャンネルはありません',
         inline: false
       });
     }
