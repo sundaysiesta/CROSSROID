@@ -130,14 +130,21 @@ async function getActiveChannels() {
     // 部活カテゴリからアクティブなチャンネルを検出
     const clubChannels = [];
     const allClubChannels = []; // 新着部活検出用
+    console.log(`今日の開始時刻: ${new Date(todayStartTime).toLocaleString('ja-JP')}`);
+    
     for (const categoryId of CLUB_CATEGORY_IDS) {
       const category = guild.channels.cache.get(categoryId);
-      if (!category || category.type !== 4) continue; // カテゴリでない場合はスキップ
+      if (!category || category.type !== 4) {
+        console.log(`カテゴリ ${categoryId} が見つからないか、カテゴリではありません`);
+        continue;
+      }
 
       const channels = category.children.cache.filter(ch => 
         ch.type === 0 && // テキストチャンネル
         ch.permissionsFor(guild.members.me).has('ViewChannel')
       );
+
+      console.log(`カテゴリ ${category.name}: ${channels.size}個のテキストチャンネル`);
 
       for (const channel of channels.values()) {
         allClubChannels.push(channel);
@@ -149,20 +156,28 @@ async function getActiveChannels() {
           );
           
           if (recentMessage) {
+            const messageCount = messages.filter(msg => 
+              !msg.author.bot && 
+              msg.createdTimestamp > todayStartTime
+            ).size;
+            
             clubChannels.push({
               channel: channel,
               lastActivity: recentMessage.createdTimestamp,
-              messageCount: messages.filter(msg => 
-                !msg.author.bot && 
-                msg.createdTimestamp > todayStartTime
-              ).size
+              messageCount: messageCount
             });
+            
+            console.log(`アクティブチャンネル追加: ${channel.name} (${messageCount}件)`);
+          } else {
+            console.log(`非アクティブ: ${channel.name} (今日のメッセージなし)`);
           }
         } catch (error) {
           console.error(`チャンネル ${channel.name} の取得に失敗:`, error);
         }
       }
     }
+    
+    console.log(`アクティブな部活チャンネル数: ${clubChannels.length}`);
 
     // 新着部活を検出（24時間以内に作成されたチャンネル）
     const newClubs = allClubChannels.filter(channel => 
@@ -217,6 +232,8 @@ async function getActiveChannels() {
 
     // 今日一番発言した人を検出（上位3名）
     const userMessageCounts = new Map();
+    console.log(`テキストトップスピーカー集計開始: ${clubChannels.length}個のアクティブチャンネル`);
+    
     for (const channelData of clubChannels) {
       try {
         const messages = await channelData.channel.messages.fetch({ limit: 200 }); // 取得数をさらに増やす
@@ -235,6 +252,8 @@ async function getActiveChannels() {
         console.error(`メッセージ数カウントでエラー:`, error);
       }
     }
+    
+    console.log(`集計されたユーザー数: ${userMessageCounts.size}`);
 
     const topSpeakers = [];
     if (userMessageCounts.size > 0) {
