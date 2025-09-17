@@ -723,6 +723,16 @@ client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   console.log(`CROSSROID, ready for duty.`);
   
+  // ボットの権限とインテントを確認
+  const guild = client.guilds.cache.first();
+  if (guild) {
+    const botMember = guild.members.me;
+    console.log(`ボットの権限:`, botMember.permissions.toArray());
+    console.log(`レベル10ロールID: ${LEVEL_10_ROLE_ID}`);
+    console.log(`現在の世代ロールID: ${CURRENT_GENERATION_ROLE_ID}`);
+    console.log(`メインチャンネルID: ${MAIN_CHANNEL_ID}`);
+  }
+  
   
   // スラッシュコマンドを登録
   const commands = [
@@ -763,6 +773,18 @@ client.once('ready', async () => {
     {
       name: 'bump',
       description: '部活チャンネルを宣伝します（2時間に1回まで）'
+    },
+    {
+      name: 'test_generation',
+      description: '世代獲得通知のテスト（運営専用）',
+      options: [
+        {
+          name: 'ユーザー',
+          description: 'テスト対象のユーザー',
+          type: 6, // USER
+          required: true
+        }
+      ]
     }
   ];
 
@@ -1072,12 +1094,15 @@ client.on('messageCreate', async message => {
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   try {
     console.log(`guildMemberUpdate イベント: ${newMember.user.tag} (${newMember.user.id})`);
+    console.log(`レベル10ロールID: ${LEVEL_10_ROLE_ID}`);
     
     // レベル10ロールが新しく追加されたかチェック
     const hadLevel10Role = oldMember.roles.cache.has(LEVEL_10_ROLE_ID);
     const hasLevel10Role = newMember.roles.cache.has(LEVEL_10_ROLE_ID);
     
     console.log(`レベル10ロール状態: 以前=${hadLevel10Role}, 現在=${hasLevel10Role}`);
+    console.log(`oldMember roles:`, oldMember.roles.cache.map(r => r.id));
+    console.log(`newMember roles:`, newMember.roles.cache.map(r => r.id));
     
     // レベル10ロールが新しく追加された場合
     if (!hadLevel10Role && hasLevel10Role) {
@@ -1393,6 +1418,54 @@ client.on('interactionCreate', async interaction => {
       
     } catch (error) {
       console.error('bumpコマンドでエラー:', error);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+    }
+  }
+  
+  if (interaction.commandName === 'test_generation') {
+    try {
+      // 管理者限定チェック
+      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: 'このコマンドは運営専用です。', ephemeral: true });
+      }
+
+      const targetUser = interaction.options.getUser('ユーザー');
+      const targetMember = await interaction.guild.members.fetch(targetUser.id);
+      
+      await interaction.deferReply({ ephemeral: true });
+      
+      // テスト用の世代獲得通知を送信
+      const mainChannel = client.channels.cache.get(MAIN_CHANNEL_ID);
+      if (mainChannel) {
+        const embed = new EmbedBuilder()
+          .setTitle('🎉 第18世代おめでとうございます！（テスト）')
+          .setDescription(`${targetUser} さんがレベル10に到達し、第18世代ロールを獲得しました！`)
+          .setColor(0xFFD700) // 金色
+          .setThumbnail(targetUser.displayAvatarURL())
+          .addFields(
+            { name: '獲得したロール', value: `<@&${CURRENT_GENERATION_ROLE_ID}>`, inline: true },
+            { name: '世代', value: '第18世代', inline: true },
+            { name: 'レベル', value: '10', inline: true }
+          )
+          .setTimestamp(new Date())
+          .setFooter({ text: 'CROSSROID (テスト)', iconURL: client.user.displayAvatarURL() });
+        
+        await mainChannel.send({ 
+          content: `🎊 ${targetUser} さん、第18世代獲得おめでとうございます！🎊（テスト）`,
+          embeds: [embed]
+        });
+        
+        await interaction.editReply({ content: 'テスト通知を送信しました。' });
+      } else {
+        await interaction.editReply({ content: 'メインチャンネルが見つかりません。' });
+      }
+      
+    } catch (error) {
+      console.error('テストコマンドでエラー:', error);
       if (interaction.deferred || interaction.replied) {
         return interaction.editReply({ content: 'エラーが発生しました。' });
       }
