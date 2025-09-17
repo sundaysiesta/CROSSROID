@@ -97,6 +97,52 @@ const processingMessages = new Set();
 // 処理中のコマンドを追跡（重複処理防止）
 const processingCommands = new Set();
 
+// メモリ最適化のための定期的なクリーンアップ
+function performMemoryCleanup() {
+  // 古いクールダウンデータをクリア（1時間以上前のデータ）
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  
+  // 匿名機能のクールダウンクリア
+  for (const [userId, lastUsed] of cronymousCooldowns.entries()) {
+    if (lastUsed < oneHourAgo) {
+      cronymousCooldowns.delete(userId);
+    }
+  }
+  
+  // 自動代行投稿のクールダウンクリア
+  for (const [userId, lastUsed] of autoProxyCooldowns.entries()) {
+    if (lastUsed < oneHourAgo) {
+      autoProxyCooldowns.delete(userId);
+    }
+  }
+  
+  // bumpコマンドのクールダウンクリア
+  for (const [userId, lastBump] of bumpCooldowns.entries()) {
+    if (lastBump < oneHourAgo) {
+      bumpCooldowns.delete(userId);
+    }
+  }
+  
+  // 処理中のメッセージIDをクリア（古いもの）
+  const oldProcessingMessages = Array.from(processingMessages);
+  for (const messageId of oldProcessingMessages) {
+    // メッセージIDが古い場合は削除（1時間以上前）
+    processingMessages.delete(messageId);
+  }
+  
+  // 処理中のコマンドをクリア（古いもの）
+  const oldProcessingCommands = Array.from(processingCommands);
+  for (const commandKey of oldProcessingCommands) {
+    // コマンドキーが古い場合は削除
+    processingCommands.delete(commandKey);
+  }
+  
+  console.log('メモリクリーンアップを実行しました');
+}
+
+// 30分ごとにメモリクリーンアップを実行
+setInterval(performMemoryCleanup, 30 * 60 * 1000);
+
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
   res.send('CROSSROID is alive!');
@@ -157,36 +203,49 @@ async function getActiveChannels() {
 
       console.log(`カテゴリ ${category.name}: ${channels.size}個のテキストチャンネル`);
 
-      for (const channel of channels.values()) {
-        allClubChannels.push(channel);
-        try {
-          const messages = await channel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
-          const recentMessage = messages.find(msg => 
-            !msg.author.bot && 
-            msg.createdTimestamp > todayStartTime
-          );
-          
-          if (recentMessage) {
-            const todayMessages = messages.filter(msg => 
+      // 並列処理でAPI呼び出しを削減（最大5チャンネルずつ処理）
+      const channelArray = Array.from(channels.values());
+      const batchSize = 5;
+      
+      for (let i = 0; i < channelArray.length; i += batchSize) {
+        const batch = channelArray.slice(i, i + batchSize);
+        
+        await Promise.all(batch.map(async (channel) => {
+          allClubChannels.push(channel);
+          try {
+            const messages = await channel.messages.fetch({ limit: 30 }); // さらにAPI呼び出しを削減
+            const recentMessage = messages.find(msg => 
               !msg.author.bot && 
               msg.createdTimestamp > todayStartTime
             );
             
-            const messageCount = todayMessages.size;
-            const uniqueSpeakers = new Set(todayMessages.map(msg => msg.author.id)).size;
-            const activityScore = messageCount + (uniqueSpeakers * 3); // メッセージ数 + (話している人数 × 3)
-            
-            clubChannels.push({
-              channel: channel,
-              lastActivity: recentMessage.createdTimestamp,
-              messageCount: messageCount,
-              uniqueSpeakers: uniqueSpeakers,
-              activityScore: activityScore
-            });
+            if (recentMessage) {
+              const todayMessages = messages.filter(msg => 
+                !msg.author.bot && 
+                msg.createdTimestamp > todayStartTime
+              );
+              
+              const messageCount = todayMessages.size;
+              const uniqueSpeakers = new Set(todayMessages.map(msg => msg.author.id)).size;
+              const activityScore = messageCount + (uniqueSpeakers * 3); // メッセージ数 + (話している人数 × 3)
+              
+              clubChannels.push({
+                channel: channel,
+                lastActivity: recentMessage.createdTimestamp,
+                messageCount: messageCount,
+                uniqueSpeakers: uniqueSpeakers,
+                activityScore: activityScore
+              });
+            }
+          } catch (error) {
+            console.error(`チャンネル ${channel.name} の取得に失敗:`, error.message);
+            // エラーが発生しても他のチャンネルの処理は続行
           }
-        } catch (error) {
-          console.error(`チャンネル ${channel.name} の取得に失敗:`, error.message);
-          // エラーが発生しても他のチャンネルの処理は続行
+        }));
+        
+        // バッチ間で少し待機してAPIレート制限を回避
+        if (i + batchSize < channelArray.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
     }
@@ -227,11 +286,15 @@ async function getActiveChannels() {
     
     console.log(`最終的なVCチャンネル数: ${vcChannels.length}`);
 
-    // ハイライト投稿を検出（リアクション数が多い投稿）
+    // ハイライト投稿を検出（リアクション数が多い投稿）- 上位5チャンネルのみ
     const highlights = [];
-    for (const channelData of clubChannels) {
+    const topChannels = clubChannels
+      .sort((a, b) => b.activityScore - a.activityScore)
+      .slice(0, 5); // 上位5チャンネルのみ処理
+    
+    for (const channelData of topChannels) {
       try {
-        const messages = await channelData.channel.messages.fetch({ limit: 100 }); // Discord APIの制限に合わせる
+        const messages = await channelData.channel.messages.fetch({ limit: 20 }); // さらにAPI呼び出しを削減
         const highlightMessages = messages.filter(msg => 
           !msg.author.bot && 
           msg.reactions.cache.size > 0 &&
@@ -256,13 +319,13 @@ async function getActiveChannels() {
       }
     }
 
-    // 直近100メッセージから発言者を検出（上位3名）- メインチャンネルのみから集計
+    // 直近50メッセージから発言者を検出（上位3名）- メインチャンネルのみから集計
     const userMessageCounts = new Map();
     
     try {
       const mainChannel = guild.channels.cache.get(MAIN_CHANNEL_ID);
       if (mainChannel) {
-        const messages = await mainChannel.messages.fetch({ limit: 100 });
+        const messages = await mainChannel.messages.fetch({ limit: 50 }); // API呼び出しを削減
         const recentMessages = messages.filter(msg => !msg.author.bot);
 
         for (const msg of recentMessages.values()) {
@@ -467,7 +530,7 @@ async function updateGuideBoard() {
     
     const embed = new EmbedBuilder()
       .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
-      .setDescription('**リアルタイム更新** - 5分ごとに自動更新')
+      .setDescription('**自動更新** - 15分ごと（朝5-12時は30分ごと）')
       .setColor(0x5865F2)
       .setTimestamp(now)
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
@@ -551,7 +614,7 @@ async function updateGuideBoard() {
         ).join('\n');
       
       embed.addFields({
-        name: '💬 直近100メッセージ発言者ランキング',
+        name: '💬 直近50メッセージ発言者ランキング',
         value: topSpeakerList,
         inline: false
       });
@@ -750,14 +813,34 @@ client.once('ready', async () => {
     console.error('再起動通知の送信に失敗しました:', e);
   }
 
-  // 案内板の定期更新（5分間隔）
-  setInterval(async () => {
-    try {
-      await updateGuideBoard();
-    } catch (error) {
-      console.error('定期案内板更新でエラー:', error);
+  // 案内板の定期更新（時間帯に応じて間隔を調整）
+  function getUpdateInterval() {
+    const now = new Date();
+    const hour = now.getHours();
+    
+    // 朝5時から昼12時までは30分間隔、それ以外は15分間隔
+    if (hour >= 5 && hour < 12) {
+      return 30 * 60 * 1000; // 30分
+    } else {
+      return 15 * 60 * 1000; // 15分
     }
-  }, 5 * 60 * 1000); // 5分 = 300,000ms
+  }
+  
+  function scheduleNextUpdate() {
+    const interval = getUpdateInterval();
+    setTimeout(async () => {
+      try {
+        await updateGuideBoard();
+      } catch (error) {
+        console.error('定期案内板更新でエラー:', error);
+      }
+      // 次の更新をスケジュール
+      scheduleNextUpdate();
+    }, interval);
+  }
+  
+  // 初回のスケジュール設定
+  scheduleNextUpdate();
 
 
   // 初回案内板更新（既存メッセージを検出）
