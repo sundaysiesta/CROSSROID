@@ -530,7 +530,7 @@ async function updateGuideBoard() {
     
     const embed = new EmbedBuilder()
       .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
-      .setDescription('**自動更新** - 15分ごと（朝5-12時は30分ごと）')
+      .setDescription('**自動更新** - 15分ごと（朝3-12時は1時間ごと）')
       .setColor(0x5865F2)
       .setTimestamp(now)
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
@@ -818,9 +818,9 @@ client.once('ready', async () => {
     const now = new Date();
     const hour = now.getHours();
     
-    // 朝5時から昼12時までは30分間隔、それ以外は15分間隔
-    if (hour >= 5 && hour < 12) {
-      return 30 * 60 * 1000; // 30分
+    // 朝3時から昼12時までは1時間間隔、それ以外は15分間隔
+    if (hour >= 3 && hour < 12) {
+      return 60 * 60 * 1000; // 1時間
     } else {
       return 15 * 60 * 1000; // 15分
     }
