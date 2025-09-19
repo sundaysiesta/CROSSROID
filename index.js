@@ -518,7 +518,6 @@ async function updateGuideBoard() {
       }
     }
 
-    // 新しい案内板を作成
     const now = new Date();
     const timeString = now.toLocaleString('ja-JP', { 
       timeZone: 'Asia/Tokyo',
@@ -527,11 +526,15 @@ async function updateGuideBoard() {
       hour: '2-digit', 
       minute: '2-digit' 
     });
-    
-    const embed = new EmbedBuilder()
+
+    // 複数の埋め込みを作成
+    const embeds = [];
+
+    // 1. メイン案内板（ヘッダー）
+    const mainEmbed = new EmbedBuilder()
       .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
       .setDescription('**自動更新** - 15分ごと（朝3-12時は1時間ごと）')
-      .setColor(0x5865F2)
+      .setColor(0x5865F2) // 青色
       .setTimestamp(now)
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
 
@@ -541,16 +544,22 @@ async function updateGuideBoard() {
         .map(user => `🎉 ${user}`)
         .join(' ');
       
-      embed.addFields({
+      mainEmbed.addFields({
         name: '🎉 今日の世代獲得者',
         value: generationList,
         inline: false
       });
     }
 
+    embeds.push(mainEmbed);
 
-    // 部活チャンネル情報（上位5位まで）
+    // 2. 部活ランキング埋め込み
     if (clubChannels.length > 0) {
+      const clubEmbed = new EmbedBuilder()
+        .setTitle('🏫 アクティブ部活ランキング')
+        .setColor(0xFF6B6B) // 赤色
+        .setTimestamp(now);
+
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const clubList = await Promise.all(
         clubChannels
@@ -581,15 +590,17 @@ async function updateGuideBoard() {
           })
       );
       
-      embed.addFields({
-        name: '🏫 アクティブ部活ランキング',
-        value: clubList.join('\n') || 'アクティブなチャンネルはありません',
-        inline: false
-      });
+      clubEmbed.setDescription(clubList.join('\n') || 'アクティブなチャンネルはありません');
+      embeds.push(clubEmbed);
     }
 
-    // VC情報（上位5位まで）
+    // 3. VCランキング埋め込み
     if (vcChannels.length > 0) {
+      const vcEmbed = new EmbedBuilder()
+        .setTitle('🎤 アクティブVCランキング')
+        .setColor(0x4ECDC4) // ティール色
+        .setTimestamp(now);
+
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const vcList = vcChannels
         .sort((a, b) => b.memberCount - a.memberCount)
@@ -598,75 +609,83 @@ async function updateGuideBoard() {
           `${rankEmojis[index]} 🔊 ${data.channel} — ${data.memberCount}人`
         ).join('\n');
       
-      embed.addFields({
-        name: '🎤 アクティブVCランキング',
-        value: vcList,
-        inline: false
-      });
+      vcEmbed.setDescription(vcList);
+      embeds.push(vcEmbed);
     }
 
-    // テキストトップスピーカー（直近100メッセージ）
+    // 4. テキストスピーカー埋め込み
     if (topSpeakers.length > 0) {
+      const speakerEmbed = new EmbedBuilder()
+        .setTitle('💬 直近50メッセージ発言者ランキング')
+        .setColor(0xFFE66D) // 黄色
+        .setTimestamp(now);
+
       const rankEmojis = ['🥇', '🥈', '🥉'];
       const topSpeakerList = topSpeakers
         .map((speaker, index) => 
           `${rankEmojis[index]} ${speaker.user} — ${speaker.count}件`
         ).join('\n');
       
-      embed.addFields({
-        name: '💬 直近50メッセージ発言者ランキング',
-        value: topSpeakerList,
-        inline: false
-      });
+      speakerEmbed.setDescription(topSpeakerList);
+      embeds.push(speakerEmbed);
     }
 
-    // 急上昇ランキング（上位3位まで）
-    if (trendingClubs.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉'];
-      const trendingList = trendingClubs
-        .slice(0, 3) // 上位3位まで
-        .map((data, index) => 
-          `${rankEmojis[index]} ${data.channel} — +${data.scoreIncrease}pt`
-        ).join('\n');
-      
-      embed.addFields({
-        name: '📈 急上昇部活',
-        value: trendingList,
-        inline: false
-      });
-    }
+    // 5. 急上昇・休止部活埋め込み
+    if (trendingClubs.length > 0 || dormantClubs.length > 0) {
+      const trendEmbed = new EmbedBuilder()
+        .setTitle('📈 部活トレンド情報')
+        .setColor(0xA8E6CF) // 緑色
+        .setTimestamp(now);
 
-    // 休止中の部活（ランダムに1つ、最終活動日時を表示）
-    if (dormantClubs.length > 0) {
-      const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
-      
-      // 最終活動日時を計算
-      const now = new Date();
-      const lastActivity = new Date(randomDormant.lastMessageAt || randomDormant.createdTimestamp);
-      const daysDiff = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
-      
-      let activityText;
-      if (daysDiff === 0) {
-        activityText = '今日';
-      } else if (daysDiff === 1) {
-        activityText = '昨日';
-      } else if (daysDiff < 7) {
-        activityText = `${daysDiff}日前`;
-      } else if (daysDiff < 30) {
-        activityText = `${Math.floor(daysDiff / 7)}週間前`;
-      } else {
-        activityText = `${Math.floor(daysDiff / 30)}ヶ月前`;
+      let trendDescription = '';
+
+      // 急上昇ランキング（上位3位まで）
+      if (trendingClubs.length > 0) {
+        const rankEmojis = ['🥇', '🥈', '🥉'];
+        const trendingList = trendingClubs
+          .slice(0, 3) // 上位3位まで
+          .map((data, index) => 
+            `${rankEmojis[index]} ${data.channel} — +${data.scoreIncrease}pt`
+          ).join('\n');
+        
+        trendDescription += `**急上昇部活**\n${trendingList}\n\n`;
       }
-      
-      embed.addFields({
-        name: '🛌 休止中の部活',
-        value: `${randomDormant} — 最終活動: ${activityText}`,
-        inline: false
-      });
+
+      // 休止中の部活（ランダムに1つ、最終活動日時を表示）
+      if (dormantClubs.length > 0) {
+        const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
+        
+        // 最終活動日時を計算
+        const lastActivity = new Date(randomDormant.lastMessageAt || randomDormant.createdTimestamp);
+        const daysDiff = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
+        
+        let activityText;
+        if (daysDiff === 0) {
+          activityText = '今日';
+        } else if (daysDiff === 1) {
+          activityText = '昨日';
+        } else if (daysDiff < 7) {
+          activityText = `${daysDiff}日前`;
+        } else if (daysDiff < 30) {
+          activityText = `${Math.floor(daysDiff / 7)}週間前`;
+        } else {
+          activityText = `${Math.floor(daysDiff / 30)}ヶ月前`;
+        }
+        
+        trendDescription += `**休止中の部活**\n🛌 ${randomDormant} — 最終活動: ${activityText}`;
+      }
+
+      trendEmbed.setDescription(trendDescription);
+      embeds.push(trendEmbed);
     }
 
-    // ハイライト投稿（引用風、上位3件まで）
+    // 6. ハイライト・コメント埋め込み
     if (highlights.length > 0) {
+      const highlightEmbed = new EmbedBuilder()
+        .setTitle('✨ ハイライト')
+        .setColor(0xFFB6C1) // ピンク色
+        .setTimestamp(now);
+
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
         .slice(0, 3) // 上位3件まで
@@ -674,21 +693,20 @@ async function updateGuideBoard() {
           `${data.channel} — 「${data.message.content.slice(0, 40)}${data.message.content.length > 40 ? '...' : ''}」 - ${data.message.author} ${data.reactionCount}👍`
         ).join('\n');
       
-      embed.addFields({
-        name: '✨ ハイライト',
-        value: highlightList,
-        inline: false
-      });
+      highlightEmbed.setDescription(highlightList);
+      embeds.push(highlightEmbed);
     }
 
-    // Botコメント風のエモいまとめ
+    // 7. Botコメント埋め込み
     const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs);
     if (botComments) {
-      embed.addFields({
-        name: '📝 本日の一言',
-        value: botComments,
-        inline: false
-      });
+      const commentEmbed = new EmbedBuilder()
+        .setTitle('📝 本日の一言')
+        .setDescription(botComments)
+        .setColor(0xDDA0DD) // プラム色
+        .setTimestamp(now);
+      
+      embeds.push(commentEmbed);
     }
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
@@ -699,7 +717,7 @@ async function updateGuideBoard() {
         console.log('既存の案内板メッセージを取得中...');
         const message = await guideChannel.messages.fetch(guideBoardMessageId);
         console.log(`メッセージ取得成功: ${message.id}`);
-        await message.edit({ embeds: [embed] });
+        await message.edit({ embeds: embeds });
         console.log('案内板を編集しました');
       } catch (error) {
         console.error('案内板の編集に失敗、新規作成します:', error);
@@ -709,7 +727,7 @@ async function updateGuideBoard() {
     
     if (!guideBoardMessageId) {
       console.log('新規案内板メッセージを作成中...');
-      const message = await guideChannel.send({ embeds: [embed] });
+      const message = await guideChannel.send({ embeds: embeds });
       guideBoardMessageId = message.id;
       console.log(`案内板を新規作成しました: ${guideBoardMessageId}`);
     }
