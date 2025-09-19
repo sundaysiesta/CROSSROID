@@ -534,9 +534,7 @@ async function updateGuideBoard() {
     const mainEmbed = new EmbedBuilder()
       .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
       .setDescription('**自動更新** - 15分ごと（朝3-12時は1時間ごと）')
-      .setColor(0x5865F2) // 青色
-      .setTimestamp(now)
-      .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+      .setColor(0x5865F2); // 青色
 
     // 世代獲得者セクション（重要情報として上部に配置）
     if (generationWinnersList.length > 0) {
@@ -557,8 +555,7 @@ async function updateGuideBoard() {
     if (clubChannels.length > 0) {
       const clubEmbed = new EmbedBuilder()
         .setTitle('🏫 アクティブ部活ランキング')
-        .setColor(0xFF6B6B) // 赤色
-        .setTimestamp(now);
+        .setColor(0xFF6B6B); // 赤色
 
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const clubList = await Promise.all(
@@ -598,8 +595,7 @@ async function updateGuideBoard() {
     if (vcChannels.length > 0) {
       const vcEmbed = new EmbedBuilder()
         .setTitle('🎤 アクティブVCランキング')
-        .setColor(0x4ECDC4) // ティール色
-        .setTimestamp(now);
+        .setColor(0x4ECDC4); // ティール色
 
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const vcList = vcChannels
@@ -617,8 +613,7 @@ async function updateGuideBoard() {
     if (topSpeakers.length > 0) {
       const speakerEmbed = new EmbedBuilder()
         .setTitle('💬 直近50メッセージ発言者ランキング')
-        .setColor(0xFFE66D) // 黄色
-        .setTimestamp(now);
+        .setColor(0xFFE66D); // 黄色
 
       const rankEmojis = ['🥇', '🥈', '🥉'];
       const topSpeakerList = topSpeakers
@@ -634,8 +629,7 @@ async function updateGuideBoard() {
     if (trendingClubs.length > 0 || dormantClubs.length > 0) {
       const trendEmbed = new EmbedBuilder()
         .setTitle('📈 部活トレンド情報')
-        .setColor(0xA8E6CF) // 緑色
-        .setTimestamp(now);
+        .setColor(0xA8E6CF); // 緑色
 
       let trendDescription = '';
 
@@ -683,8 +677,7 @@ async function updateGuideBoard() {
     if (highlights.length > 0) {
       const highlightEmbed = new EmbedBuilder()
         .setTitle('✨ ハイライト')
-        .setColor(0xFFB6C1) // ピンク色
-        .setTimestamp(now);
+        .setColor(0xFFB6C1); // ピンク色
 
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
@@ -697,16 +690,24 @@ async function updateGuideBoard() {
       embeds.push(highlightEmbed);
     }
 
-    // 7. Botコメント埋め込み
+    // 7. Botコメント埋め込み（最後の埋め込みにフッターを追加）
     const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs);
     if (botComments) {
       const commentEmbed = new EmbedBuilder()
         .setTitle('📝 本日の一言')
         .setDescription(botComments)
         .setColor(0xDDA0DD) // プラム色
-        .setTimestamp(now);
+        .setTimestamp(now)
+        .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
       
       embeds.push(commentEmbed);
+    } else {
+      // Botコメントがない場合は、最後の埋め込みにフッターを追加
+      if (embeds.length > 0) {
+        const lastEmbed = embeds[embeds.length - 1];
+        lastEmbed.setTimestamp(now);
+        lastEmbed.setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+      }
     }
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
