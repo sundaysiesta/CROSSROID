@@ -1396,18 +1396,9 @@ client.on('interactionCreate', async interaction => {
       // 日替わりユーザー固有ID（英小文字+数字）
       const dailyId = generateDailyUserId(interaction.user.id);
       
-      // 常に1%の確率で匿名剥がれ
-      let isRevealed = false;
-      let displayName, avatarURL;
-      
-      if (Math.random() < 0.01) { // 100回に1回の確率
-        isRevealed = true;
-        displayName = `🔓 ${interaction.user.username} (正体判明!)`;
-        avatarURL = interaction.user.displayAvatarURL();
-      } else {
-        displayName = `名無しの障害者 ID: ${dailyId}`;
-        avatarURL = client.user.displayAvatarURL();
-      }
+      // 匿名表示名とアバターを設定
+      const displayName = `名無しの障害者 ID: ${dailyId}`;
+      const avatarURL = client.user.displayAvatarURL();
       
       // チャンネルのwebhookを取得または作成
       const webhooks = await interaction.channel.fetchWebhooks();
