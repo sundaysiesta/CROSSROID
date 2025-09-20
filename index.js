@@ -1009,12 +1009,46 @@ client.on('messageDelete', async message => {
       Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
     
     if (hasMedia) {
-      // 画像削除ログチャンネルに投稿
+      // 削除されたメッセージの情報を取得
+      const guild = message.guild;
+      if (!guild) return;
+      
+      // 削除されたメッセージの詳細を取得（キャッシュから）
+      const deletedMessage = message;
+      
+      // 管理者による削除かチェック（メッセージの作者以外が削除した場合）
+      // 実際の削除者を特定するのは困難なため、メッセージの作成時刻と現在時刻の差で判断
+      const messageAge = Date.now() - deletedMessage.createdTimestamp;
+      const isRecentMessage = messageAge < 60000; // 1分以内のメッセージ
+      
+      // 最近のメッセージの場合は管理者による削除の可能性が高いためスキップ
+      if (isRecentMessage) {
+        console.log(`最近のメッセージのため管理者削除と判断し、ログをスキップ: ${message.id}`);
+        return;
+      }
+      
+      // 画像削除ログチャンネルにwebhookで投稿
       const logChannel = client.channels.cache.get(IMAGE_DELETE_LOG_CHANNEL_ID);
       if (logChannel) {
+        // webhookを取得または作成
+        let webhook;
+        try {
+          const webhooks = await logChannel.fetchWebhooks();
+          webhook = webhooks.find(wh => wh.name === 'CROSSROID Image Log');
+          
+          if (!webhook) {
+            webhook = await logChannel.createWebhook({
+              name: 'CROSSROID Image Log',
+              avatar: client.user.displayAvatarURL()
+            });
+          }
+        } catch (webhookError) {
+          console.error('webhookの取得/作成に失敗:', webhookError);
+          return;
+        }
+        
         const embed = new EmbedBuilder()
           .setTitle('🗑️ 画像削除ログ')
-          .setDescription(`[削除されたメッセージ](${message.url})`)
           .addFields(
             { name: 'チャンネル', value: message.channel.toString(), inline: true },
             { name: '投稿者', value: message.author.toString(), inline: true },
@@ -1044,11 +1078,13 @@ client.on('messageDelete', async message => {
           }
         }
         
-        await logChannel.send({ 
+        await webhook.send({ 
           embeds: [embed],
-          files: files
+          files: files,
+          username: 'CROSSROID Image Log',
+          avatarURL: client.user.displayAvatarURL()
         });
-        console.log(`画像削除ログを投稿しました: ${message.id}`);
+        console.log(`画像削除ログをwebhookで投稿しました: ${message.id}`);
       }
     }
   } catch (error) {
