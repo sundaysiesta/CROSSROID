@@ -76,6 +76,12 @@ const VC_CATEGORY_ID = '1369659877735137342';
 // 案内板チャンネルID
 const GUIDE_BOARD_CHANNEL_ID = '1417353618910216192';
 
+// ハイライトチャンネルID
+const HIGHLIGHT_CHANNEL_ID = '1406942589738815633';
+
+// 画像削除ログチャンネルID
+const IMAGE_DELETE_LOG_CHANNEL_ID = '1381140728528375869';
+
 // 案内板メッセージIDを保存
 let guideBoardMessageId = null;
 
@@ -527,14 +533,13 @@ async function updateGuideBoard() {
       minute: '2-digit' 
     });
 
-    // 複数の埋め込みを作成
-    const embeds = [];
-
-    // 1. メイン案内板（ヘッダー）
+    // 一つの埋め込みに統合
     const mainEmbed = new EmbedBuilder()
       .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
       .setDescription('**自動更新** - 15分ごと（朝3-12時は1時間ごと）')
-      .setColor(0x5865F2); // 青色
+      .setColor(0x5865F2) // 青色
+      .setTimestamp(now)
+      .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
 
     // 世代獲得者セクション（重要情報として上部に配置）
     if (generationWinnersList.length > 0) {
@@ -549,14 +554,8 @@ async function updateGuideBoard() {
       });
     }
 
-    embeds.push(mainEmbed);
-
-    // 2. 部活ランキング埋め込み
+    // 部活ランキングセクション
     if (clubChannels.length > 0) {
-      const clubEmbed = new EmbedBuilder()
-        .setTitle('🏫 アクティブ部活ランキング')
-        .setColor(0xFF6B6B); // 赤色
-
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const clubList = await Promise.all(
         clubChannels
@@ -587,16 +586,15 @@ async function updateGuideBoard() {
           })
       );
       
-      clubEmbed.setDescription(clubList.join('\n') || 'アクティブなチャンネルはありません');
-      embeds.push(clubEmbed);
+      mainEmbed.addFields({
+        name: '🏫 アクティブ部活ランキング',
+        value: clubList.join('\n') || 'アクティブなチャンネルはありません',
+        inline: false
+      });
     }
 
-    // 3. VCランキング埋め込み
+    // VCランキングセクション
     if (vcChannels.length > 0) {
-      const vcEmbed = new EmbedBuilder()
-        .setTitle('🎤 アクティブVCランキング')
-        .setColor(0x4ECDC4); // ティール色
-
       const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
       const vcList = vcChannels
         .sort((a, b) => b.memberCount - a.memberCount)
@@ -605,32 +603,30 @@ async function updateGuideBoard() {
           `${rankEmojis[index]} 🔊 ${data.channel} — ${data.memberCount}人`
         ).join('\n');
       
-      vcEmbed.setDescription(vcList);
-      embeds.push(vcEmbed);
+      mainEmbed.addFields({
+        name: '🎤 アクティブVCランキング',
+        value: vcList,
+        inline: false
+      });
     }
 
-    // 4. テキストスピーカー埋め込み
+    // テキストスピーカーセクション
     if (topSpeakers.length > 0) {
-      const speakerEmbed = new EmbedBuilder()
-        .setTitle('💬 直近50メッセージ発言者ランキング')
-        .setColor(0xFFE66D); // 黄色
-
       const rankEmojis = ['🥇', '🥈', '🥉'];
       const topSpeakerList = topSpeakers
         .map((speaker, index) => 
           `${rankEmojis[index]} ${speaker.user} — ${speaker.count}件`
         ).join('\n');
       
-      speakerEmbed.setDescription(topSpeakerList);
-      embeds.push(speakerEmbed);
+      mainEmbed.addFields({
+        name: '💬 直近50メッセージ発言者ランキング',
+        value: topSpeakerList,
+        inline: false
+      });
     }
 
-    // 5. 急上昇・休止部活埋め込み
+    // 急上昇・休止部活セクション
     if (trendingClubs.length > 0 || dormantClubs.length > 0) {
-      const trendEmbed = new EmbedBuilder()
-        .setTitle('📈 部活トレンド情報')
-        .setColor(0xA8E6CF); // 緑色
-
       let trendDescription = '';
 
       // 急上昇ランキング（上位3位まで）
@@ -669,16 +665,15 @@ async function updateGuideBoard() {
         trendDescription += `**休止中の部活**\n🛌 ${randomDormant} — 最終活動: ${activityText}`;
       }
 
-      trendEmbed.setDescription(trendDescription);
-      embeds.push(trendEmbed);
+      mainEmbed.addFields({
+        name: '📈 部活トレンド情報',
+        value: trendDescription,
+        inline: false
+      });
     }
 
-    // 6. ハイライト・コメント埋め込み
+    // ハイライトセクション
     if (highlights.length > 0) {
-      const highlightEmbed = new EmbedBuilder()
-        .setTitle('✨ ハイライト')
-        .setColor(0xFFB6C1); // ピンク色
-
       const highlightList = highlights
         .sort((a, b) => b.reactionCount - a.reactionCount)
         .slice(0, 3) // 上位3件まで
@@ -686,29 +681,24 @@ async function updateGuideBoard() {
           `${data.channel} — 「${data.message.content.slice(0, 40)}${data.message.content.length > 40 ? '...' : ''}」 - ${data.message.author} ${data.reactionCount}👍`
         ).join('\n');
       
-      highlightEmbed.setDescription(highlightList);
-      embeds.push(highlightEmbed);
+      mainEmbed.addFields({
+        name: '✨ ハイライト',
+        value: highlightList,
+        inline: false
+      });
     }
 
-    // 7. Botコメント埋め込み（最後の埋め込みにフッターを追加）
+    // Botコメントセクション
     const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs);
     if (botComments) {
-      const commentEmbed = new EmbedBuilder()
-        .setTitle('📝 本日の一言')
-        .setDescription(botComments)
-        .setColor(0xDDA0DD) // プラム色
-        .setTimestamp(now)
-        .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-      
-      embeds.push(commentEmbed);
-    } else {
-      // Botコメントがない場合は、最後の埋め込みにフッターを追加
-      if (embeds.length > 0) {
-        const lastEmbed = embeds[embeds.length - 1];
-        lastEmbed.setTimestamp(now);
-        lastEmbed.setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-      }
+      mainEmbed.addFields({
+        name: '📝 本日の一言',
+        value: botComments,
+        inline: false
+      });
     }
+
+    const embeds = [mainEmbed];
 
     // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
     console.log(`案内板更新: guideBoardMessageId = ${guideBoardMessageId}`);
@@ -948,6 +938,123 @@ function isImageOrVideo(attachment) {
   const extension = attachment.name.toLowerCase().substring(attachment.name.lastIndexOf('.'));
   return imageExtensions.includes(extension) || videoExtensions.includes(extension);
 }
+
+// ハイライト機能：リアクションが5つ以上ついたメッセージをハイライトチャンネルに投稿
+client.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    // ボットのリアクションは無視
+    if (user.bot) return;
+    
+    // メッセージを取得
+    const message = reaction.message;
+    
+    // ボットのメッセージは無視
+    if (message.author.bot) return;
+    
+    // リアクションの総数を計算
+    const totalReactions = Array.from(message.reactions.cache.values())
+      .reduce((sum, reaction) => sum + reaction.count, 0);
+    
+    // 5つ以上のリアクションがついた場合
+    if (totalReactions >= 5) {
+      // ハイライトチャンネルに投稿
+      const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
+      if (highlightChannel) {
+        const embed = new EmbedBuilder()
+          .setTitle('✨ ハイライト')
+          .setDescription(`[メッセージにジャンプ](${message.url})`)
+          .addFields(
+            { name: 'チャンネル', value: message.channel.toString(), inline: true },
+            { name: '投稿者', value: message.author.toString(), inline: true },
+            { name: 'リアクション数', value: totalReactions.toString(), inline: true }
+          )
+          .setColor(0xFFB6C1) // ピンク色
+          .setTimestamp(new Date())
+          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+        
+        // メッセージの内容を追加（長すぎる場合は省略）
+        let content = message.content || '';
+        if (content.length > 200) {
+          content = content.slice(0, 197) + '...';
+        }
+        if (content) {
+          embed.addFields({ name: '内容', value: content, inline: false });
+        }
+        
+        // 添付ファイルがある場合は追加
+        if (message.attachments.size > 0) {
+          const attachment = message.attachments.first();
+          if (attachment) {
+            embed.setImage(attachment.url);
+          }
+        }
+        
+        await highlightChannel.send({ embeds: [embed] });
+        console.log(`ハイライトを投稿しました: ${message.id} (${totalReactions}リアクション)`);
+      }
+    }
+  } catch (error) {
+    console.error('ハイライト機能でエラー:', error);
+  }
+});
+
+// 画像削除ログ機能：画像メッセージが削除された際にログチャンネルに投稿
+client.on('messageDelete', async message => {
+  try {
+    // ボットのメッセージは無視
+    if (message.author.bot) return;
+    
+    // 画像・動画ファイルがあるかチェック
+    const hasMedia = message.attachments && message.attachments.size > 0 && 
+      Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
+    
+    if (hasMedia) {
+      // 画像削除ログチャンネルに投稿
+      const logChannel = client.channels.cache.get(IMAGE_DELETE_LOG_CHANNEL_ID);
+      if (logChannel) {
+        const embed = new EmbedBuilder()
+          .setTitle('🗑️ 画像削除ログ')
+          .setDescription(`[削除されたメッセージ](${message.url})`)
+          .addFields(
+            { name: 'チャンネル', value: message.channel.toString(), inline: true },
+            { name: '投稿者', value: message.author.toString(), inline: true },
+            { name: '削除時刻', value: new Date().toLocaleString('ja-JP'), inline: true }
+          )
+          .setColor(0xFF6B6B) // 赤色
+          .setTimestamp(new Date())
+          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+        
+        // メッセージの内容を追加（長すぎる場合は省略）
+        let content = message.content || '';
+        if (content.length > 200) {
+          content = content.slice(0, 197) + '...';
+        }
+        if (content) {
+          embed.addFields({ name: '内容', value: content, inline: false });
+        }
+        
+        // 削除された画像を添付
+        const files = [];
+        for (const attachment of message.attachments.values()) {
+          if (isImageOrVideo(attachment)) {
+            files.push({
+              attachment: attachment.url,
+              name: attachment.name
+            });
+          }
+        }
+        
+        await logChannel.send({ 
+          embeds: [embed],
+          files: files
+        });
+        console.log(`画像削除ログを投稿しました: ${message.id}`);
+      }
+    }
+  } catch (error) {
+    console.error('画像削除ログ機能でエラー:', error);
+  }
+});
 
 // メッセージイベントリスナー
 client.on('messageCreate', async message => {
