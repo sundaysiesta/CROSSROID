@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const Groq = require('groq-sdk');
 require('dotenv').config(); // .env ファイルから環境変数を読み込む
 
 // Discordクライアントのインスタンスを作成
@@ -63,6 +64,16 @@ const CURRENT_GENERATION_ROLE_ID = '1401922708442320916';
 // メインチャンネルID
 const MAIN_CHANNEL_ID = '1415336647284883528';
 
+// Groq API設定
+// 注意: APIキーは環境変数から取得します。ハードコーディングは絶対に避けてください。
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
+});
+
+// 時報機能の設定
+const TIME_REPORT_HOURS = [6, 9, 12, 15, 18, 21, 24, 3]; // 24時は0時として扱う
+const TIME_REPORT_CHANNEL_ID = '1415336647284883528';
+
 // 部活カテゴリID
 const CLUB_CATEGORY_IDS = [
   '1417350444619010110',
@@ -90,6 +101,60 @@ const todayGenerationWinners = new Set();
 
 // 前回の部活データを保存（急上昇ランキング用）
 let previousClubData = new Map();
+
+// 日本の祝日データ（2024年）
+const JAPANESE_HOLIDAYS_2024 = [
+  '2024-01-01', // 元日
+  '2024-01-08', // 成人の日
+  '2024-02-11', // 建国記念の日
+  '2024-02-12', // 建国記念の日 振替休日
+  '2024-02-23', // 天皇誕生日
+  '2024-03-20', // 春分の日
+  '2024-04-29', // 昭和の日
+  '2024-05-03', // 憲法記念日
+  '2024-05-04', // みどりの日
+  '2024-05-05', // こどもの日
+  '2024-05-06', // こどもの日 振替休日
+  '2024-07-15', // 海の日
+  '2024-08-11', // 山の日
+  '2024-08-12', // 山の日 振替休日
+  '2024-09-16', // 敬老の日
+  '2024-09-22', // 秋分の日
+  '2024-09-23', // 秋分の日 振替休日
+  '2024-10-14', // スポーツの日
+  '2024-11-03', // 文化の日
+  '2024-11-04', // 文化の日 振替休日
+  '2024-11-23', // 勤労感謝の日
+];
+
+// 日本の祝日データ（2025年）
+const JAPANESE_HOLIDAYS_2025 = [
+  '2025-01-01', // 元日
+  '2025-01-13', // 成人の日
+  '2025-02-11', // 建国記念の日
+  '2025-02-23', // 天皇誕生日
+  '2025-03-20', // 春分の日
+  '2025-04-29', // 昭和の日
+  '2025-05-03', // 憲法記念日
+  '2025-05-04', // みどりの日
+  '2025-05-05', // こどもの日
+  '2025-05-06', // こどもの日 振替休日
+  '2025-07-21', // 海の日
+  '2025-08-11', // 山の日
+  '2025-09-15', // 敬老の日
+  '2025-09-23', // 秋分の日
+  '2025-10-13', // スポーツの日
+  '2025-11-03', // 文化の日
+  '2025-11-23', // 勤労感謝の日
+  '2025-11-24', // 勤労感謝の日 振替休日
+];
+
+// 学校の長期休暇期間（日本の平均的な期間）
+const SCHOOL_VACATIONS = {
+  spring: { start: '2025-03-20', end: '2025-04-07' }, // 春休み
+  summer: { start: '2025-07-20', end: '2025-08-31' }, // 夏休み
+  winter: { start: '2024-12-23', end: '2025-01-07' }, // 冬休み
+};
 
 
 // bumpコマンドのクールダウン管理
@@ -148,6 +213,213 @@ function performMemoryCleanup() {
 
 // 30分ごとにメモリクリーンアップを実行
 setInterval(performMemoryCleanup, 30 * 60 * 1000);
+
+// 祝日判定関数
+function isJapaneseHoliday(date) {
+  const year = date.getFullYear();
+  const dateString = date.toISOString().split('T')[0];
+  
+  if (year === 2024) {
+    return JAPANESE_HOLIDAYS_2024.includes(dateString);
+  } else if (year === 2025) {
+    return JAPANESE_HOLIDAYS_2025.includes(dateString);
+  }
+  
+  return false;
+}
+
+// 長期休暇判定関数
+function getSchoolVacationType(date) {
+  const dateString = date.toISOString().split('T')[0];
+  
+  // 春休み
+  if (dateString >= SCHOOL_VACATIONS.spring.start && dateString <= SCHOOL_VACATIONS.spring.end) {
+    return 'spring';
+  }
+  
+  // 夏休み
+  if (dateString >= SCHOOL_VACATIONS.summer.start && dateString <= SCHOOL_VACATIONS.summer.end) {
+    return 'summer';
+  }
+  
+  // 冬休み
+  if (dateString >= SCHOOL_VACATIONS.winter.start && dateString <= SCHOOL_VACATIONS.winter.end) {
+    return 'winter';
+  }
+  
+  return null;
+}
+
+// 曜日判定関数
+function getDayType(date) {
+  const dayOfWeek = date.getDay(); // 0=日曜日, 1=月曜日, ..., 6=土曜日
+  
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return 'weekend';
+  } else {
+    return 'weekday';
+  }
+}
+
+// 祝日名取得関数
+function getHolidayName(date) {
+  const year = date.getFullYear();
+  const dateString = date.toISOString().split('T')[0];
+  
+  const holidays = year === 2024 ? JAPANESE_HOLIDAYS_2024 : JAPANESE_HOLIDAYS_2025;
+  const holidayNames = {
+    '2024-01-01': '元日',
+    '2024-01-08': '成人の日',
+    '2024-02-11': '建国記念の日',
+    '2024-02-12': '建国記念の日 振替休日',
+    '2024-02-23': '天皇誕生日',
+    '2024-03-20': '春分の日',
+    '2024-04-29': '昭和の日',
+    '2024-05-03': '憲法記念日',
+    '2024-05-04': 'みどりの日',
+    '2024-05-05': 'こどもの日',
+    '2024-05-06': 'こどもの日 振替休日',
+    '2024-07-15': '海の日',
+    '2024-08-11': '山の日',
+    '2024-08-12': '山の日 振替休日',
+    '2024-09-16': '敬老の日',
+    '2024-09-22': '秋分の日',
+    '2024-09-23': '秋分の日 振替休日',
+    '2024-10-14': 'スポーツの日',
+    '2024-11-03': '文化の日',
+    '2024-11-04': '文化の日 振替休日',
+    '2024-11-23': '勤労感謝の日',
+    '2025-01-01': '元日',
+    '2025-01-13': '成人の日',
+    '2025-02-11': '建国記念の日',
+    '2025-02-23': '天皇誕生日',
+    '2025-03-20': '春分の日',
+    '2025-04-29': '昭和の日',
+    '2025-05-03': '憲法記念日',
+    '2025-05-04': 'みどりの日',
+    '2025-05-05': 'こどもの日',
+    '2025-05-06': 'こどもの日 振替休日',
+    '2025-07-21': '海の日',
+    '2025-08-11': '山の日',
+    '2025-09-15': '敬老の日',
+    '2025-09-23': '秋分の日',
+    '2025-10-13': 'スポーツの日',
+    '2025-11-03': '文化の日',
+    '2025-11-23': '勤労感謝の日',
+    '2025-11-24': '勤労感謝の日 振替休日'
+  };
+  
+  return holidayNames[dateString] || null;
+}
+
+// Groq APIを使用した時報文章生成関数
+async function generateTimeReportMessage(hour, date) {
+  try {
+    const dayType = getDayType(date);
+    const isHoliday = isJapaneseHoliday(date);
+    const holidayName = isHoliday ? getHolidayName(date) : null;
+    const vacationType = getSchoolVacationType(date);
+    
+    // 日付情報を構築
+    let dateInfo = '';
+    if (vacationType) {
+      const vacationNames = {
+        spring: '春休み',
+        summer: '夏休み',
+        winter: '冬休み'
+      };
+      dateInfo = `${vacationNames[vacationType]}期間中`;
+    } else if (isHoliday) {
+      dateInfo = `${holidayName}`;
+    } else if (dayType === 'weekend') {
+      dateInfo = '休日';
+    } else {
+      dateInfo = '平日';
+    }
+    
+    // 時間帯に応じた挨拶
+    let timeGreeting = '';
+    if (hour === 3) {
+      timeGreeting = '深夜3時';
+    } else if (hour === 6) {
+      timeGreeting = '朝6時';
+    } else if (hour === 9) {
+      timeGreeting = '朝9時';
+    } else if (hour === 12) {
+      timeGreeting = '昼12時';
+    } else if (hour === 15) {
+      timeGreeting = '午後3時';
+    } else if (hour === 18) {
+      timeGreeting = '夕方6時';
+    } else if (hour === 21) {
+      timeGreeting = '夜9時';
+    } else if (hour === 0) {
+      timeGreeting = '深夜0時';
+    }
+    
+    const prompt = `あなたは障害者で作業所で働いているヤンキー口調のキャラクターです。語尾に「ダラァ」をつけて話します。ミリタリーオタクで虚言癖があり、彼女がいると嘘をついたり、パソコンの部品についても詳しいです。
+
+現在は${timeGreeting}で、${dateInfo}です。この時間と状況に合わせた一行程度の時報メッセージを作成してください。
+
+キャラクター設定：
+- 障害者で作業所勤務
+- ヤンキー口調（語尾に「ダラァ」）
+- ミリタリーオタク
+- 虚言癖
+- 彼女がいると嘘をつく
+- パソコン部品に詳しい
+
+時間と状況に応じて、適切な内容で一行程度のメッセージを作成してください。`;
+
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      model: "llama-3.1-70b-versatile",
+      temperature: 0.8,
+      max_tokens: 100
+    });
+
+    return completion.choices[0]?.message?.content || `${timeGreeting}だダラァ！${dateInfo}だけど今日も頑張るダラァ！`;
+  } catch (error) {
+    console.error('Groq API エラー:', error);
+    // フォールバックメッセージ
+    const timeGreeting = hour === 0 ? '深夜0時' : hour === 3 ? '深夜3時' : hour === 6 ? '朝6時' : 
+                        hour === 9 ? '朝9時' : hour === 12 ? '昼12時' : hour === 15 ? '午後3時' : 
+                        hour === 18 ? '夕方6時' : hour === 21 ? '夜9時' : `${hour}時`;
+    return `${timeGreeting}だダラァ！今日も作業所で頑張るダラァ！`;
+  }
+}
+
+// 時報送信機能
+async function sendTimeReport(hour, date) {
+  try {
+    const channel = client.channels.cache.get(TIME_REPORT_CHANNEL_ID);
+    if (!channel) {
+      console.error('時報チャンネルが見つかりません');
+      return;
+    }
+
+    // Groq APIで時報メッセージを生成
+    const message = await generateTimeReportMessage(hour, date);
+    
+    // 埋め込みメッセージを作成
+    const embed = new EmbedBuilder()
+      .setTitle('🕐 時報')
+      .setDescription(message)
+      .setColor(0x5865F2) // 青色
+      .setTimestamp(date)
+      .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+
+    await channel.send({ embeds: [embed] });
+    console.log(`時報を送信しました: ${hour}時 - ${message}`);
+  } catch (error) {
+    console.error('時報送信でエラー:', error);
+  }
+}
 
 // Uptime Robotがアクセスするためのルートパス
 app.get('/', (req, res) => {
@@ -794,6 +1066,18 @@ client.once('ready', async () => {
           required: true
         }
       ]
+    },
+    {
+      name: 'test_timereport',
+      description: '時報機能のテスト（運営専用）',
+      options: [
+        {
+          name: '時間',
+          description: 'テストする時間（0-23）',
+          type: 4, // INTEGER
+          required: true
+        }
+      ]
     }
   ];
 
@@ -872,6 +1156,51 @@ client.once('ready', async () => {
   
   // 初回のスケジュール設定
   scheduleNextUpdate();
+
+  // 時報スケジューラーの設定
+  function scheduleTimeReports() {
+    const now = new Date();
+    const japanTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+    
+    // 次の時報時間を計算
+    function getNextTimeReport() {
+      const currentHour = japanTime.getHours();
+      
+      // 現在の時間が時報対象時間の場合は、次の時間を探す
+      for (let i = 0; i < TIME_REPORT_HOURS.length; i++) {
+        const targetHour = TIME_REPORT_HOURS[i] === 24 ? 0 : TIME_REPORT_HOURS[i];
+        if (targetHour > currentHour) {
+          const nextTime = new Date(japanTime);
+          nextTime.setHours(targetHour, 0, 0, 0);
+          return nextTime;
+        }
+      }
+      
+      // 今日の時報が終わった場合は、明日の最初の時報を設定
+      const tomorrow = new Date(japanTime);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(TIME_REPORT_HOURS[0] === 24 ? 0 : TIME_REPORT_HOURS[0], 0, 0, 0);
+      return tomorrow;
+    }
+    
+    const nextTimeReport = getNextTimeReport();
+    const timeUntilNext = nextTimeReport.getTime() - japanTime.getTime();
+    
+    console.log(`次の時報予定: ${nextTimeReport.toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}`);
+    
+    setTimeout(async () => {
+      const reportHour = nextTimeReport.getHours();
+      const reportDate = new Date(nextTimeReport.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+      
+      await sendTimeReport(reportHour, reportDate);
+      
+      // 次の時報をスケジュール
+      scheduleTimeReports();
+    }, timeUntilNext);
+  }
+  
+  // 時報スケジューラーを開始
+  scheduleTimeReports();
 
 
   // 初回案内板更新（既存メッセージを検出）
@@ -1625,11 +1954,55 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
     }
   }
+  
+  if (interaction.commandName === 'test_timereport') {
+    try {
+      // 管理者限定チェック
+      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: 'このコマンドは運営専用です。', ephemeral: true });
+      }
+
+      const testHour = interaction.options.getInteger('時間');
+      
+      if (testHour < 0 || testHour > 23) {
+        return interaction.reply({ content: '時間は0-23の範囲で指定してください。', ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      
+      // テスト用の時報を送信
+      const testDate = new Date();
+      await sendTimeReport(testHour, testDate);
+      
+      await interaction.editReply({ content: `時報テストを送信しました（${testHour}時）。` });
+      
+    } catch (error) {
+      console.error('時報テストコマンドでエラー:', error);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+    }
+  }
 });
 
 
 
 // Discordボットとしてログイン
+// セキュリティ: 環境変数の存在確認
+if (!process.env.DISCORD_TOKEN) {
+  console.error('DISCORD_TOKEN環境変数が設定されていません');
+  console.error('セキュリティのため、.envファイルにDISCORD_TOKENを設定してください');
+  process.exit(1);
+}
+
+if (!process.env.GROQ_API_KEY) {
+  console.error('GROQ_API_KEY環境変数が設定されていません');
+  console.error('セキュリティのため、.envファイルにGROQ_API_KEYを設定してください');
+  process.exit(1);
+}
+
 client.login(process.env.DISCORD_TOKEN);
 
 // Webサーバーを起動
