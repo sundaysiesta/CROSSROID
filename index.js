@@ -6,7 +6,44 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const Groq = require('groq-sdk');
-require('dotenv').config(); // .env ファイルから環境変数を読み込む
+// 環境変数の読み込み（ローカル開発時のみ）
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    require('dotenv').config(); // .env ファイルから環境変数を読み込む
+    console.log('✅ .envファイルから環境変数を読み込みました');
+  } catch (error) {
+    console.log('⚠️ .envファイルの読み込みに失敗しました:', error.message);
+  }
+} else {
+  console.log('🚀 本番環境で実行中（.envファイルは読み込みません）');
+}
+
+// デバッグ用: 環境変数の確認
+console.log('=== 環境変数の確認 ===');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? `設定済み (長さ: ${process.env.DISCORD_TOKEN.length})` : '未設定');
+console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? `設定済み (長さ: ${process.env.GROQ_API_KEY.length})` : '未設定');
+console.log('PORT:', process.env.PORT || '3000');
+
+// Discordトークンの形式チェック
+if (process.env.DISCORD_TOKEN) {
+  const token = process.env.DISCORD_TOKEN;
+  console.log('Discordトークンの形式チェック:');
+  console.log('- 長さ:', token.length);
+  console.log('- 先頭:', token.substring(0, 10) + '...');
+  console.log('- 末尾:', '...' + token.substring(token.length - 10));
+  
+  // Botトークンの形式チェック
+  if (token.length < 50) {
+    console.error('❌ Discordトークンが短すぎます。正しいBotトークンを設定してください。');
+  } else if (!token.includes('.')) {
+    console.error('❌ Discordトークンの形式が正しくありません。Botトークンには"."が含まれている必要があります。');
+  } else {
+    console.log('✅ Discordトークンの形式は正しく見えます');
+  }
+} else {
+  console.error('❌ DISCORD_TOKENが設定されていません');
+}
 
 // Discordクライアントのインスタンスを作成
 const client = new Client({
@@ -2015,8 +2052,12 @@ client.on('interactionCreate', async interaction => {
 // Discordボットとしてログイン
 // セキュリティ: 環境変数の存在確認
 if (!process.env.DISCORD_TOKEN) {
-  console.error('DISCORD_TOKEN環境変数が設定されていません');
-  console.error('デプロイ環境では環境変数を設定してください');
+  console.error('❌ DISCORD_TOKEN環境変数が設定されていません');
+  console.error('Koyebでの設定方法:');
+  console.error('1. Koyebダッシュボードでアプリを選択');
+  console.error('2. Settings > Environment Variables に移動');
+  console.error('3. DISCORD_TOKEN = your_discord_bot_token を追加');
+  console.error('4. アプリを再デプロイ');
   process.exit(1);
 }
 
@@ -2026,7 +2067,29 @@ if (!process.env.GROQ_API_KEY) {
   console.warn('時報機能は無効になりますが、ボットは起動します');
 }
 
-client.login(process.env.DISCORD_TOKEN);
+// Discordボットのログイン（エラーハンドリング付き）
+client.login(process.env.DISCORD_TOKEN).catch(error => {
+  console.error('❌ Discordボットのログインに失敗しました:');
+  console.error('エラー:', error.message);
+  console.error('コード:', error.code);
+  
+  if (error.code === 'TokenInvalid') {
+    console.error('');
+    console.error('🔧 解決方法:');
+    console.error('1. Discord Developer Portal (https://discord.com/developers/applications) にアクセス');
+    console.error('2. アプリケーションを選択');
+    console.error('3. Bot セクションでトークンを確認/再生成');
+    console.error('4. Koyebで環境変数 DISCORD_TOKEN を更新');
+    console.error('5. アプリを再デプロイ');
+    console.error('');
+    console.error('⚠️ 注意: トークンは以下の形式である必要があります:');
+    console.error('   - 長さ: 約70文字');
+    console.error('   - 形式: [数字].[文字列].[文字列]');
+    console.error('   - 例: 123456789012345678.abcdefghijklmnop.ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+  }
+  
+  process.exit(1);
+});
 
 // Webサーバーを起動
 app.listen(PORT, '0.0.0.0', () => {
