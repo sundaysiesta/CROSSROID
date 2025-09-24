@@ -2085,9 +2085,25 @@ client.on('interactionCreate', async interaction => {
       
       // AI文章生成でテスト用の時報を送信
       const testDate = new Date();
-      await sendTimeReport(testHour, testDate);
       
-      await interaction.editReply({ content: `時報テストを送信しました（${testHour}時、AI文章生成）。` });
+      // 直接AI文章生成を実行
+      const aiMessage = await generateTimeReportMessage(testHour, testDate);
+      
+      // 埋め込みメッセージを作成
+      const channel = client.channels.cache.get(TIME_REPORT_CHANNEL_ID);
+      if (channel) {
+        const embed = new EmbedBuilder()
+          .setTitle('🕐 時報テスト（AI文章生成）')
+          .setDescription(aiMessage)
+          .setColor(0x5865F2)
+          .setTimestamp(testDate)
+          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+
+        await channel.send({ embeds: [embed] });
+        await interaction.editReply({ content: `時報テストを送信しました（${testHour}時、AI文章生成）。\n生成されたメッセージ: ${aiMessage}` });
+      } else {
+        await interaction.editReply({ content: '時報チャンネルが見つかりません。' });
+      }
       
     } catch (error) {
       console.error('時報テストコマンドでエラー:', error);
