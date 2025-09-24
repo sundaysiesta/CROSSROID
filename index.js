@@ -66,9 +66,14 @@ const MAIN_CHANNEL_ID = '1415336647284883528';
 
 // Groq API設定
 // 注意: APIキーは環境変数から取得します。ハードコーディングは絶対に避けてください。
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
+let groq = null;
+if (process.env.GROQ_API_KEY) {
+  groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY
+  });
+} else {
+  console.warn('GROQ_API_KEYが設定されていません。時報機能は無効になります。');
+}
 
 // 時報機能の設定
 const TIME_REPORT_HOURS = [6, 9, 12, 15, 18, 21, 24, 3]; // 24時は0時として扱う
@@ -314,6 +319,14 @@ function getHolidayName(date) {
 
 // Groq APIを使用した時報文章生成関数
 async function generateTimeReportMessage(hour, date) {
+  // Groq APIが利用できない場合はフォールバックメッセージを返す
+  if (!groq) {
+    const timeGreeting = hour === 0 ? '深夜0時' : hour === 3 ? '深夜3時' : hour === 6 ? '朝6時' : 
+                        hour === 9 ? '朝9時' : hour === 12 ? '昼12時' : hour === 15 ? '午後3時' : 
+                        hour === 18 ? '夕方6時' : hour === 21 ? '夜9時' : `${hour}時`;
+    return `${timeGreeting}だダラァ！今日も作業所で頑張るダラァ！`;
+  }
+
   try {
     const dayType = getDayType(date);
     const isHoliday = isJapaneseHoliday(date);
@@ -1199,8 +1212,13 @@ client.once('ready', async () => {
     }, timeUntilNext);
   }
   
-  // 時報スケジューラーを開始
-  scheduleTimeReports();
+  // 時報スケジューラーを開始（GROQ_API_KEYが設定されている場合のみ）
+  if (process.env.GROQ_API_KEY) {
+    scheduleTimeReports();
+    console.log('時報スケジューラーを開始しました');
+  } else {
+    console.log('GROQ_API_KEYが設定されていないため、時報スケジューラーをスキップしました');
+  }
 
 
   // 初回案内板更新（既存メッセージを検出）
@@ -1971,6 +1989,11 @@ client.on('interactionCreate', async interaction => {
 
       await interaction.deferReply({ ephemeral: true });
       
+      if (!process.env.GROQ_API_KEY) {
+        await interaction.editReply({ content: 'GROQ_API_KEYが設定されていないため、時報テストを実行できません。' });
+        return;
+      }
+      
       // テスト用の時報を送信
       const testDate = new Date();
       await sendTimeReport(testHour, testDate);
@@ -1993,14 +2016,14 @@ client.on('interactionCreate', async interaction => {
 // セキュリティ: 環境変数の存在確認
 if (!process.env.DISCORD_TOKEN) {
   console.error('DISCORD_TOKEN環境変数が設定されていません');
-  console.error('セキュリティのため、.envファイルにDISCORD_TOKENを設定してください');
+  console.error('デプロイ環境では環境変数を設定してください');
   process.exit(1);
 }
 
+// GROQ_API_KEYは時報機能にのみ必要なので、設定されていなくてもボットは起動する
 if (!process.env.GROQ_API_KEY) {
-  console.error('GROQ_API_KEY環境変数が設定されていません');
-  console.error('セキュリティのため、.envファイルにGROQ_API_KEYを設定してください');
-  process.exit(1);
+  console.warn('GROQ_API_KEY環境変数が設定されていません');
+  console.warn('時報機能は無効になりますが、ボットは起動します');
 }
 
 client.login(process.env.DISCORD_TOKEN);

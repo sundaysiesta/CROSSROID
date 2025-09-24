@@ -81,6 +81,31 @@ PORT=3000
 npm start
 ```
 
+## 🚀 デプロイ
+
+### 環境変数の設定
+
+デプロイ時は以下の環境変数を設定してください：
+
+- `DISCORD_TOKEN`: Discord Bot Token（必須）
+- `GROQ_API_KEY`: Groq API Key（時報機能用、オプション）
+- `PORT`: サーバーポート（デフォルト: 3000）
+
+### Docker デプロイ
+
+```bash
+# イメージをビルド
+docker build -t crossroid .
+
+# 環境変数を設定して実行
+docker run -e DISCORD_TOKEN=your_token -e GROQ_API_KEY=your_key -p 3000:3000 crossroid
+```
+
+### 注意事項
+
+- `GROQ_API_KEY`が設定されていない場合、時報機能は無効になりますが、ボットは正常に動作します
+- デプロイ環境では`.env`ファイルは使用されません。環境変数を直接設定してください
+
 ## 🔧 設定
 
 ### チャンネルIDの設定
