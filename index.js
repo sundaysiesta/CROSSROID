@@ -356,8 +356,15 @@ function getHolidayName(date) {
 
 // Groq APIを使用した時報文章生成関数
 async function generateTimeReportMessage(hour, date) {
+  // デバッグ情報を追加
+  console.log('generateTimeReportMessage 呼び出し:');
+  console.log('- hour:', hour);
+  console.log('- groq:', groq ? '初期化済み' : '未初期化');
+  console.log('- GROQ_API_KEY:', process.env.GROQ_API_KEY ? '設定済み' : '未設定');
+  
   // Groq APIが利用できない場合はフォールバックメッセージを返す
   if (!groq) {
+    console.log('⚠️ Groq APIが利用できないため、フォールバックメッセージを返します');
     const timeGreeting = hour === 0 ? '深夜0時' : hour === 3 ? '深夜3時' : hour === 6 ? '朝6時' : 
                         hour === 9 ? '朝9時' : hour === 12 ? '昼12時' : hour === 15 ? '午後3時' : 
                         hour === 18 ? '夕方6時' : hour === 21 ? '夜9時' : `${hour}時`;
@@ -365,10 +372,13 @@ async function generateTimeReportMessage(hour, date) {
   }
 
   try {
+    console.log('🤖 AI文章生成を開始します');
     const dayType = getDayType(date);
     const isHoliday = isJapaneseHoliday(date);
     const holidayName = isHoliday ? getHolidayName(date) : null;
     const vacationType = getSchoolVacationType(date);
+    
+    console.log('日付情報:', { dayType, isHoliday, holidayName, vacationType });
     
     // 日付情報を構築
     let dateInfo = '';
@@ -451,6 +461,7 @@ async function generateTimeReportMessage(hour, date) {
 
 時間と状況に応じて、適切な内容で一行程度のメッセージを作成してください。`;
 
+    console.log('📝 Groq APIにリクエストを送信中...');
     const completion = await groq.chat.completions.create({
       messages: [
         {
@@ -458,12 +469,14 @@ async function generateTimeReportMessage(hour, date) {
           content: prompt
         }
       ],
-      model: "llama-3.1-70b-versatile",
+      model: "llama-3.1-8b-instant",
       temperature: 0.8,
       max_tokens: 100
     });
 
-    return completion.choices[0]?.message?.content || `${timeGreeting}だダラァ！${dateInfo}だけど今日も頑張るダラァ！`;
+    const aiMessage = completion.choices[0]?.message?.content || `${timeGreeting}だダラァ！${dateInfo}だけど今日も頑張るダラァ！`;
+    console.log('✅ AI文章生成完了:', aiMessage);
+    return aiMessage;
   } catch (error) {
     console.error('Groq API エラー:', error);
     // フォールバックメッセージ
