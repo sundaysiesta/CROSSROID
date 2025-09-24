@@ -407,9 +407,39 @@ async function generateTimeReportMessage(hour, date) {
       timeGreeting = '深夜0時';
     }
     
+    // より詳細な状況情報を追加
+    const dayOfWeek = date.getDay();
+    const dayNames = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'];
+    const currentDay = dayNames[dayOfWeek];
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    
+    // 季節の判定
+    let season = '';
+    if (month >= 3 && month <= 5) season = '春';
+    else if (month >= 6 && month <= 8) season = '夏';
+    else if (month >= 9 && month <= 11) season = '秋';
+    else season = '冬';
+    
+    // 時間帯に応じた活動内容
+    let activity = '';
+    if (hour >= 6 && hour < 9) activity = '朝の準備や通勤';
+    else if (hour >= 9 && hour < 12) activity = '作業所での午前の作業';
+    else if (hour >= 12 && hour < 15) activity = '昼休みや午後の作業';
+    else if (hour >= 15 && hour < 18) activity = '午後の作業';
+    else if (hour >= 18 && hour < 21) activity = '夕方の作業や帰宅準備';
+    else if (hour >= 21 || hour < 3) activity = '夜の時間や休憩';
+
     const prompt = `あなたは障害者で作業所で働いているヤンキー口調のキャラクターです。語尾に「ダラァ」をつけて話します。ミリタリーオタクで虚言癖があり、彼女がいると嘘をついたり、パソコンの部品についても詳しいです。
 
-現在は${timeGreeting}で、${dateInfo}です。この時間と状況に合わせた一行程度の時報メッセージを作成してください。
+現在の状況：
+- 時間: ${timeGreeting} (${hour}時)
+- 日付: ${month}月${day}日 (${currentDay})
+- 季節: ${season}
+- 状況: ${dateInfo}
+- 活動: ${activity}
+
+この時間と状況に合わせた一行程度の時報メッセージを作成してください。キャラクターの特徴を活かして、その日の状況や時間帯に応じた内容にしてください。
 
 キャラクター設定：
 - 障害者で作業所勤務
@@ -2027,15 +2057,37 @@ client.on('interactionCreate', async interaction => {
       await interaction.deferReply({ ephemeral: true });
       
       if (!process.env.GROQ_API_KEY) {
-        await interaction.editReply({ content: 'GROQ_API_KEYが設定されていないため、時報テストを実行できません。' });
+        await interaction.editReply({ content: 'GROQ_API_KEYが設定されていないため、AI文章生成はできません。フォールバックメッセージでテストします。' });
+        
+        // フォールバックメッセージでテスト
+        const testDate = new Date();
+        const channel = client.channels.cache.get(TIME_REPORT_CHANNEL_ID);
+        if (channel) {
+          const timeGreeting = testHour === 0 ? '深夜0時' : testHour === 3 ? '深夜3時' : testHour === 6 ? '朝6時' : 
+                              testHour === 9 ? '朝9時' : testHour === 12 ? '昼12時' : testHour === 15 ? '午後3時' : 
+                              testHour === 18 ? '夕方6時' : testHour === 21 ? '夜9時' : `${testHour}時`;
+          const fallbackMessage = `${timeGreeting}だダラァ！今日も作業所で頑張るダラァ！`;
+          
+          const embed = new EmbedBuilder()
+            .setTitle('🕐 時報テスト（フォールバック）')
+            .setDescription(fallbackMessage)
+            .setColor(0x5865F2)
+            .setTimestamp(testDate)
+            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+
+          await channel.send({ embeds: [embed] });
+          await interaction.editReply({ content: `時報テストを送信しました（${testHour}時、フォールバックメッセージ）。` });
+        } else {
+          await interaction.editReply({ content: '時報チャンネルが見つかりません。' });
+        }
         return;
       }
       
-      // テスト用の時報を送信
+      // AI文章生成でテスト用の時報を送信
       const testDate = new Date();
       await sendTimeReport(testHour, testDate);
       
-      await interaction.editReply({ content: `時報テストを送信しました（${testHour}時）。` });
+      await interaction.editReply({ content: `時報テストを送信しました（${testHour}時、AI文章生成）。` });
       
     } catch (error) {
       console.error('時報テストコマンドでエラー:', error);
