@@ -1665,47 +1665,54 @@ client.on('messageDelete', async message => {
           }
         } catch (webhookError) {
           console.error('webhookの取得/作成に失敗:', webhookError);
-          return;
+          // webhookエラーでも処理は続行
         }
         
-        const embed = new EmbedBuilder()
-          .setTitle('🗑️ 画像削除ログ')
-          .addFields(
-            { name: 'チャンネル', value: message.channel.toString(), inline: true },
-            { name: '投稿者', value: message.author.toString(), inline: true },
-            { name: '削除時刻', value: new Date().toLocaleString('ja-JP'), inline: true }
-          )
-          .setColor(0xFF6B6B) // 赤色
-          .setTimestamp(new Date())
-          .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-        
-        // メッセージの内容を追加（長すぎる場合は省略）
-        let content = message.content || '';
-        if (content.length > 200) {
-          content = content.slice(0, 197) + '...';
-        }
-        if (content) {
-          embed.addFields({ name: '内容', value: content, inline: false });
-        }
-        
-        // 削除された画像を添付
-        const files = [];
-        for (const attachment of message.attachments.values()) {
-          if (isImageOrVideo(attachment)) {
-            files.push({
-              attachment: attachment.url,
-              name: attachment.name
+        // webhookが取得できた場合のみログを送信
+        if (webhook) {
+          const embed = new EmbedBuilder()
+            .setTitle('🗑️ 画像削除ログ')
+            .addFields(
+              { name: 'チャンネル', value: message.channel.toString(), inline: true },
+              { name: '投稿者', value: message.author.toString(), inline: true },
+              { name: '削除時刻', value: new Date().toLocaleString('ja-JP'), inline: true }
+            )
+            .setColor(0xFF6B6B) // 赤色
+            .setTimestamp(new Date())
+            .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+          
+          // メッセージの内容を追加（長すぎる場合は省略）
+          let content = message.content || '';
+          if (content.length > 200) {
+            content = content.slice(0, 197) + '...';
+          }
+          if (content) {
+            embed.addFields({ name: '内容', value: content, inline: false });
+          }
+          
+          // 削除された画像を添付
+          const files = [];
+          for (const attachment of message.attachments.values()) {
+            if (isImageOrVideo(attachment)) {
+              files.push({
+                attachment: attachment.url,
+                name: attachment.name
+              });
+            }
+          }
+          
+          try {
+            await webhook.send({ 
+              embeds: [embed],
+              files: files,
+              username: 'CROSSROID Image Log',
+              avatarURL: client.user.displayAvatarURL()
             });
+            console.log(`画像削除ログをwebhookで投稿しました: ${message.id}`);
+          } catch (sendError) {
+            console.error('webhook送信でエラー:', sendError);
           }
         }
-        
-        await webhook.send({ 
-          embeds: [embed],
-          files: files,
-          username: 'CROSSROID Image Log',
-          avatarURL: client.user.displayAvatarURL()
-        });
-        console.log(`画像削除ログをwebhookで投稿しました: ${message.id}`);
       }
     }
   } catch (error) {
@@ -2126,58 +2133,73 @@ client.on('interactionCreate', async interaction => {
                 }
               } catch (webhookError) {
                 console.error('webhookの取得/作成に失敗:', webhookError);
-                return;
+                // webhookエラーでも処理は続行
               }
               
-              const embed = new EmbedBuilder()
-                .setTitle('🗑️ 画像削除ログ（ユーザー削除）')
-                .addFields(
-                  { name: 'チャンネル', value: messageInfo.channel.toString(), inline: true },
-                  { name: '投稿者', value: messageInfo.author.toString(), inline: true },
-                  { name: '削除者', value: interaction.user.toString(), inline: true },
-                  { name: '削除時刻', value: new Date().toLocaleString('ja-JP'), inline: true }
-                )
-                .setColor(0xFF6B6B) // 赤色
-                .setTimestamp(new Date())
-                .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-              
-              // メッセージの内容を追加（長すぎる場合は省略）
-              let content = messageInfo.content || '';
-              if (content.length > 200) {
-                content = content.slice(0, 197) + '...';
-              }
-              if (content) {
-                embed.addFields({ name: '内容', value: content, inline: false });
-              }
-              
-              // 削除された画像を添付
-              const files = [];
-              for (const attachment of messageInfo.attachments) {
-                if (isImageOrVideo(attachment)) {
-                  files.push({
-                    attachment: attachment.url,
-                    name: attachment.name
+              // webhookが取得できた場合のみログを送信
+              if (webhook) {
+                const embed = new EmbedBuilder()
+                  .setTitle('🗑️ 画像削除ログ（ユーザー削除）')
+                  .addFields(
+                    { name: 'チャンネル', value: messageInfo.channel.toString(), inline: true },
+                    { name: '投稿者', value: messageInfo.author.toString(), inline: true },
+                    { name: '削除者', value: interaction.user.toString(), inline: true },
+                    { name: '削除時刻', value: new Date().toLocaleString('ja-JP'), inline: true }
+                  )
+                  .setColor(0xFF6B6B) // 赤色
+                  .setTimestamp(new Date())
+                  .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+                
+                // メッセージの内容を追加（長すぎる場合は省略）
+                let content = messageInfo.content || '';
+                if (content.length > 200) {
+                  content = content.slice(0, 197) + '...';
+                }
+                if (content) {
+                  embed.addFields({ name: '内容', value: content, inline: false });
+                }
+                
+                // 削除された画像を添付
+                const files = [];
+                for (const attachment of messageInfo.attachments) {
+                  if (isImageOrVideo(attachment)) {
+                    files.push({
+                      attachment: attachment.url,
+                      name: attachment.name
+                    });
+                  }
+                }
+                
+                try {
+                  await webhook.send({ 
+                    embeds: [embed],
+                    files: files,
+                    username: 'CROSSROID Image Log',
+                    avatarURL: client.user.displayAvatarURL()
                   });
+                  console.log(`ユーザー削除による画像削除ログをwebhookで投稿しました: ${interaction.message.id}`);
+                } catch (sendError) {
+                  console.error('webhook送信でエラー:', sendError);
                 }
               }
-              
-              await webhook.send({ 
-                embeds: [embed],
-                files: files,
-                username: 'CROSSROID Image Log',
-                avatarURL: client.user.displayAvatarURL()
-              });
-              console.log(`ユーザー削除による画像削除ログをwebhookで投稿しました: ${interaction.message.id}`);
             }
           }
         }
         
         // 削除完了の応答
-        await interaction.reply({ content: 'メッセージを削除しました。', ephemeral: true });
+        try {
+          await interaction.reply({ content: 'メッセージを削除しました。', ephemeral: true });
+        } catch (replyError) {
+          console.error('削除完了の応答でエラー:', replyError);
+        }
         
       } catch (error) {
         console.error('メッセージ削除でエラーが発生しました:', error);
-        await interaction.reply({ content: 'メッセージの削除に失敗しました。', ephemeral: true });
+        try {
+          await interaction.reply({ content: 'メッセージの削除に失敗しました。', ephemeral: true });
+        } catch (replyError) {
+          console.error('エラー応答でエラー:', replyError);
+        }
       }
       return;
     }
