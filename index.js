@@ -233,6 +233,10 @@ const vcMemberCounts = new Map(); // key: channelId, value: { current: number, p
 // VC通知対象人数
 const VC_NOTIFY_THRESHOLDS = [10, 15, 20, 25];
 
+// ランダムメンションコマンドのクールダウン管理（30秒）
+const RANDOM_MENTION_COOLDOWN_MS = 30 * 1000; // 30秒
+const randomMentionCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
+
 // メモリ最適化のための定期的なクリーンアップ
 function performMemoryCleanup() {
   // 古いクールダウンデータをクリア（1時間以上前のデータ）
@@ -300,6 +304,13 @@ function performMemoryCleanup() {
     // 1時間以上前のデータは削除
     if (Date.now() - (data.timestamp || 0) > oneHourAgo) {
       vcMemberCounts.delete(channelId);
+    }
+  }
+  
+  // ランダムメンションのクールダウンクリア
+  for (const [userId, lastUsed] of randomMentionCooldowns.entries()) {
+    if (lastUsed < oneHourAgo) {
+      randomMentionCooldowns.delete(userId);
     }
   }
   
@@ -1245,6 +1256,10 @@ client.once('ready', async () => {
           required: true
         }
       ]
+    },
+    {
+      name: 'random_mention',
+      description: 'サーバーメンバーをランダムでメンションします'
     }
   ];
 
@@ -2513,6 +2528,59 @@ client.on('interactionCreate', async interaction => {
       
     } catch (error) {
       console.error('時報テストコマンドでエラー:', error);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+    }
+  }
+  
+  if (interaction.commandName === 'random_mention') {
+    try {
+      // ユーザー別クールダウンチェック
+      const userId = interaction.user.id;
+      const lastUsed = randomMentionCooldowns.get(userId) || 0;
+      const now = Date.now();
+      
+      if (now - lastUsed < RANDOM_MENTION_COOLDOWN_MS) {
+        const remainingSeconds = Math.ceil((RANDOM_MENTION_COOLDOWN_MS - (now - lastUsed)) / 1000);
+        return interaction.reply({ 
+          content: `⏰ クールダウン中です。あと${remainingSeconds}秒後に使用できます。`, 
+          ephemeral: true 
+        });
+      }
+
+      // サーバーのメンバーを取得
+      const guild = interaction.guild;
+      if (!guild) {
+        return interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+      }
+
+      // ボット以外のメンバーを取得
+      const members = await guild.members.fetch();
+      const humanMembers = members.filter(member => !member.user.bot);
+      
+      if (humanMembers.size === 0) {
+        return interaction.reply({ content: 'メンバーが見つかりません。', ephemeral: true });
+      }
+
+      // ランダムでメンバーを選択
+      const memberArray = Array.from(humanMembers.values());
+      const randomMember = memberArray[Math.floor(Math.random() * memberArray.length)];
+
+      // メンション+さんおはようございます！のメッセージを送信
+      await interaction.reply({ 
+        content: `${randomMember}さんおはようございます！`,
+        allowedMentions: { users: [randomMember.id] }
+      });
+
+      // クールダウンを設定
+      randomMentionCooldowns.set(userId, now);
+
+      console.log(`ランダムメンションを送信しました: ${randomMember.user.tag} (${randomMember.id})`);
+      
+    } catch (error) {
+      console.error('ランダムメンションコマンドでエラー:', error);
       if (interaction.deferred || interaction.replied) {
         return interaction.editReply({ content: 'エラーが発生しました。' });
       }
