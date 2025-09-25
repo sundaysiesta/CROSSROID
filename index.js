@@ -222,6 +222,9 @@ const processingMessages = new Set();
 // 処理中のコマンドを追跡（重複処理防止）
 const processingCommands = new Set();
 
+// 削除されたメッセージの情報を保存（削除ボタン用）
+const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
+
 // メモリ最適化のための定期的なクリーンアップ
 function performMemoryCleanup() {
   // 古いクールダウンデータをクリア（1時間以上前のデータ）
@@ -267,6 +270,14 @@ function performMemoryCleanup() {
   for (const commandKey of oldProcessingCommands) {
     // コマンドキーが古い場合は削除
     processingCommands.delete(commandKey);
+  }
+  
+  // 削除されたメッセージ情報をクリア（古いもの）
+  for (const [messageId, info] of deletedMessageInfo.entries()) {
+    // 1時間以上前の情報は削除
+    if (Date.now() - (info.timestamp || 0) > oneHourAgo) {
+      deletedMessageInfo.delete(messageId);
+    }
   }
   
   console.log('メモリクリーンアップを実行しました');
@@ -459,26 +470,21 @@ async function generateTimeReportMessage(hour, date) {
     else if (hour >= 18 && hour < 21) activity = '夕方の作業や帰宅準備';
     else if (hour >= 21 || hour < 3) activity = '夜の時間や休憩';
 
-    const prompt = `あなたは障害者で作業所で働いているヤンキー口調のキャラクターです。語尾に「ダラァ」をつけて話します。ミリタリーオタクで虚言癖があり、彼女がいると嘘をついたり、パソコンの部品についても詳しいです。
+    const prompt = `あなたは障害者で作業所で働いているヤンキー口調のキャラクターです。語尾に「ダラァ」をつけて話します。
 
 現在の状況：
 - 時間: ${timeGreeting} (${hour}時)
 - 日付: ${month}月${day}日 (${currentDay})
 - 季節: ${season}
 - 状況: ${dateInfo}
-- 活動: ${activity}
 
-この時間と状況に合わせた一行程度の時報メッセージを作成してください。キャラクターの特徴を活かして、その日の状況や時間帯に応じた内容にしてください。
+この時間と状況に合わせた短い時報メッセージを作成してください。30文字以内で、キャラクターの特徴を活かして簡潔に表現してください。
 
 キャラクター設定：
 - 障害者で作業所勤務
 - ヤンキー口調（語尾に「ダラァ」）
-- ミリタリーオタク
-- 虚言癖
-- 彼女がいると嘘をつく
-- パソコン部品に詳しい
 
-時間と状況に応じて、適切な内容で一行程度のメッセージを作成してください。`;
+時間と状況に応じて、30文字以内の短いメッセージを作成してください。`;
 
     console.log('📝 Groq APIにリクエストを送信中...');
     const completion = await groq.chat.completions.create({
@@ -518,9 +524,31 @@ async function sendTimeReport(hour, date) {
     // Groq APIで時報メッセージを生成
     const message = await generateTimeReportMessage(hour, date);
     
+    // 時間に応じたタイトルを生成
+    let timeTitle = '';
+    if (hour === 0) {
+      timeTitle = '黒須直輝が午前0時ぐらいをおしらせします';
+    } else if (hour === 3) {
+      timeTitle = '黒須直輝が午前3時ぐらいをおしらせします';
+    } else if (hour === 6) {
+      timeTitle = '黒須直輝が午前6時ぐらいをおしらせします';
+    } else if (hour === 9) {
+      timeTitle = '黒須直輝が午前9時ぐらいをおしらせします';
+    } else if (hour === 12) {
+      timeTitle = '黒須直輝が午後0時ぐらいをおしらせします';
+    } else if (hour === 15) {
+      timeTitle = '黒須直輝が午後3時ぐらいをおしらせします';
+    } else if (hour === 18) {
+      timeTitle = '黒須直輝が午後6時ぐらいをおしらせします';
+    } else if (hour === 21) {
+      timeTitle = '黒須直輝が午後9時ぐらいをおしらせします';
+    } else {
+      timeTitle = `黒須直輝が${hour}時ぐらいをおしらせします`;
+    }
+
     // 埋め込みメッセージを作成
     const embed = new EmbedBuilder()
-      .setTitle('🕐 時報')
+      .setTitle(timeTitle)
       .setDescription(message)
       .setColor(0x5865F2) // 青色
       .setTimestamp(date)
@@ -1686,6 +1714,16 @@ client.on('messageCreate', async message => {
         allowedMentions: { parse: [] } // すべてのメンションを無効化
       });
       
+      // 削除されたメッセージの情報を保存（削除ボタン用）
+      deletedMessageInfo.set(webhookMessage.id, {
+        content: originalContent,
+        author: originalAuthor,
+        attachments: originalAttachments,
+        channel: message.channel,
+        originalMessageId: message.id,
+        timestamp: Date.now()
+      });
+      
       console.log('代行投稿完了:', webhookMessage.id);
     } catch (webhookError) {
       console.error('webhook送信エラー:', webhookError);
@@ -1931,8 +1969,82 @@ client.on('interactionCreate', async interaction => {
       }
       
       try {
+        // 削除されるメッセージの情報を取得
+        const messageInfo = deletedMessageInfo.get(interaction.message.id);
+        
         // メッセージを削除
         await interaction.message.delete();
+        
+        // 削除されたメッセージの情報をクリーンアップ
+        deletedMessageInfo.delete(interaction.message.id);
+        
+        // 画像・動画ファイルがある場合は削除ログに送信
+        if (messageInfo && messageInfo.attachments && messageInfo.attachments.length > 0) {
+          const hasMedia = messageInfo.attachments.some(attachment => isImageOrVideo(attachment));
+          
+          if (hasMedia) {
+            // 画像削除ログチャンネルにwebhookで投稿
+            const logChannel = client.channels.cache.get(IMAGE_DELETE_LOG_CHANNEL_ID);
+            if (logChannel) {
+              // webhookを取得または作成
+              let webhook;
+              try {
+                const webhooks = await logChannel.fetchWebhooks();
+                webhook = webhooks.find(wh => wh.name === 'CROSSROID Image Log');
+                
+                if (!webhook) {
+                  webhook = await logChannel.createWebhook({
+                    name: 'CROSSROID Image Log',
+                    avatar: client.user.displayAvatarURL()
+                  });
+                }
+              } catch (webhookError) {
+                console.error('webhookの取得/作成に失敗:', webhookError);
+                return;
+              }
+              
+              const embed = new EmbedBuilder()
+                .setTitle('🗑️ 画像削除ログ（ユーザー削除）')
+                .addFields(
+                  { name: 'チャンネル', value: messageInfo.channel.toString(), inline: true },
+                  { name: '投稿者', value: messageInfo.author.toString(), inline: true },
+                  { name: '削除者', value: interaction.user.toString(), inline: true },
+                  { name: '削除時刻', value: new Date().toLocaleString('ja-JP'), inline: true }
+                )
+                .setColor(0xFF6B6B) // 赤色
+                .setTimestamp(new Date())
+                .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+              
+              // メッセージの内容を追加（長すぎる場合は省略）
+              let content = messageInfo.content || '';
+              if (content.length > 200) {
+                content = content.slice(0, 197) + '...';
+              }
+              if (content) {
+                embed.addFields({ name: '内容', value: content, inline: false });
+              }
+              
+              // 削除された画像を添付
+              const files = [];
+              for (const attachment of messageInfo.attachments) {
+                if (isImageOrVideo(attachment)) {
+                  files.push({
+                    attachment: attachment.url,
+                    name: attachment.name
+                  });
+                }
+              }
+              
+              await webhook.send({ 
+                embeds: [embed],
+                files: files,
+                username: 'CROSSROID Image Log',
+                avatarURL: client.user.displayAvatarURL()
+              });
+              console.log(`ユーザー削除による画像削除ログをwebhookで投稿しました: ${interaction.message.id}`);
+            }
+          }
+        }
         
         // 削除完了の応答
         await interaction.reply({ content: 'メッセージを削除しました。', ephemeral: true });
