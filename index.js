@@ -1745,13 +1745,8 @@ client.on('messageCreate', async message => {
   // メンバー情報を取得
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   
-  // 強制代行投稿ロールを持っている場合は代行投稿を実行
-  if (hasForceProxyRole(member)) {
-    // 強制代行投稿の場合は処理を続行
-  } else if (hasAllowedRole(member)) {
-    // 特定のロールを持っている場合は無視
-    return;
-  }
+  // 規制単語機能はすべてのユーザーに適用（ロールに関係なく）
+  // 強制代行投稿ロールのチェックは不要（すべてのユーザーが対象）
   
   // ボットの権限をチェック
   if (!message.guild.members.me.permissions.has('ManageMessages')) {
