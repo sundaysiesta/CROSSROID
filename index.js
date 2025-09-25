@@ -67,6 +67,17 @@ const cronymousCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const AUTO_PROXY_COOLDOWN_MS = 30 * 1000;
 const autoProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
+// 特定ワード自動代行のユーザーごとのクールダウン管理（30秒）
+const WORD_PROXY_COOLDOWN_MS = 30 * 1000;
+const wordProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
+
+// フィルタリング対象のワードリスト（ワイルドカード対応）
+const FILTERED_WORDS = [
+  '*5歳*', '*6歳*', '*7歳*', '*8歳*', '*9歳*', '*10歳*', '*11歳*', '*12歳*', '*13歳*', '*14歳*', '*15歳*', '*16歳*', '*17歳*',
+  '*JC*', '*JK*', '*JS*', '*じぽ*', '*ジポ*', '*ペド*', '*ぺど*', '*ロリ*', '*ろり*',
+  '*園児*', '*高校生*', '*児ポ*', '*児童ポルノ*', '*女子高生*', '*女子小学生*', '*女子中学生*', '*小学生*', '*少女*', '*中学生*', '*低学年*', '*未成年*', '*幼女*', '*幼稚園*'
+];
+
 // 特定のロールIDのリスト（代行投稿をスキップするロール）
 const ALLOWED_ROLE_IDS = [
   '1401922708442320916',
@@ -226,6 +237,13 @@ function performMemoryCleanup() {
   for (const [userId, lastUsed] of autoProxyCooldowns.entries()) {
     if (lastUsed < oneHourAgo) {
       autoProxyCooldowns.delete(userId);
+    }
+  }
+  
+  // 特定ワード自動代行のクールダウンクリア
+  for (const [userId, lastUsed] of wordProxyCooldowns.entries()) {
+    if (lastUsed < oneHourAgo) {
+      wordProxyCooldowns.delete(userId);
     }
   }
   
@@ -1366,6 +1384,27 @@ function isImageOrVideo(attachment) {
   return imageExtensions.includes(extension) || videoExtensions.includes(extension);
 }
 
+// ワイルドカード対応のワードマッチング関数
+function matchesFilteredWord(text, pattern) {
+  // パターンからワイルドカードを除去して実際のワードを取得
+  const word = pattern.replace(/\*/g, '');
+  
+  // 大文字小文字を区別せずに検索
+  return text.toLowerCase().includes(word.toLowerCase());
+}
+
+// フィルタリング対象のワードが含まれているかチェック
+function containsFilteredWords(text) {
+  if (!text) return false;
+  
+  for (const pattern of FILTERED_WORDS) {
+    if (matchesFilteredWord(text, pattern)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ハイライト機能：リアクションが5つ以上ついたメッセージをハイライトチャンネルに投稿
 client.on('messageReactionAdd', async (reaction, user) => {
   try {
@@ -1673,6 +1712,141 @@ client.on('messageCreate', async message => {
     
   } catch (error) {
     console.error('メディア代行投稿でエラーが発生しました:', error.message);
+  } finally {
+    // 処理完了後にメッセージIDをクリーンアップ
+    processingMessages.delete(message.id);
+  }
+});
+
+// 特定ワード自動代行機能
+client.on('messageCreate', async message => {
+  // ボットのメッセージは無視
+  if (message.author.bot) return;
+  
+  // メッセージ内容がない場合は無視
+  if (!message.content || message.content.trim() === '') return;
+  
+  // フィルタリング対象のワードが含まれているかチェック
+  if (!containsFilteredWords(message.content)) return;
+  
+  // ユーザー別クールダウン（特定ワード自動代行）
+  const userId = message.author.id;
+  const lastWordProxyAt = wordProxyCooldowns.get(userId) || 0;
+  if (Date.now() - lastWordProxyAt < WORD_PROXY_COOLDOWN_MS) {
+    return;
+  }
+  
+  // 同時処理制限チェック
+  if (processingMessages.has(message.id)) {
+    console.log(`メッセージ ${message.id} は既に処理中です`);
+    return;
+  }
+  
+  // メンバー情報を取得
+  const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+  
+  // 強制代行投稿ロールを持っている場合は代行投稿を実行
+  if (hasForceProxyRole(member)) {
+    // 強制代行投稿の場合は処理を続行
+  } else if (hasAllowedRole(member)) {
+    // 特定のロールを持っている場合は無視
+    return;
+  }
+  
+  // ボットの権限をチェック
+  if (!message.guild.members.me.permissions.has('ManageMessages')) {
+    return;
+  }
+  
+  // 処理中としてマーク
+  processingMessages.add(message.id);
+  
+  try {
+    // 元のメッセージの情報を保存
+    const originalContent = message.content;
+    const originalAuthor = message.author;
+    
+    // 表示名を事前に取得（重複取得を防ぐ）
+    const displayName = member?.nickname || originalAuthor.displayName;
+    
+    // チャンネルのwebhookを取得または作成
+    let webhook;
+    
+    try {
+      console.log('特定ワード自動代行: webhookを取得中...');
+      const webhooks = await message.channel.fetchWebhooks();
+      console.log(`既存のwebhook数: ${webhooks.size}`);
+      
+      webhook = webhooks.find(wh => wh.name === 'CROSSROID Word Filter');
+      
+      if (!webhook) {
+        console.log('CROSSROID Word Filter webhookが見つからないため作成します');
+        webhook = await message.channel.createWebhook({
+          name: 'CROSSROID Word Filter',
+          avatar: originalAuthor.displayAvatarURL()
+        });
+        console.log('webhookを作成しました:', webhook.id);
+      } else {
+        console.log('既存のwebhookを使用します:', webhook.id);
+      }
+    } catch (webhookError) {
+      console.error('webhookの取得/作成に失敗しました:', webhookError);
+      throw webhookError;
+    }
+    
+    // メンションを無効化
+    const sanitizedContent = originalContent
+      .replace(/@everyone/g, '@\u200beveryone')
+      .replace(/@here/g, '@\u200bhere')
+      .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
+    
+    // webhookでメッセージを送信
+    console.log('特定ワード自動代行: webhookでメッセージを送信中...');
+    console.log(`送信内容: ${sanitizedContent}`);
+    console.log(`表示名: ${displayName}`);
+    
+    try {
+      // メッセージがまだ存在するかチェック（重複防止）
+      const messageExists = await message.fetch().catch(() => null);
+      if (!messageExists) {
+        console.log('メッセージが既に削除されているため、webhook送信をスキップします');
+        return;
+      }
+      
+      const webhookMessage = await webhook.send({
+        content: sanitizedContent,
+        username: displayName,
+        avatarURL: originalAuthor.displayAvatarURL(),
+        allowedMentions: { parse: [] } // すべてのメンションを無効化
+      });
+      
+      console.log('特定ワード自動代行完了:', webhookMessage.id);
+    } catch (webhookError) {
+      console.error('webhook送信エラー:', webhookError);
+      throw webhookError;
+    }
+    
+    // クールダウン開始（特定ワード自動代行）
+    wordProxyCooldowns.set(userId, Date.now());
+    
+    // 代行投稿が成功したら元のメッセージを削除
+    try {
+      console.log('元のメッセージの削除を試行中...');
+      // メッセージがまだ存在するかチェック
+      const messageExists = await message.fetch().catch(() => null);
+      if (messageExists) {
+        await message.delete();
+        console.log('元のメッセージを削除しました');
+      } else {
+        console.log('元のメッセージは既に削除されています');
+      }
+    } catch (deleteError) {
+      console.error('元のメッセージの削除に失敗しました:', deleteError);
+      // 削除に失敗しても処理は続行
+    }
+    
+  } catch (error) {
+    console.error('特定ワード自動代行でエラーが発生しました:', error.message);
   } finally {
     // 処理完了後にメッセージIDをクリーンアップ
     processingMessages.delete(message.id);
