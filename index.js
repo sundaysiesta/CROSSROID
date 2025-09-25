@@ -2556,12 +2556,39 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
       }
 
-      // ボット以外のメンバーを取得
-      const members = await guild.members.fetch();
+      // 即座に応答を送信（処理中であることを示す）
+      await interaction.deferReply();
+
+      // ボット以外のメンバーを取得（キャッシュから）
+      const members = guild.members.cache;
       const humanMembers = members.filter(member => !member.user.bot);
       
       if (humanMembers.size === 0) {
-        return interaction.reply({ content: 'メンバーが見つかりません。', ephemeral: true });
+        // キャッシュにメンバーがいない場合はfetchを試行
+        try {
+          const fetchedMembers = await guild.members.fetch();
+          const fetchedHumanMembers = fetchedMembers.filter(member => !member.user.bot);
+          if (fetchedHumanMembers.size === 0) {
+            return interaction.editReply({ content: 'メンバーが見つかりません。' });
+          }
+          const memberArray = Array.from(fetchedHumanMembers.values());
+          const randomMember = memberArray[Math.floor(Math.random() * memberArray.length)];
+          
+          // メンション+さんおはようございます！のメッセージを送信
+          await interaction.editReply({ 
+            content: `${randomMember}さんおはようございます！`,
+            allowedMentions: { users: [randomMember.id] }
+          });
+
+          // クールダウンを設定
+          randomMentionCooldowns.set(userId, now);
+
+          console.log(`ランダムメンションを送信しました: ${randomMember.user.tag} (${randomMember.id})`);
+          return;
+        } catch (fetchError) {
+          console.error('メンバー取得でエラー:', fetchError);
+          return interaction.editReply({ content: 'メンバーの取得に失敗しました。' });
+        }
       }
 
       // ランダムでメンバーを選択
@@ -2569,7 +2596,7 @@ client.on('interactionCreate', async interaction => {
       const randomMember = memberArray[Math.floor(Math.random() * memberArray.length)];
 
       // メンション+さんおはようございます！のメッセージを送信
-      await interaction.reply({ 
+      await interaction.editReply({ 
         content: `${randomMember}さんおはようございます！`,
         allowedMentions: { users: [randomMember.id] }
       });
@@ -2582,9 +2609,18 @@ client.on('interactionCreate', async interaction => {
     } catch (error) {
       console.error('ランダムメンションコマンドでエラー:', error);
       if (interaction.deferred || interaction.replied) {
-        return interaction.editReply({ content: 'エラーが発生しました。' });
+        try {
+          await interaction.editReply({ content: 'エラーが発生しました。' });
+        } catch (editError) {
+          console.error('editReplyでもエラーが発生:', editError);
+        }
+      } else {
+        try {
+          await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+        } catch (replyError) {
+          console.error('replyでもエラーが発生:', replyError);
+        }
       }
-      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
     }
   }
 });
