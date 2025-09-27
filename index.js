@@ -83,7 +83,7 @@ const FILTERED_WORDS = [
   '*小１*', '*小２*', '*小３*', '*小４*', '*小５*', '*小６*',
   '*中１*', '*中２*', '*中３*',
   '*高１*', '*高２*', '*高３*',
-  '*児*', '*ショタ*', '*しょた*', '**'
+  '*児*', '*ショタ*', '*しょた*', 
 ];
 
 // 特定のロールIDのリスト（代行投稿をスキップするロール）
@@ -145,23 +145,18 @@ const CLUB_CATEGORY_IDS = [
 // VCカテゴリID
 const VC_CATEGORY_ID = '1369659877735137342';
 
-// 案内板チャンネルID
-const GUIDE_BOARD_CHANNEL_ID = '1417353618910216192';
 
 // ハイライトチャンネルID
 const HIGHLIGHT_CHANNEL_ID = '1406942589738815633';
 
+// ハイライト済みメッセージを追跡（重複投稿防止）
+const highlightedMessages = new Set();
+
 // 画像削除ログチャンネルID
 const IMAGE_DELETE_LOG_CHANNEL_ID = '1381140728528375869';
 
-// 案内板メッセージIDを保存
-let guideBoardMessageId = null;
-
 // 今日世代を獲得した人を追跡
 const todayGenerationWinners = new Set();
-
-// 前回の部活データを保存（急上昇ランキング用）
-let previousClubData = new Map();
 
 // 日本の祝日データ（2024年）
 const JAPANESE_HOLIDAYS_2024 = [
@@ -628,561 +623,8 @@ function generateDailyUserId(userId) {
   return generateDailyUserIdForDate(userId, new Date());
 }
 
-// アクティブチャンネル検出機能
-async function getActiveChannels() {
-  try {
-    const guild = client.guilds.cache.first();
-    if (!guild) return { 
-      clubChannels: [], 
-      vcChannels: [], 
-      highlights: [], 
-      topSpeakers: [], 
-      vcTopSpeakers: [],
-      newClubs: []
-    };
-
-    const now = Date.now();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayStartTime = todayStart.getTime();
-    const oneDayAgo = now - (24 * 60 * 60 * 1000); // 24時間前
-
-    // 部活カテゴリからアクティブなチャンネルを検出
-    const clubChannels = [];
-    const allClubChannels = []; // 新着部活検出用
-    console.log(`今日の開始時刻: ${new Date(todayStartTime).toLocaleString('ja-JP')}`);
-    
-    for (const categoryId of CLUB_CATEGORY_IDS) {
-      const category = guild.channels.cache.get(categoryId);
-      if (!category || category.type !== 4) {
-        console.log(`カテゴリ ${categoryId} が見つからないか、カテゴリではありません`);
-        continue;
-      }
-
-      const channels = category.children.cache.filter(ch => 
-        ch.type === 0 && // テキストチャンネル
-        ch.permissionsFor(guild.members.me).has('ViewChannel')
-      );
-
-      console.log(`カテゴリ ${category.name}: ${channels.size}個のテキストチャンネル`);
-
-      // 並列処理でAPI呼び出しを削減（最大5チャンネルずつ処理）
-      const channelArray = Array.from(channels.values());
-      const batchSize = 5;
-      
-      for (let i = 0; i < channelArray.length; i += batchSize) {
-        const batch = channelArray.slice(i, i + batchSize);
-        
-        await Promise.all(batch.map(async (channel) => {
-          allClubChannels.push(channel);
-          try {
-            const messages = await channel.messages.fetch({ limit: 30 }); // さらにAPI呼び出しを削減
-            const recentMessage = messages.find(msg => 
-              !msg.author.bot && 
-              msg.createdTimestamp > todayStartTime
-            );
-            
-            if (recentMessage) {
-              const todayMessages = messages.filter(msg => 
-                !msg.author.bot && 
-                msg.createdTimestamp > todayStartTime
-              );
-              
-              const messageCount = todayMessages.size;
-              const uniqueSpeakers = new Set(todayMessages.map(msg => msg.author.id)).size;
-              const activityScore = messageCount + (uniqueSpeakers * 3); // メッセージ数 + (話している人数 × 3)
-              
-              clubChannels.push({
-                channel: channel,
-                lastActivity: recentMessage.createdTimestamp,
-                messageCount: messageCount,
-                uniqueSpeakers: uniqueSpeakers,
-                activityScore: activityScore
-              });
-            }
-          } catch (error) {
-            console.error(`チャンネル ${channel.name} の取得に失敗:`, error.message);
-            // エラーが発生しても他のチャンネルの処理は続行
-          }
-        }));
-        
-        // バッチ間で少し待機してAPIレート制限を回避
-        if (i + batchSize < channelArray.length) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-    }
-
-    // 新着部活を検出（24時間以内に作成されたチャンネル）
-    const newClubs = allClubChannels.filter(channel => 
-      channel.createdTimestamp > oneDayAgo
-    );
-
-    // VCカテゴリからアクティブなボイスチャンネルを検出
-    const vcChannels = [];
-    const vcCategory = guild.channels.cache.get(VC_CATEGORY_ID);
-    
-    console.log(`VCカテゴリ検索: ${VC_CATEGORY_ID}, 見つかった: ${vcCategory ? 'はい' : 'いいえ'}`);
-    
-    if (vcCategory && vcCategory.type === 4) {
-      const voiceChannels = vcCategory.children.cache.filter(ch => 
-        ch.type === 2 && // ボイスチャンネル
-        ch.members && ch.members.size > 0
-      );
-
-      console.log(`VCカテゴリ内のボイスチャンネル数: ${vcCategory.children.cache.size}`);
-      console.log(`アクティブなボイスチャンネル数: ${voiceChannels.size}`);
-
-      for (const vc of voiceChannels.values()) {
-        const memberList = Array.from(vc.members.values()).map(member => member.user.username);
-        console.log(`VC ${vc.name}: ${vc.members.size}人 (${memberList.join(', ')})`);
-        
-        vcChannels.push({
-          channel: vc,
-          memberCount: vc.members.size,
-          members: memberList
-        });
-      }
-    } else {
-      console.log('VCカテゴリが見つからないか、カテゴリではありません');
-    }
-    
-    console.log(`最終的なVCチャンネル数: ${vcChannels.length}`);
-
-    // ハイライト投稿を検出（リアクション数が多い投稿）- 上位5チャンネルのみ
-    const highlights = [];
-    const topChannels = clubChannels
-      .sort((a, b) => b.activityScore - a.activityScore)
-      .slice(0, 5); // 上位5チャンネルのみ処理
-    
-    for (const channelData of topChannels) {
-      try {
-        const messages = await channelData.channel.messages.fetch({ limit: 20 }); // さらにAPI呼び出しを削減
-        const highlightMessages = messages.filter(msg => 
-          !msg.author.bot && 
-          msg.reactions.cache.size > 0 &&
-          msg.createdTimestamp > todayStartTime
-        );
-
-        for (const msg of highlightMessages.values()) {
-          const totalReactions = Array.from(msg.reactions.cache.values())
-            .reduce((sum, reaction) => sum + reaction.count, 0);
-          
-          if (totalReactions >= 3) { // 3つ以上のリアクション
-            highlights.push({
-              message: msg,
-              channel: channelData.channel,
-              reactionCount: totalReactions
-            });
-          }
-        }
-      } catch (error) {
-        console.error(`ハイライト検出でエラー (${channelData.channel.name}):`, error.message);
-        // エラーが発生しても他のチャンネルの処理は続行
-      }
-    }
-
-    // 直近50メッセージから発言者を検出（上位3名）- メインチャンネルのみから集計
-    const userMessageCounts = new Map();
-    
-    try {
-      const mainChannel = guild.channels.cache.get(MAIN_CHANNEL_ID);
-      if (mainChannel) {
-        const messages = await mainChannel.messages.fetch({ limit: 50 }); // API呼び出しを削減
-        const recentMessages = messages.filter(msg => !msg.author.bot);
-
-        for (const msg of recentMessages.values()) {
-          const count = userMessageCounts.get(msg.author.id) || 0;
-          userMessageCounts.set(msg.author.id, count + 1);
-        }
-      }
-    } catch (error) {
-      console.error(`メインチャンネルのメッセージ数カウントでエラー:`, error.message);
-    }
-
-    const topSpeakers = [];
-    if (userMessageCounts.size > 0) {
-      const sortedUsers = Array.from(userMessageCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3); // 上位3名のみ
-      
-      for (const [userId, count] of sortedUsers) {
-        const user = await client.users.fetch(userId).catch(() => null);
-        if (user) {
-          topSpeakers.push({ user, count });
-        }
-      }
-    }
 
 
-    // 急上昇ランキング用のデータを計算
-    const trendingClubs = [];
-    const dormantClubs = [];
-    
-    // 前回のデータと比較して急上昇を検出
-    for (const clubData of clubChannels) {
-      const channelId = clubData.channel.id;
-      const previousScore = previousClubData.get(channelId) || 0;
-      const currentScore = clubData.activityScore;
-      const scoreIncrease = currentScore - previousScore;
-      
-      if (scoreIncrease > 0) {
-        trendingClubs.push({
-          ...clubData,
-          scoreIncrease: scoreIncrease
-        });
-      }
-    }
-    
-    // 急上昇ランキングをスコア増加量でソート
-    trendingClubs.sort((a, b) => b.scoreIncrease - a.scoreIncrease);
-    
-    // 休止中の部活を検出（過去24時間で0件の部活）
-    for (const channel of allClubChannels) {
-      const isActive = clubChannels.some(active => active.channel.id === channel.id);
-      if (!isActive) {
-        dormantClubs.push(channel);
-      }
-    }
-    
-    // 今回のデータを次回用に保存
-    const currentClubData = new Map();
-    for (const clubData of clubChannels) {
-      currentClubData.set(clubData.channel.id, clubData.activityScore);
-    }
-    previousClubData = currentClubData;
-
-    return { 
-      clubChannels, 
-      vcChannels, 
-      highlights, 
-      topSpeakers, 
-      newClubs,
-      trendingClubs,
-      dormantClubs
-    };
-  } catch (error) {
-    console.error('アクティブチャンネル検出でエラー:', error);
-    return { 
-      clubChannels: [], 
-      vcChannels: [], 
-      highlights: [], 
-      topSpeakers: [], 
-      newClubs: [],
-      trendingClubs: [],
-      dormantClubs: []
-    };
-  }
-}
-
-// Botコメント風のエモいまとめを生成
-function generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs) {
-  const comments = [];
-  const random = Math.random();
-  
-  // 静かな夜のコメント（低活動時）
-  if (clubChannels.length === 0 || (clubChannels.length > 0 && clubChannels[0].activityScore < 10)) {
-    if (dormantClubs.length > 0 && random < 0.3) {
-      const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
-      const dormantName = randomDormant.name.replace(/[｜|]/g, '').trim();
-      comments.push(`「今日は静かな夜…穴場は${randomDormant}」`);
-    } else {
-      comments.push('「今日は静かな夜…🌙」');
-    }
-    return comments.join(' ');
-  }
-  
-  // 部長ランキングのコメント
-  if (clubChannels.length > 0 && random < 0.2) {
-    const topClub = clubChannels[0];
-    const clubName = topClub.channel.name.replace(/[｜|]/g, '').trim();
-    comments.push(`「部長ランキングTOPは${clubName}」`);
-  }
-  
-  // 復活予感のコメント
-  if (dormantClubs.length > 0 && random < 0.15) {
-    const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
-    const dormantName = randomDormant.name.replace(/[｜|]/g, '').trim();
-    comments.push(`「${randomDormant}がそろそろ復活しそう？」`);
-  }
-  
-  // 部活の盛り上がり具合に基づくコメント
-  if (clubChannels.length > 0) {
-    const topClub = clubChannels[0];
-    const clubName = topClub.channel.name.replace(/[｜|]/g, '').trim();
-    if (topClub.activityScore > 50) {
-      comments.push(`「${clubName}が今日も圧倒的！` + (topClub.activityScore > 100 ? '🔥」' : '」'));
-    } else if (topClub.activityScore > 20) {
-      comments.push(`「${clubName}も勢いアリ！` + (topClub.activityScore > 40 ? '✨」' : '」'));
-    }
-  }
-  
-  // 急上昇部活のコメント
-  if (trendingClubs.length > 0) {
-    const topTrending = trendingClubs[0];
-    const trendingName = topTrending.channel.name.replace(/[｜|]/g, '').trim();
-    comments.push(`「${trendingName}が急上昇中！📈」`);
-  }
-  
-  // VCの盛り上がり具合
-  if (vcChannels.length > 0) {
-    const topVC = vcChannels[0];
-    const vcName = topVC.channel.name.replace(/[｜|]/g, '').trim();
-    if (topVC.memberCount > 5) {
-      comments.push(`「${vcName}で大盛り上がり！🎤」`);
-    } else if (topVC.memberCount > 2) {
-      comments.push(`「${vcName}も賑やか！💬」`);
-    }
-  }
-  
-  // テキストスピーカーのコメント
-  if (topSpeakers.length > 0) {
-    const topSpeaker = topSpeakers[0];
-    const speakerName = topSpeaker.user.username;
-    if (topSpeaker.count > 20) {
-      comments.push(`「${speakerName}さんが今日も大活躍！💪」`);
-    } else if (topSpeaker.count > 10) {
-      comments.push(`「${speakerName}さんも頑張ってる！👏」`);
-    }
-  }
-  
-  // 全体的なコメント
-  if (comments.length === 0) {
-    comments.push('「今日もみんなお疲れ様！🌙」');
-  } else if (comments.length === 1) {
-    // 1つだけの場合はそのまま
-  } else {
-    // 複数ある場合は最初の2つを組み合わせ
-    comments.splice(2);
-  }
-  
-  return comments.join(' ');
-}
-
-// 案内板を更新する機能
-async function updateGuideBoard() {
-  try {
-    const { clubChannels, vcChannels, highlights, topSpeakers, newClubs, trendingClubs, dormantClubs } = await getActiveChannels();
-    
-    const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
-    if (!guideChannel) {
-      console.error('案内板チャンネルが見つかりません');
-      return;
-    }
-
-    // 今日の世代獲得者を取得
-    const generationWinnersList = [];
-    for (const userId of todayGenerationWinners) {
-      try {
-        const user = await client.users.fetch(userId);
-        generationWinnersList.push(user);
-      } catch (error) {
-        console.error(`世代獲得者の取得に失敗: ${userId}`, error);
-      }
-    }
-
-    const now = new Date();
-    const timeString = now.toLocaleString('ja-JP', { 
-      timeZone: 'Asia/Tokyo',
-      month: '2-digit', 
-      day: '2-digit', 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-
-    // 一つの埋め込みに統合
-    const mainEmbed = new EmbedBuilder()
-      .setTitle(`📋 サーバー活動案内板 (${timeString}更新)`)
-      .setDescription('**自動更新** - 15分ごと（朝3-12時は1時間ごと）')
-      .setColor(0x5865F2) // 青色
-      .setTimestamp(now)
-      .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-
-    // 世代獲得者セクション（重要情報として上部に配置）
-    if (generationWinnersList.length > 0) {
-      const generationList = generationWinnersList
-        .map(user => `🎉 ${user}`)
-        .join(' ');
-      
-      mainEmbed.addFields({
-        name: '🎉 今日の世代獲得者',
-        value: generationList,
-        inline: false
-      });
-    }
-
-    // 部活ランキングセクション
-    if (clubChannels.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-      const clubList = await Promise.all(
-        clubChannels
-          .sort((a, b) => b.activityScore - a.activityScore)
-          .slice(0, 5) // 上位5位まで
-          .map(async (data, index) => {
-            // チャンネルの権限を持つ人（部長）を取得
-            const channel = data.channel;
-            let clubLeader = '';
-            
-            // チャンネルのオーバーライド権限を持つ人を探す（botを除く）
-            const members = await channel.guild.members.fetch();
-            for (const [memberId, member] of members) {
-              if (member.user.bot) continue; // botを除外
-              
-              // チャンネル固有の権限オーバーライドをチェック
-              const memberPermissions = channel.permissionsFor(member);
-              if (memberPermissions && memberPermissions.has('ManageChannels')) {
-                const channelOverwrites = channel.permissionOverwrites.cache.get(memberId);
-                if (channelOverwrites && channelOverwrites.allow.has('ManageChannels')) {
-                  clubLeader = member.toString();
-                  break;
-                }
-              }
-            }
-            
-            return `${rankEmojis[index]} ${data.channel} — ${data.activityScore}pt ${clubLeader ? `部長:${clubLeader}` : ''}`;
-          })
-      );
-      
-      mainEmbed.addFields({
-        name: '🏫 アクティブ部活ランキング',
-        value: clubList.join('\n') || 'アクティブなチャンネルはありません',
-        inline: false
-      });
-    }
-
-    // VCランキングセクション
-    if (vcChannels.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-      const vcList = vcChannels
-        .sort((a, b) => b.memberCount - a.memberCount)
-        .slice(0, 5) // 上位5位まで
-        .map((data, index) => 
-          `${rankEmojis[index]} 🔊 ${data.channel} — ${data.memberCount}人`
-        ).join('\n');
-      
-      mainEmbed.addFields({
-        name: '🎤 アクティブVCランキング',
-        value: vcList,
-        inline: false
-      });
-    }
-
-    // テキストスピーカーセクション
-    if (topSpeakers.length > 0) {
-      const rankEmojis = ['🥇', '🥈', '🥉'];
-      const topSpeakerList = topSpeakers
-        .map((speaker, index) => 
-          `${rankEmojis[index]} ${speaker.user} — ${speaker.count}件`
-        ).join('\n');
-      
-      mainEmbed.addFields({
-        name: '💬 直近50メッセージ発言者ランキング',
-        value: topSpeakerList,
-        inline: false
-      });
-    }
-
-    // 急上昇・休止部活セクション
-    if (trendingClubs.length > 0 || dormantClubs.length > 0) {
-      let trendDescription = '';
-
-      // 急上昇ランキング（上位3位まで）
-      if (trendingClubs.length > 0) {
-        const rankEmojis = ['🥇', '🥈', '🥉'];
-        const trendingList = trendingClubs
-          .slice(0, 3) // 上位3位まで
-          .map((data, index) => 
-            `${rankEmojis[index]} ${data.channel} — +${data.scoreIncrease}pt`
-          ).join('\n');
-        
-        trendDescription += `**急上昇部活**\n${trendingList}\n\n`;
-      }
-
-      // 休止中の部活（ランダムに1つ、最終活動日時を表示）
-      if (dormantClubs.length > 0) {
-        const randomDormant = dormantClubs[Math.floor(Math.random() * dormantClubs.length)];
-        
-        // 最終活動日時を計算
-        const lastActivity = new Date(randomDormant.lastMessageAt || randomDormant.createdTimestamp);
-        const daysDiff = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
-        
-        let activityText;
-        if (daysDiff === 0) {
-          activityText = '今日';
-        } else if (daysDiff === 1) {
-          activityText = '昨日';
-        } else if (daysDiff < 7) {
-          activityText = `${daysDiff}日前`;
-        } else if (daysDiff < 30) {
-          activityText = `${Math.floor(daysDiff / 7)}週間前`;
-        } else {
-          activityText = `${Math.floor(daysDiff / 30)}ヶ月前`;
-        }
-        
-        trendDescription += `**休止中の部活**\n🛌 ${randomDormant} — 最終活動: ${activityText}`;
-      }
-
-      mainEmbed.addFields({
-        name: '📈 部活トレンド情報',
-        value: trendDescription,
-        inline: false
-      });
-    }
-
-    // ハイライトセクション
-    if (highlights.length > 0) {
-      const highlightList = highlights
-        .sort((a, b) => b.reactionCount - a.reactionCount)
-        .slice(0, 3) // 上位3件まで
-        .map((data) => 
-          `${data.channel} — 「${data.message.content.slice(0, 40)}${data.message.content.length > 40 ? '...' : ''}」 - ${data.message.author} ${data.reactionCount}👍`
-        ).join('\n');
-      
-      mainEmbed.addFields({
-        name: '✨ ハイライト',
-        value: highlightList,
-        inline: false
-      });
-    }
-
-    // Botコメントセクション
-    const botComments = generateBotComment(clubChannels, vcChannels, topSpeakers, trendingClubs, dormantClubs);
-    if (botComments) {
-      mainEmbed.addFields({
-        name: '📝 本日の一言',
-        value: botComments,
-        inline: false
-      });
-    }
-
-    const embeds = [mainEmbed];
-
-    // 既存の案内板メッセージがある場合は編集、ない場合は新規作成
-    console.log(`案内板更新: guideBoardMessageId = ${guideBoardMessageId}`);
-    
-    if (guideBoardMessageId) {
-      try {
-        console.log('既存の案内板メッセージを取得中...');
-        const message = await guideChannel.messages.fetch(guideBoardMessageId);
-        console.log(`メッセージ取得成功: ${message.id}`);
-        await message.edit({ embeds: embeds });
-        console.log('案内板を編集しました');
-      } catch (error) {
-        console.error('案内板の編集に失敗、新規作成します:', error);
-        guideBoardMessageId = null;
-      }
-    }
-    
-    if (!guideBoardMessageId) {
-      console.log('新規案内板メッセージを作成中...');
-      const message = await guideChannel.send({ embeds: embeds });
-      guideBoardMessageId = message.id;
-      console.log(`案内板を新規作成しました: ${guideBoardMessageId}`);
-    }
-  } catch (error) {
-    console.error('案内板更新でエラー:', error);
-  }
-}
 
 // ボットが準備完了したときに一度だけ実行されるイベント
 client.once('ready', async () => {
@@ -1231,10 +673,6 @@ client.once('ready', async () => {
           required: false
         }
       ]
-    },
-    {
-      name: 'update_guide',
-      description: '案内板を手動更新（運営専用）'
     },
     {
       name: 'bump',
@@ -1317,34 +755,6 @@ client.once('ready', async () => {
     console.error('再起動通知の送信に失敗しました:', e);
   }
 
-  // 案内板の定期更新（時間帯に応じて間隔を調整）
-  function getUpdateInterval() {
-    const now = new Date();
-    const hour = now.getHours();
-    
-    // 朝3時から昼12時までは1時間間隔、それ以外は15分間隔
-    if (hour >= 3 && hour < 12) {
-      return 60 * 60 * 1000; // 1時間
-    } else {
-      return 15 * 60 * 1000; // 15分
-    }
-  }
-  
-  function scheduleNextUpdate() {
-    const interval = getUpdateInterval();
-    setTimeout(async () => {
-      try {
-        await updateGuideBoard();
-      } catch (error) {
-        console.error('定期案内板更新でエラー:', error);
-      }
-      // 次の更新をスケジュール
-      scheduleNextUpdate();
-    }, interval);
-  }
-  
-  // 初回のスケジュール設定
-  scheduleNextUpdate();
 
   // VC通知の定期実行（5分ごと）
   setInterval(async () => {
@@ -1406,30 +816,6 @@ client.once('ready', async () => {
   }
 
 
-  // 初回案内板更新（既存メッセージを検出）
-  setTimeout(async () => {
-    try {
-      // 既存の案内板メッセージを検索
-      const guideChannel = client.channels.cache.get(GUIDE_BOARD_CHANNEL_ID);
-      if (guideChannel) {
-        const messages = await guideChannel.messages.fetch({ limit: 20 });
-        const existingGuideMessage = messages.find(msg => 
-          msg.author.id === client.user.id && 
-          msg.embeds.length > 0 && 
-          msg.embeds[0].title && msg.embeds[0].title.includes('📋 サーバー活動案内板')
-        );
-        
-        if (existingGuideMessage) {
-          guideBoardMessageId = existingGuideMessage.id;
-          console.log('既存の案内板メッセージを発見しました');
-        }
-      }
-      
-      await updateGuideBoard();
-    } catch (error) {
-      console.error('初回案内板更新でエラー:', error);
-    }
-  }, 10000); // 10秒後に初回実行
 
   // 日付が変わったときに世代獲得者リストをリセット（毎日0時に実行）
   const now = new Date();
@@ -1587,12 +973,18 @@ client.on('messageReactionAdd', async (reaction, user) => {
     // ボットのメッセージは無視
     if (message.author.bot) return;
     
+    // 既にハイライト済みのメッセージは無視
+    if (highlightedMessages.has(message.id)) return;
+    
     // リアクションの総数を計算
     const totalReactions = Array.from(message.reactions.cache.values())
       .reduce((sum, reaction) => sum + reaction.count, 0);
     
     // 5つ以上のリアクションがついた場合
     if (totalReactions >= 5) {
+      // ハイライト済みとしてマーク
+      highlightedMessages.add(message.id);
+      
       // ハイライトチャンネルに投稿
       const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
       if (highlightChannel) {
@@ -1631,6 +1023,32 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
   } catch (error) {
     console.error('ハイライト機能でエラー:', error);
+  }
+});
+
+// リアクション削除時の処理（ハイライト済みメッセージの追跡をリセット）
+client.on('messageReactionRemove', async (reaction, user) => {
+  try {
+    // ボットのリアクションは無視
+    if (user.bot) return;
+    
+    // メッセージを取得
+    const message = reaction.message;
+    
+    // ボットのメッセージは無視
+    if (message.author.bot) return;
+    
+    // リアクションの総数を再計算
+    const totalReactions = Array.from(message.reactions.cache.values())
+      .reduce((sum, reaction) => sum + reaction.count, 0);
+    
+    // 5つ未満になった場合はハイライト済みフラグをリセット
+    if (totalReactions < 5 && highlightedMessages.has(message.id)) {
+      highlightedMessages.delete(message.id);
+      console.log(`ハイライト済みフラグをリセットしました: ${message.id} (${totalReactions}リアクション)`);
+    }
+  } catch (error) {
+    console.error('ハイライト機能（リアクション削除）でエラー:', error);
   }
 });
 
@@ -2362,25 +1780,6 @@ client.on('interactionCreate', async interaction => {
     }
   }
   
-  if (interaction.commandName === 'update_guide') {
-    try {
-      // 管理者限定チェック
-      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-      if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'このコマンドは運営専用です。', ephemeral: true });
-      }
-
-      await interaction.deferReply({ ephemeral: true });
-      await updateGuideBoard();
-      await interaction.editReply({ content: '案内板を更新しました。' });
-    } catch (error) {
-      console.error('手動案内板更新でエラー:', error);
-      if (interaction.deferred || interaction.replied) {
-        return interaction.editReply({ content: 'エラーが発生しました。' });
-      }
-      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
-    }
-  }
   
   if (interaction.commandName === 'bump') {
     try {
