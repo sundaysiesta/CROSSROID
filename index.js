@@ -242,6 +242,8 @@ const randomMentionCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 // メッセージ数カウント機能
 const dailyMessageCount = new Map(); // key: dateString, value: count
 const MESSAGE_COUNT_VC_CHANNEL_ID = '1422204717823426645'; // 指定されたVCチャンネルID
+let lastVCUpdateTime = 0; // 最後のVCチャンネル名更新時刻
+const VC_UPDATE_COOLDOWN_MS = 30 * 1000; // 30秒のクールダウン
 
 // 日本時間で日付文字列を取得する関数
 function getJapanDateString(date = new Date()) {
@@ -263,6 +265,12 @@ function incrementMessageCount() {
 // VCチャンネル名を更新する関数
 async function updateVCChannelName() {
   try {
+    // クールダウンチェック
+    const now = Date.now();
+    if (now - lastVCUpdateTime < VC_UPDATE_COOLDOWN_MS) {
+      return; // クールダウン中はスキップ
+    }
+
     const guild = client.guilds.cache.first();
     if (!guild) return;
 
@@ -275,16 +283,12 @@ async function updateVCChannelName() {
     const today = getJapanDateString();
     const messageCount = dailyMessageCount.get(today) || 0;
     
-    // 現在のチャンネル名から日付部分を抽出（既存の日付がある場合）
-    const currentName = vcChannel.name;
-    const dateMatch = currentName.match(/^(.+?)\s*\(\d{4}-\d{2}-\d{2}\)$/);
-    const baseName = dateMatch ? dateMatch[1] : currentName;
-    
-    // 新しいチャンネル名を設定（日付とメッセージ数を含む）
-    const newName = `${baseName} (${today}) - ${messageCount}件`;
+    // 新しいチャンネル名を設定（メッセージ数のみ）
+    const newName = `今日のメッセージ数: ${messageCount}`;
     
     if (currentName !== newName) {
       await vcChannel.setName(newName);
+      lastVCUpdateTime = now; // 更新時刻を記録
       console.log(`VCチャンネル名を更新しました: ${newName}`);
     }
   } catch (error) {
@@ -825,6 +829,15 @@ client.once('ready', async () => {
     }
   }, 5 * 60 * 1000); // 5分ごと
 
+  // VCチャンネル名の定期更新（5分ごと、API制限を考慮）
+  setInterval(async () => {
+    try {
+      await updateVCChannelName();
+    } catch (error) {
+      console.error('定期VCチャンネル名更新でエラー:', error);
+    }
+  }, 5 * 60 * 1000); // 5分ごと
+
   // 時報スケジューラーの設定
   function scheduleTimeReports() {
     const now = new Date();
@@ -1233,12 +1246,7 @@ client.on('messageCreate', async message => {
   if (message.author.bot) return;
   
   // メッセージ数をカウント（ボット以外のすべてのメッセージ）
-  const messageCount = incrementMessageCount();
-  
-  // VCチャンネル名を更新（10メッセージごと）
-  if (messageCount % 10 === 0) {
-    await updateVCChannelName();
-  }
+  incrementMessageCount();
   
   // 添付ファイルがない場合は無視
   if (!message.attachments || message.attachments.size === 0) return;
