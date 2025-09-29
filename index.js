@@ -283,6 +283,9 @@ async function updateVCChannelName() {
     const today = getJapanDateString();
     const messageCount = dailyMessageCount.get(today) || 0;
     
+    // 現在のチャンネル名を取得
+    const currentName = vcChannel.name;
+    
     // 新しいチャンネル名を設定（メッセージ数のみ）
     const newName = `今日のメッセージ数: ${messageCount}`;
     
