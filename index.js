@@ -239,6 +239,59 @@ const VC_NOTIFY_THRESHOLDS = [10, 15, 20, 25];
 const RANDOM_MENTION_COOLDOWN_MS = 30 * 1000; // 30秒
 const randomMentionCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
+// メッセージ数カウント機能
+const dailyMessageCount = new Map(); // key: dateString, value: count
+const MESSAGE_COUNT_VC_CHANNEL_ID = '1422204717823426645'; // 指定されたVCチャンネルID
+
+// 日本時間で日付文字列を取得する関数
+function getJapanDateString(date = new Date()) {
+  const japanTime = new Date(date.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+  const year = japanTime.getFullYear();
+  const month = String(japanTime.getMonth() + 1).padStart(2, '0');
+  const day = String(japanTime.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// メッセージ数をカウントする関数
+function incrementMessageCount() {
+  const today = getJapanDateString();
+  const currentCount = dailyMessageCount.get(today) || 0;
+  dailyMessageCount.set(today, currentCount + 1);
+  return currentCount + 1;
+}
+
+// VCチャンネル名を更新する関数
+async function updateVCChannelName() {
+  try {
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+
+    const vcChannel = guild.channels.cache.get(MESSAGE_COUNT_VC_CHANNEL_ID);
+    if (!vcChannel) {
+      console.error('メッセージ数表示用VCチャンネルが見つかりません');
+      return;
+    }
+
+    const today = getJapanDateString();
+    const messageCount = dailyMessageCount.get(today) || 0;
+    
+    // 現在のチャンネル名から日付部分を抽出（既存の日付がある場合）
+    const currentName = vcChannel.name;
+    const dateMatch = currentName.match(/^(.+?)\s*\(\d{4}-\d{2}-\d{2}\)$/);
+    const baseName = dateMatch ? dateMatch[1] : currentName;
+    
+    // 新しいチャンネル名を設定（日付とメッセージ数を含む）
+    const newName = `${baseName} (${today}) - ${messageCount}件`;
+    
+    if (currentName !== newName) {
+      await vcChannel.setName(newName);
+      console.log(`VCチャンネル名を更新しました: ${newName}`);
+    }
+  } catch (error) {
+    console.error('VCチャンネル名の更新でエラー:', error);
+  }
+}
+
 // メモリ最適化のための定期的なクリーンアップ
 function performMemoryCleanup() {
   // 古いクールダウンデータをクリア（1時間以上前のデータ）
@@ -586,12 +639,15 @@ async function sendTimeReport(hour, date) {
       timeTitle = `黒須直輝が${hour}時ぐらいをおしらせします`;
     }
 
+    // 日本時間でタイムスタンプを設定
+    const japanTime = new Date(date.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+
     // 埋め込みメッセージを作成
     const embed = new EmbedBuilder()
       .setTitle(timeTitle)
       .setDescription(message)
       .setColor(0x5865F2) // 青色
-      .setTimestamp(date)
+      .setTimestamp(japanTime)
       .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
 
     await channel.send({ embeds: [embed] });
@@ -705,6 +761,10 @@ client.once('ready', async () => {
     {
       name: 'random_mention',
       description: 'サーバーメンバーをランダムでメンションします'
+    },
+    {
+      name: 'message_count',
+      description: '今日のメッセージ数を表示します'
     }
   ];
 
@@ -797,10 +857,12 @@ client.once('ready', async () => {
     console.log(`次の時報予定: ${nextTimeReport.toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}`);
     
     setTimeout(async () => {
-      const reportHour = nextTimeReport.getHours();
-      const reportDate = new Date(nextTimeReport.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+      // 日本時間で現在時刻を取得
+      const now = new Date();
+      const japanTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+      const reportHour = japanTime.getHours();
       
-      await sendTimeReport(reportHour, reportDate);
+      await sendTimeReport(reportHour, japanTime);
       
       // 次の時報をスケジュール
       scheduleTimeReports();
@@ -815,23 +877,35 @@ client.once('ready', async () => {
     console.log('GROQ_API_KEYが設定されていないため、時報スケジューラーをスキップしました');
   }
 
+  // VCチャンネル名を初期化
+  await updateVCChannelName();
 
 
-  // 日付が変わったときに世代獲得者リストをリセット（毎日0時に実行）
+
+  // 日付が変わったときに世代獲得者リストとメッセージ数をリセット（毎日0時に実行）
   const now = new Date();
-  const tomorrow = new Date(now);
+  const japanTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+  const tomorrow = new Date(japanTime);
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(0, 0, 0, 0);
-  const msUntilMidnight = tomorrow.getTime() - now.getTime();
+  const msUntilMidnight = tomorrow.getTime() - japanTime.getTime();
   
   setTimeout(() => {
     todayGenerationWinners.clear();
-    console.log('世代獲得者リストをリセットしました');
+    dailyMessageCount.clear();
+    console.log('世代獲得者リストとメッセージ数をリセットしました');
+    
+    // VCチャンネル名を更新（リセット後）
+    updateVCChannelName();
     
     // その後は24時間ごとにリセット
     setInterval(() => {
       todayGenerationWinners.clear();
-      console.log('世代獲得者リストをリセットしました');
+      dailyMessageCount.clear();
+      console.log('世代獲得者リストとメッセージ数をリセットしました');
+      
+      // VCチャンネル名を更新（リセット後）
+      updateVCChannelName();
     }, 24 * 60 * 60 * 1000);
   }, msUntilMidnight);
 });
@@ -1157,6 +1231,14 @@ client.on('messageDelete', async message => {
 client.on('messageCreate', async message => {
   // ボットのメッセージは無視
   if (message.author.bot) return;
+  
+  // メッセージ数をカウント（ボット以外のすべてのメッセージ）
+  const messageCount = incrementMessageCount();
+  
+  // VCチャンネル名を更新（10メッセージごと）
+  if (messageCount % 10 === 0) {
+    await updateVCChannelName();
+  }
   
   // 添付ファイルがない場合は無視
   if (!message.attachments || message.attachments.size === 0) return;
@@ -2057,6 +2139,29 @@ client.on('interactionCreate', async interaction => {
           console.error('replyでもエラーが発生:', replyError);
         }
       }
+    }
+  }
+  
+  if (interaction.commandName === 'message_count') {
+    try {
+      const today = getJapanDateString();
+      const messageCount = dailyMessageCount.get(today) || 0;
+      
+      const embed = new EmbedBuilder()
+        .setTitle('📊 今日のメッセージ数')
+        .setDescription(`**${today}** のメッセージ数: **${messageCount}件**`)
+        .setColor(0x00FF00) // 緑色
+        .setTimestamp(new Date())
+        .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
+      
+      await interaction.reply({ embeds: [embed] });
+      
+    } catch (error) {
+      console.error('メッセージ数表示コマンドでエラー:', error);
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ content: 'エラーが発生しました。' });
+      }
+      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
     }
   }
 });
