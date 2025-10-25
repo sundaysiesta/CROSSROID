@@ -133,7 +133,7 @@ if (process.env.GROQ_API_KEY) {
 
 // 時報機能の設定
 const TIME_REPORT_HOURS = [6, 9, 12, 15, 18, 21, 24, 3]; // 24時は0時として扱う
-const TIME_REPORT_CHANNEL_ID = '1415336647284883528';
+const TIME_REPORT_CHANNEL_ID = '1369660410008965203';
 
 // 部活カテゴリID
 const CLUB_CATEGORY_IDS = [
@@ -785,7 +785,7 @@ client.once('ready', async () => {
 
   // 再起動通知を送信
   try {
-    const notifyChannelId = '1415336647284883528';
+    const notifyChannelId = '1369660410008965203';
     const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
     if (channel) {
       // Git情報を取得（Authorは含めない）
