@@ -239,65 +239,7 @@ const VC_NOTIFY_THRESHOLDS = [10, 15, 20, 25];
 const RANDOM_MENTION_COOLDOWN_MS = 30 * 1000; // 30秒
 const randomMentionCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 
-// メッセージ数カウント機能
-const dailyMessageCount = new Map(); // key: dateString, value: count
-const MESSAGE_COUNT_VC_CHANNEL_ID = '1422204717823426645'; // 指定されたVCチャンネルID
-let lastVCUpdateTime = 0; // 最後のVCチャンネル名更新時刻
-const VC_UPDATE_COOLDOWN_MS = 30 * 1000; // 30秒のクールダウン
-
-// 日本時間で日付文字列を取得する関数
-function getJapanDateString(date = new Date()) {
-  const japanTime = new Date(date.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
-  const year = japanTime.getFullYear();
-  const month = String(japanTime.getMonth() + 1).padStart(2, '0');
-  const day = String(japanTime.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-// メッセージ数をカウントする関数
-function incrementMessageCount() {
-  const today = getJapanDateString();
-  const currentCount = dailyMessageCount.get(today) || 0;
-  dailyMessageCount.set(today, currentCount + 1);
-  return currentCount + 1;
-}
-
-// VCチャンネル名を更新する関数
-async function updateVCChannelName() {
-  try {
-    // クールダウンチェック
-    const now = Date.now();
-    if (now - lastVCUpdateTime < VC_UPDATE_COOLDOWN_MS) {
-      return; // クールダウン中はスキップ
-    }
-
-    const guild = client.guilds.cache.first();
-    if (!guild) return;
-
-    const vcChannel = guild.channels.cache.get(MESSAGE_COUNT_VC_CHANNEL_ID);
-    if (!vcChannel) {
-      console.error('メッセージ数表示用VCチャンネルが見つかりません');
-      return;
-    }
-
-    const today = getJapanDateString();
-    const messageCount = dailyMessageCount.get(today) || 0;
-    
-    // 現在のチャンネル名を取得
-    const currentName = vcChannel.name;
-    
-    // 新しいチャンネル名を設定（メッセージ数のみ）
-    const newName = `今日のメッセージ数: ${messageCount}`;
-    
-    if (currentName !== newName) {
-      await vcChannel.setName(newName);
-      lastVCUpdateTime = now; // 更新時刻を記録
-      console.log(`VCチャンネル名を更新しました: ${newName}`);
-    }
-  } catch (error) {
-    console.error('VCチャンネル名の更新でエラー:', error);
-  }
-}
+// メッセージカウント機能（削除済み）
 
 // メモリ最適化のための定期的なクリーンアップ
 function performMemoryCleanup() {
@@ -768,10 +710,6 @@ client.once('ready', async () => {
     {
       name: 'random_mention',
       description: 'サーバーメンバーをランダムでメンションします'
-    },
-    {
-      name: 'message_count',
-      description: '今日のメッセージ数を表示します'
     }
   ];
 
@@ -832,14 +770,7 @@ client.once('ready', async () => {
     }
   }, 5 * 60 * 1000); // 5分ごと
 
-  // VCチャンネル名の定期更新（5分ごと、API制限を考慮）
-  setInterval(async () => {
-    try {
-      await updateVCChannelName();
-    } catch (error) {
-      console.error('定期VCチャンネル名更新でエラー:', error);
-    }
-  }, 5 * 60 * 1000); // 5分ごと
+  // VCチャンネル名の定期更新（削除済み）
 
   // 時報スケジューラーの設定
   function scheduleTimeReports() {
@@ -893,8 +824,7 @@ client.once('ready', async () => {
     console.log('GROQ_API_KEYが設定されていないため、時報スケジューラーをスキップしました');
   }
 
-  // VCチャンネル名を初期化
-  await updateVCChannelName();
+  // VCチャンネル名の初期化（削除済み）
 
 
 
@@ -908,20 +838,12 @@ client.once('ready', async () => {
   
   setTimeout(() => {
     todayGenerationWinners.clear();
-    dailyMessageCount.clear();
-    console.log('世代獲得者リストとメッセージ数をリセットしました');
-    
-    // VCチャンネル名を更新（リセット後）
-    updateVCChannelName();
+    console.log('世代獲得者リストをリセットしました');
     
     // その後は24時間ごとにリセット
     setInterval(() => {
       todayGenerationWinners.clear();
-      dailyMessageCount.clear();
-      console.log('世代獲得者リストとメッセージ数をリセットしました');
-      
-      // VCチャンネル名を更新（リセット後）
-      updateVCChannelName();
+      console.log('世代獲得者リストをリセットしました');
     }, 24 * 60 * 60 * 1000);
   }, msUntilMidnight);
 });
@@ -1247,9 +1169,6 @@ client.on('messageDelete', async message => {
 client.on('messageCreate', async message => {
   // ボットのメッセージは無視
   if (message.author.bot) return;
-  
-  // メッセージ数をカウント（ボット以外のすべてのメッセージ）
-  incrementMessageCount();
   
   // 添付ファイルがない場合は無視
   if (!message.attachments || message.attachments.size === 0) return;
@@ -2153,28 +2072,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
   
-  if (interaction.commandName === 'message_count') {
-    try {
-      const today = getJapanDateString();
-      const messageCount = dailyMessageCount.get(today) || 0;
-      
-      const embed = new EmbedBuilder()
-        .setTitle('📊 今日のメッセージ数')
-        .setDescription(`**${today}** のメッセージ数: **${messageCount}件**`)
-        .setColor(0x00FF00) // 緑色
-        .setTimestamp(new Date())
-        .setFooter({ text: 'CROSSROID', iconURL: client.user.displayAvatarURL() });
-      
-      await interaction.reply({ embeds: [embed] });
-      
-    } catch (error) {
-      console.error('メッセージ数表示コマンドでエラー:', error);
-      if (interaction.deferred || interaction.replied) {
-        return interaction.editReply({ content: 'エラーが発生しました。' });
-      }
-      return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
-    }
-  }
+  // message_count コマンド（削除済み）
 });
 
 
