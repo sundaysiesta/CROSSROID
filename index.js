@@ -118,7 +118,7 @@ const LEVEL_10_ROLE_ID = '1369627346201481239';
 const CURRENT_GENERATION_ROLE_ID = '1401922708442320916';
 
 // メインチャンネルID
-const MAIN_CHANNEL_ID = '1415336647284883528';
+const MAIN_CHANNEL_ID = '1431905157657923646';
 
 // Groq API設定
 // 注意: APIキーは環境変数から取得します。ハードコーディングは絶対に避けてください。
@@ -133,7 +133,7 @@ if (process.env.GROQ_API_KEY) {
 
 // 時報機能の設定
 const TIME_REPORT_HOURS = [6, 9, 12, 15, 18, 21, 24, 3]; // 24時は0時として扱う
-const TIME_REPORT_CHANNEL_ID = '1369660410008965203';
+const TIME_REPORT_CHANNEL_ID = '1431905157657923646';
 
 // 部活カテゴリID
 const CLUB_CATEGORY_IDS = [
@@ -153,7 +153,7 @@ const HIGHLIGHT_CHANNEL_ID = '1406942589738815633';
 const highlightedMessages = new Set();
 
 // 画像削除ログチャンネルID
-const IMAGE_DELETE_LOG_CHANNEL_ID = '1381140728528375869';
+const IMAGE_DELETE_LOG_CHANNEL_ID = '1431905160875212864';
 
 // 今日世代を獲得した人を追跡
 const todayGenerationWinners = new Set();
@@ -723,7 +723,7 @@ client.once('ready', async () => {
 
   // 再起動通知を送信
   try {
-    const notifyChannelId = '1369660410008965203';
+    const notifyChannelId = '1431905157657923646';
     const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
     if (channel) {
       // Git情報を取得（Authorは含めない）
