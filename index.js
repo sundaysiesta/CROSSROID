@@ -1826,7 +1826,7 @@ client.on('interactionCreate', async interaction => {
       bumpCooldowns.set(userId, now);
       
       // 通知チャンネルに埋め込みを送信
-      const notifyChannel = interaction.guild.channels.cache.get('1415336647284883528');
+      const notifyChannel = interaction.guild.channels.cache.get('1431905157657923646');
       if (notifyChannel) {
         const bumpEmbed = new EmbedBuilder()
           .setColor(0xff6b6b)
