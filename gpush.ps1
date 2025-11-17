@@ -16,9 +16,24 @@ if (Test-Path $GitBash) {
     $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $GpushSh = Join-Path $ScriptDir "gpush.sh"
     if (Test-Path $GpushSh) {
-        $UnixPath = $ScriptDir -replace '\\', '/' -replace '^C:', '/c' -replace '^c:', '/c'
-        & $GitBash -c "cd '$UnixPath' && ./gpush.sh '$Message'"
-        exit $LASTEXITCODE
+        # Convert Windows path to Unix-style path for Git Bash
+        # Example: C:\Users\natsu\デスクトップ\CROSSROID -> /c/Users/natsu/デスクトップ/CROSSROID
+        $UnixPath = $ScriptDir -replace '\\', '/'
+        if ($UnixPath -match '^([A-Za-z]):') {
+            $DriveLetter = $Matches[1].ToLower()
+            $UnixPath = $UnixPath -replace '^([A-Za-z]):', "/$DriveLetter"
+        }
+        
+        # Escape single quotes in message for bash
+        $EscapedMessage = $Message -replace "'", "'\''"
+        
+        # Execute gpush.sh via Git Bash
+        $Command = "cd '$UnixPath' && ./gpush.sh '$EscapedMessage'"
+        & $GitBash -c $Command
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        return
     }
 }
 
