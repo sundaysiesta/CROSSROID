@@ -5,6 +5,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Try to use gpush.sh via Git Bash if available, otherwise use PowerShell implementation
+$GitBash = "C:\Program Files\Git\bin\bash.exe"
+if (-not (Test-Path $GitBash)) {
+    $GitBash = "C:\Program Files (x86)\Git\bin\bash.exe"
+}
+
+if (Test-Path $GitBash) {
+    # Use gpush.sh via Git Bash
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $GpushSh = Join-Path $ScriptDir "gpush.sh"
+    if (Test-Path $GpushSh) {
+        $UnixPath = $ScriptDir -replace '\\', '/' -replace '^C:', '/c' -replace '^c:', '/c'
+        & $GitBash -c "cd '$UnixPath' && ./gpush.sh '$Message'"
+        exit $LASTEXITCODE
+    }
+}
+
+# Fallback to PowerShell implementation
 # Stage all changes
 git add -A
 
