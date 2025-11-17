@@ -48,9 +48,12 @@ if (Test-Path $GitBash) {
 git add -A
 
 # Commit only if there are staged changes
-if (git diff --cached --quiet) {
+git diff --cached --quiet 2>&1 | Out-Null
+if ($LASTEXITCODE -eq 0) {
+  # No changes to commit (git diff returns 0 when no differences)
   Write-Host "No changes to commit. Skipping commit."
 } else {
+  # Has changes, commit them (git diff returns 1 when there are differences)
   git commit -m $Message
   if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to commit changes."
