@@ -29,11 +29,17 @@ if (Test-Path $GitBash) {
         
         # Execute gpush.sh via Git Bash
         $Command = "cd '$UnixPath' && ./gpush.sh '$EscapedMessage'"
-        & $GitBash -c $Command
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+        try {
+            & $GitBash -c $Command
+            if ($LASTEXITCODE -eq 0) {
+                return
+            }
+            # If gpush.sh failed, fall through to PowerShell implementation
+            Write-Warning "gpush.sh exited with code $LASTEXITCODE, using PowerShell fallback"
+        } catch {
+            # If there's an error, fall through to PowerShell implementation
+            Write-Warning "Failed to execute gpush.sh via Git Bash: $_"
         }
-        return
     }
 }
 
