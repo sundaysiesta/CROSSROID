@@ -21,5 +21,3 @@ Write-Host "Pushing to origin/$branch ..."
 git push origin $branch
 Write-Host "Done."
 
-
-
