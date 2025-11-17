@@ -111,7 +111,7 @@ const ALLOWED_ROLE_IDS = [
 ];
 
 // 強制代行投稿ロールID（このロールを持っている人は代行投稿される）
-const FORCE_PROXY_ROLE_ID = '1416291713009582172';
+const FORCE_PROXY_ROLE_ID = '1431905155913089133';
 
 // レベル10ロールID
 const LEVEL_10_ROLE_ID = '1369627346201481239';
@@ -1179,13 +1179,6 @@ client.on('messageCreate', async message => {
   const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
   if (!hasMedia) return;
   
-  // ユーザー別クールダウン（自動代行投稿）
-  const userId = message.author.id;
-  const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
-  if (Date.now() - lastAutoProxyAt < AUTO_PROXY_COOLDOWN_MS) {
-    return;
-  }
-  
   // 同時処理制限チェック
   if (processingMessages.has(message.id)) {
     console.log(`メッセージ ${message.id} は既に処理中です`);
@@ -1195,13 +1188,23 @@ client.on('messageCreate', async message => {
   // メンバー情報を取得
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   
-  // 強制代行投稿ロールを持っている場合は代行投稿を実行
-  if (hasForceProxyRole(member)) {
-    // 強制代行投稿の場合は処理を続行
-  } else if (hasAllowedRole(member)) {
-    // 特定のロールを持っている場合は無視
-    return;
-  }
+  // 一旦全員代行投稿するように設定（ロールチェックとクールダウンを無効化）
+  // 強制代行投稿ロールを持っている場合は代行投稿を実行（クールダウンをスキップ）
+  // const hasForceProxy = hasForceProxyRole(member);
+  
+  // if (!hasForceProxy) {
+  //   // 強制代行投稿ロールを持っていない場合のみクールダウンチェック
+  //   const userId = message.author.id;
+  //   const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
+  //   if (Date.now() - lastAutoProxyAt < AUTO_PROXY_COOLDOWN_MS) {
+  //     return;
+  //   }
+  //   
+  //   // 特定のロールを持っている場合は無視
+  //   if (hasAllowedRole(member)) {
+  //     return;
+  //   }
+  // }
   
   // ボットの権限をチェック
   if (!message.guild.members.me.permissions.has('ManageMessages')) {
@@ -1311,7 +1314,8 @@ client.on('messageCreate', async message => {
     }
     
     // クールダウン開始（自動代行投稿）
-    autoProxyCooldowns.set(userId, Date.now());
+    // 一旦全員代行投稿のためクールダウンを無効化
+    // autoProxyCooldowns.set(userId, Date.now());
     
     // 代行投稿が成功したら元のメッセージを削除
     try {
