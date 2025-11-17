@@ -3,7 +3,7 @@ param(
 )
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 # Try to use gpush.sh via Git Bash if available, otherwise use PowerShell implementation
 $GitBash = "C:\Program Files\Git\bin\bash.exe"
@@ -52,11 +52,19 @@ if (git diff --cached --quiet) {
   Write-Host "No changes to commit. Skipping commit."
 } else {
   git commit -m $Message
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to commit changes."
+    exit 1
+  }
 }
 
 # Detect current branch and push
 $branch = git rev-parse --abbrev-ref HEAD
 Write-Host "Pushing to origin/$branch ..."
 git push origin $branch
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "Failed to push to origin/$branch"
+  exit 1
+}
 Write-Host "Done."
 
