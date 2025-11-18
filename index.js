@@ -1274,21 +1274,6 @@ client.on('messageCreate', async message => {
       .replace(/@here/g, '@\u200bhere')
       .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
     
-    // メッセージがまだ存在するかチェックし、先に削除する
-    try {
-      console.log('元のメッセージの事前削除を試行中...');
-      const messageExists = await message.fetch().catch(() => null);
-      if (!messageExists) {
-        console.log('メッセージが既に削除されているため、代行投稿をスキップします');
-        return;
-      }
-      await message.delete();
-      console.log('元のメッセージを先に削除しました');
-    } catch (deleteError) {
-      console.error('元のメッセージの事前削除に失敗しました:', deleteError);
-      // 事前削除に失敗した場合でも処理は継続
-    }
-    
     // webhookでメッセージを送信
     console.log('webhookでメッセージを送信中...');
     console.log(`送信内容: ${sanitizedContent}`);
@@ -1296,6 +1281,13 @@ client.on('messageCreate', async message => {
     console.log(`表示名: ${displayName}`);
     
     try {
+      // メッセージがまだ存在するかチェック（重複防止）
+      const messageExists = await message.fetch().catch(() => null);
+      if (!messageExists) {
+        console.log('メッセージが既に削除されているため、webhook送信をスキップします');
+        return;
+      }
+      
       const webhookMessage = await webhook.send({
         content: sanitizedContent,
         username: displayName,
@@ -1324,7 +1316,21 @@ client.on('messageCreate', async message => {
     // クールダウン開始（自動代行投稿、20秒）
     const userId = message.author.id;
     autoProxyCooldowns.set(userId, Date.now());
-    // 元のメッセージの削除は事前に実施済み
+    // 代行投稿が成功したら元のメッセージを削除
+    try {
+      console.log('元のメッセージの削除を試行中...');
+      // メッセージがまだ存在するかチェック
+      const messageExists = await message.fetch().catch(() => null);
+      if (messageExists) {
+        await message.delete();
+        console.log('元のメッセージを削除しました');
+      } else {
+        console.log('元のメッセージは既に削除されています');
+      }
+    } catch (deleteError) {
+      console.error('元のメッセージの削除に失敗しました:', deleteError);
+      // 削除に失敗しても処理は続行
+    }
     
   } catch (error) {
     console.error('メディア代行投稿でエラーが発生しました:', error.message);
