@@ -1179,42 +1179,40 @@ client.on('messageCreate', async message => {
   const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
   if (!hasMedia) return;
   
-  // 同時処理制限チェック
+  // 同時処理制限チェックとマーク（アトミック操作で競合状態を防ぐ）
   if (processingMessages.has(message.id)) {
     console.log(`メッセージ ${message.id} は既に処理中です`);
     return;
   }
-  
-  // メンバー情報を取得
-  const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-  
-  // 一旦全員代行投稿するように設定（ロールチェックは無効化、クールダウンは20秒で有効化）
-  // 強制代行投稿ロールを持っている場合は代行投稿を実行（クールダウンをスキップ）
-  const hasForceProxy = hasForceProxyRole(member);
-  
-  if (!hasForceProxy) {
-    // 強制代行投稿ロールを持っていない場合のみクールダウンチェック（20秒）
-    const userId = message.author.id;
-    const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
-    if (Date.now() - lastAutoProxyAt < AUTO_PROXY_COOLDOWN_MS) {
-      return;
-    }
-    
-    // 特定のロールを持っている場合は無視（一旦全員代行投稿のため無効化）
-    // if (hasAllowedRole(member)) {
-    //   return;
-    // }
-  }
-  
-  // ボットの権限をチェック
-  if (!message.guild.members.me.permissions.has('ManageMessages')) {
-    return;
-  }
-  
-  // 処理中としてマーク
+  // チェック直後に処理中としてマーク（非同期処理の前に実行）
   processingMessages.add(message.id);
   
   try {
+    // メンバー情報を取得
+    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+    
+    // 一旦全員代行投稿するように設定（ロールチェックは無効化、クールダウンは20秒で有効化）
+    // 強制代行投稿ロールを持っている場合は代行投稿を実行（クールダウンをスキップ）
+    const hasForceProxy = hasForceProxyRole(member);
+    
+    if (!hasForceProxy) {
+      // 強制代行投稿ロールを持っていない場合のみクールダウンチェック（20秒）
+      const userId = message.author.id;
+      const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
+      if (Date.now() - lastAutoProxyAt < AUTO_PROXY_COOLDOWN_MS) {
+        return;
+      }
+      
+      // 特定のロールを持っている場合は無視（一旦全員代行投稿のため無効化）
+      // if (hasAllowedRole(member)) {
+      //   return;
+      // }
+    }
+    
+    // ボットの権限をチェック
+    if (!message.guild.members.me.permissions.has('ManageMessages')) {
+      return;
+    }
     // 元のメッセージの情報を保存
     const originalContent = message.content || '';
     const originalAttachments = Array.from(message.attachments.values());
