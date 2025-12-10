@@ -1167,92 +1167,105 @@ client.on('messageDelete', async message => {
   }
 });
 
-// メッセージイベントリスナー
+// 画像自動代行投稿機能（再実装）
 client.on('messageCreate', async message => {
-  // ボットのメッセージは無視
+  // 基本的なフィルタリング（早期リターン）
   if (message.author.bot) return;
-  
-  // 添付ファイルがない場合は無視
   if (!message.attachments || message.attachments.size === 0) return;
   
   // 画像・動画ファイルがあるかチェック
   const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
   if (!hasMedia) return;
   
-  // 同時処理制限チェックとマーク（アトミック操作で競合状態を防ぐ）
-  if (processingMessages.has(message.id)) {
-    console.log(`メッセージ ${message.id} は既に処理中です`);
+  // 重複処理防止：処理中のメッセージIDをチェック（アトミック操作）
+  // チェックと追加を同時に行い、既に存在する場合は早期リターン
+  const messageId = message.id;
+  if (processingMessages.has(messageId)) {
+    console.log(`[画像代行] メッセージ ${messageId} は既に処理中です - スキップ`);
     return;
   }
-  // チェック直後に処理中としてマーク（非同期処理の前に実行）
-  processingMessages.add(message.id);
   
+  // 即座に処理中としてマーク（競合状態を防ぐ）
+  processingMessages.add(messageId);
+  console.log(`[画像代行] メッセージ ${messageId} の処理を開始`);
+  
+  // すべての処理をtry-finallyで囲み、確実にクリーンアップ
   try {
-    // メンバー情報を取得
+    // 1. メンバー情報を取得
     const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-    
-    // 一旦全員代行投稿するように設定（ロールチェックは無効化、クールダウンは20秒で有効化）
-    // 強制代行投稿ロールを持っている場合は代行投稿を実行（クールダウンをスキップ）
-    const hasForceProxy = hasForceProxyRole(member);
-    
-    if (!hasForceProxy) {
-      // 強制代行投稿ロールを持っていない場合のみクールダウンチェック（20秒）
-      const userId = message.author.id;
-      const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
-      if (Date.now() - lastAutoProxyAt < AUTO_PROXY_COOLDOWN_MS) {
-        return;
-      }
-      
-      // 特定のロールを持っている場合は無視（一旦全員代行投稿のため無効化）
-      // if (hasAllowedRole(member)) {
-      //   return;
-      // }
-    }
-    
-    // ボットの権限をチェック
-    if (!message.guild.members.me.permissions.has('ManageMessages')) {
+    if (!member) {
+      console.log(`[画像代行] メンバー情報の取得に失敗: ${message.author.id}`);
       return;
     }
-    // 元のメッセージの情報を保存
+    
+    // 2. 強制代行投稿ロールのチェック
+    const hasForceProxy = hasForceProxyRole(member);
+    
+    // 3. クールダウンチェック（強制代行投稿ロールを持っていない場合のみ）
+    if (!hasForceProxy) {
+      const userId = message.author.id;
+      const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
+      const timeSinceLastProxy = Date.now() - lastAutoProxyAt;
+      
+      if (timeSinceLastProxy < AUTO_PROXY_COOLDOWN_MS) {
+        const remainingSeconds = Math.ceil((AUTO_PROXY_COOLDOWN_MS - timeSinceLastProxy) / 1000);
+        console.log(`[画像代行] クールダウン中: ${remainingSeconds}秒残り`);
+        return;
+      }
+    }
+    
+    // 4. ボットの権限チェック
+    if (!message.guild.members.me.permissions.has('ManageMessages')) {
+      console.log(`[画像代行] ボットにManageMessages権限がありません`);
+      return;
+    }
+    
+    // 5. メッセージがまだ存在するか再確認（重複防止の追加チェック）
+    try {
+      const messageExists = await message.fetch().catch(() => null);
+      if (!messageExists) {
+        console.log(`[画像代行] メッセージ ${messageId} は既に削除されています`);
+        return;
+      }
+    } catch (fetchError) {
+      console.error(`[画像代行] メッセージ取得エラー:`, fetchError);
+      return;
+    }
+    
+    // 6. 元のメッセージ情報を保存（削除前に取得）
     const originalContent = message.content || '';
     const originalAttachments = Array.from(message.attachments.values());
     const originalAuthor = message.author;
-    
-    // 表示名を事前に取得（重複取得を防ぐ）
     const displayName = member?.nickname || originalAuthor.displayName;
     
-    // チャンネルのwebhookを取得または作成
+    // 7. Webhookを取得または作成
     let webhook;
-    
     try {
-      console.log('webhookを取得中...');
       const webhooks = await message.channel.fetchWebhooks();
-      console.log(`既存のwebhook数: ${webhooks.size}`);
-      
       webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
       
       if (!webhook) {
-        console.log('CROSSROID Proxy webhookが見つからないため作成します');
+        console.log(`[画像代行] Webhookを作成中...`);
         webhook = await message.channel.createWebhook({
           name: 'CROSSROID Proxy',
           avatar: originalAuthor.displayAvatarURL()
         });
-        console.log('webhookを作成しました:', webhook.id);
+        console.log(`[画像代行] Webhookを作成しました: ${webhook.id}`);
       } else {
-        console.log('既存のwebhookを使用します:', webhook.id);
+        console.log(`[画像代行] 既存のWebhookを使用: ${webhook.id}`);
       }
     } catch (webhookError) {
-      console.error('webhookの取得/作成に失敗しました:', webhookError);
+      console.error(`[画像代行] Webhook取得/作成エラー:`, webhookError);
       throw webhookError;
     }
     
-    // 添付ファイルを準備
+    // 8. 添付ファイルを準備
     const files = originalAttachments.map(attachment => ({
       attachment: attachment.url,
       name: attachment.name
     }));
     
-    // 削除ボタンを準備
+    // 9. 削除ボタンを準備
     const deleteButton = {
       type: 2, // BUTTON
       style: 4, // DANGER (赤色)
@@ -1266,75 +1279,71 @@ client.on('messageCreate', async message => {
       components: [deleteButton]
     };
     
-    // メンションを無効化
+    // 10. メンションを無効化
     const sanitizedContent = originalContent
       .replace(/@everyone/g, '@\u200beveryone')
       .replace(/@here/g, '@\u200bhere')
       .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
     
-    // webhookでメッセージを送信
-    console.log('webhookでメッセージを送信中...');
-    console.log(`送信内容: ${sanitizedContent}`);
-    console.log(`添付ファイル数: ${files.length}`);
-    console.log(`表示名: ${displayName}`);
+    // 11. Webhookでメッセージを送信（重複投稿の最終チェック）
+    console.log(`[画像代行] Webhook送信開始: ${messageId}`);
     
-    try {
-      // メッセージがまだ存在するかチェック（重複防止）
-      const messageExists = await message.fetch().catch(() => null);
-      if (!messageExists) {
-        console.log('メッセージが既に削除されているため、webhook送信をスキップします');
-        return;
-      }
-      
-      const webhookMessage = await webhook.send({
-        content: sanitizedContent,
-        username: displayName,
-        avatarURL: originalAuthor.displayAvatarURL(),
-        files: files,
-        components: [actionRow],
-        allowedMentions: { parse: [] } // すべてのメンションを無効化
-      });
-      
-      // 削除されたメッセージの情報を保存（削除ボタン用）
-      deletedMessageInfo.set(webhookMessage.id, {
-        content: originalContent,
-        author: originalAuthor,
-        attachments: originalAttachments,
-        channel: message.channel,
-        originalMessageId: message.id,
-        timestamp: Date.now()
-      });
-      
-      console.log('代行投稿完了:', webhookMessage.id);
-    } catch (webhookError) {
-      console.error('webhook送信エラー:', webhookError);
-      throw webhookError;
+    // 送信前に再度メッセージの存在を確認
+    const finalMessageCheck = await message.fetch().catch(() => null);
+    if (!finalMessageCheck) {
+      console.log(`[画像代行] 送信前にメッセージ ${messageId} が削除されました - 送信をキャンセル`);
+      return;
     }
     
-    // クールダウン開始（自動代行投稿、20秒）
+    const webhookMessage = await webhook.send({
+      content: sanitizedContent,
+      username: displayName,
+      avatarURL: originalAuthor.displayAvatarURL(),
+      files: files,
+      components: [actionRow],
+      allowedMentions: { parse: [] }
+    });
+    
+    console.log(`[画像代行] Webhook送信成功: ${webhookMessage.id} (元メッセージ: ${messageId})`);
+    
+    // 12. 削除ボタン用の情報を保存
+    deletedMessageInfo.set(webhookMessage.id, {
+      content: originalContent,
+      author: originalAuthor,
+      attachments: originalAttachments,
+      channel: message.channel,
+      originalMessageId: message.id,
+      timestamp: Date.now()
+    });
+    
+    // 13. クールダウンを設定（送信成功後）
     const userId = message.author.id;
     autoProxyCooldowns.set(userId, Date.now());
-    // 代行投稿が成功したら元のメッセージを削除
+    console.log(`[画像代行] クールダウンを設定: ${userId}`);
+    
+    // 14. 元のメッセージを削除
     try {
-      console.log('元のメッセージの削除を試行中...');
-      // メッセージがまだ存在するかチェック
-      const messageExists = await message.fetch().catch(() => null);
-      if (messageExists) {
+      const messageToDelete = await message.fetch().catch(() => null);
+      if (messageToDelete) {
         await message.delete();
-        console.log('元のメッセージを削除しました');
+        console.log(`[画像代行] 元のメッセージ ${messageId} を削除しました`);
       } else {
-        console.log('元のメッセージは既に削除されています');
+        console.log(`[画像代行] 元のメッセージ ${messageId} は既に削除されています`);
       }
     } catch (deleteError) {
-      console.error('元のメッセージの削除に失敗しました:', deleteError);
-      // 削除に失敗しても処理は続行
+      console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
+      // 削除に失敗しても処理は成功とみなす（既にwebhook送信は完了している）
     }
     
+    console.log(`[画像代行] 処理完了: ${messageId} -> ${webhookMessage.id}`);
+    
   } catch (error) {
-    console.error('メディア代行投稿でエラーが発生しました:', error.message);
+    console.error(`[画像代行] エラーが発生しました (${messageId}):`, error.message);
+    console.error(error.stack);
   } finally {
-    // 処理完了後にメッセージIDをクリーンアップ
-    processingMessages.delete(message.id);
+    // 必ず処理中フラグをクリア
+    processingMessages.delete(messageId);
+    console.log(`[画像代行] 処理中フラグをクリア: ${messageId}`);
   }
 });
 
