@@ -374,6 +374,8 @@ async function handleCommands(interaction, client) {
             const isAdmin = member && member.permissions.has(PermissionFlagsBits.Administrator);
             const isDev = interaction.user.id === '1122179390403510335';
 
+            console.log(`[EventCreate] User: ${interaction.user.id}, Role: ${hasRole}, Admin: ${isAdmin}, Dev: ${isDev}`);
+
             if (!hasRole && !isAdmin && !isDev) {
                 return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
             }
@@ -410,7 +412,7 @@ async function handleCommands(interaction, client) {
                 .setFooter({ text: 'CROSSROID Event System', iconURL: client.user.displayAvatarURL() });
 
             await newChannel.send({
-                content: '新しいイベントが作成されました！',
+                content: '@everyone 新しいイベントが作成されました！',
                 embeds: [detailEmbed]
             });
 

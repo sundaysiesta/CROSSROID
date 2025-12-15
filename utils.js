@@ -7,7 +7,8 @@ const {
 const {
     FILTERED_WORDS,
     ALLOWED_ROLE_IDS,
-    FORCE_PROXY_ROLE_ID
+    FORCE_PROXY_ROLE_ID,
+    SECRET_SALT
 } = require('./constants');
 
 // 祝日判定関数
@@ -113,7 +114,7 @@ function generateDailyUserIdForDate(userId, dateUtc) {
     const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
     const d = String(dateUtc.getUTCDate()).padStart(2, '0');
     const dayKey = `${y}${m}${d}`;
-    const hash = crypto.createHash('sha256').update(`${userId}:${dayKey}`).digest('hex');
+    const hash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:${dayKey}`).digest('hex');
     const segment = hash.slice(0, 10);
     const num = parseInt(segment, 16);
     const id36 = num.toString(36).toLowerCase();
@@ -141,7 +142,7 @@ function generateWacchoi(userId, date = new Date()) {
     const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
     const weekIndex = Math.floor(dateUtc.getTime() / oneWeekMs);
 
-    const weeklyHash = crypto.createHash('sha256').update(`${userId}:week:${weekIndex}`).digest('hex');
+    const weeklyHash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:week:${weekIndex}`).digest('hex');
     // Use first 4 chars, base36 conversion to make it look "ID-like" (alphanumeric)
     // Parsing hex to int then to base36 ensures valid alphanumeric
     const weeklySegment = weeklyHash.slice(0, 10);
@@ -154,7 +155,7 @@ function generateWacchoi(userId, date = new Date()) {
     const d = String(dateUtc.getUTCDate()).padStart(2, '0');
     const dayKey = `${y}${m}${d}`;
 
-    const dailyHash = crypto.createHash('sha256').update(`${userId}:day:${dayKey}`).digest('hex');
+    const dailyHash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:day:${dayKey}`).digest('hex');
     const dailySegment = dailyHash.slice(0, 10);
     const dailyNum = parseInt(dailySegment, 16);
     const dailyId = dailyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
