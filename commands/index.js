@@ -7,12 +7,11 @@ const {
     CLUB_CATEGORY_IDS,
     MAIN_CHANNEL_ID,
     CURRENT_GENERATION_ROLE_ID,
-    MAIN_CHANNEL_ID,
-    CURRENT_GENERATION_ROLE_ID,
     TIME_REPORT_CHANNEL_ID,
     EVENT_CATEGORY_ID,
     EVENT_NOTIFY_CHANNEL_ID,
-    EVENT_ADMIN_ROLE_ID
+    EVENT_ADMIN_ROLE_ID,
+
 } = require('../constants');
 const { generateTimeReportMessage } = require('../features/timeSignal');
 
