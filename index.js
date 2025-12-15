@@ -146,6 +146,36 @@ client.once('ready', async () => {
     {
       name: 'random_mention',
       description: 'サーバーメンバーをランダムでメンションします'
+    },
+    {
+      name: 'event_create',
+      description: 'イベント用チャンネルを作成し、告知を行います',
+      options: [
+        {
+          name: 'イベント名',
+          description: 'イベントのタイトル（チャンネル名になります）',
+          type: 3, // STRING
+          required: true
+        },
+        {
+          name: '内容',
+          description: 'イベントの詳細内容',
+          type: 3, // STRING
+          required: true
+        },
+        {
+          name: '日時',
+          description: '開催日時（任意）',
+          type: 3, // STRING
+          required: false
+        },
+        {
+          name: '場所',
+          description: '開催場所（任意）',
+          type: 3, // STRING
+          required: false
+        }
+      ]
     }
   ];
 

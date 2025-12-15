@@ -2,7 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 
 const warningCooldowns = new Set();
 const GUIDANCE_MESSAGE = `
-**旧Bot「名無しのロメダ民」は廃止されましたというよりあえて抑止してる**
+**旧Bot「名無しのロメダ民」は廃止したったぜダラァ文句あるなら流山に来いやダラァ**
 
 今後は CROSSROID の \`/cronymous\` コマンドを使用してください。
 
@@ -22,7 +22,7 @@ function setup(client) {
                 // 警告メッセージの送信（クールダウン付き: 5分に1回）
                 if (!warningCooldowns.has(channelId)) {
                     const embed = new EmbedBuilder()
-                        .setTitle("匿名の弱体化でワッチョイが必須となるクロスロイドを使え")
+                        .setTitle("ダラァチノさんよく匿名で悪口書かれてなんか腹たってきたから")
                         .setDescription(GUIDANCE_MESSAGE)
                         .setColor(0xFF0000) // 赤
                         .setFooter({ text: 'CROSSROID System' });
