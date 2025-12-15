@@ -13,6 +13,7 @@ const proxy = require('./features/proxy');
 const highlight = require('./features/highlight');
 const imageLog = require('./features/imageLog');
 const roleAward = require('./features/roleAward');
+const legacyMigration = require('./features/legacyMigration');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -198,6 +199,7 @@ client.once('ready', async () => {
   highlight.setup(client);
   imageLog.setup(client);
   roleAward.setup(client);
+  legacyMigration.setup(client);
 });
 
 // コマンド処理
