@@ -1192,34 +1192,34 @@ client.on('messageCreate', async message => {
   // すべての処理をtry-finallyで囲み、確実にクリーンアップ
   try {
     // 1. メンバー情報を取得
-    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+  const member = await message.guild.members.fetch(message.author.id).catch(() => null);
     if (!member) {
       console.log(`[画像代行] メンバー情報の取得に失敗: ${message.author.id}`);
       return;
     }
-    
+  
     // 2. 強制代行投稿ロールのチェック
-    const hasForceProxy = hasForceProxyRole(member);
-    
+  const hasForceProxy = hasForceProxyRole(member);
+  
     // 3. クールダウンチェック（強制代行投稿ロールを持っていない場合のみ）
-    if (!hasForceProxy) {
-      const userId = message.author.id;
-      const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
+  if (!hasForceProxy) {
+    const userId = message.author.id;
+    const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
       const timeSinceLastProxy = Date.now() - lastAutoProxyAt;
       
       if (timeSinceLastProxy < AUTO_PROXY_COOLDOWN_MS) {
         const remainingSeconds = Math.ceil((AUTO_PROXY_COOLDOWN_MS - timeSinceLastProxy) / 1000);
         console.log(`[画像代行] クールダウン中: ${remainingSeconds}秒残り`);
-        return;
-      }
-    }
-    
-    // 4. ボットの権限チェック
-    if (!message.guild.members.me.permissions.has('ManageMessages')) {
-      console.log(`[画像代行] ボットにManageMessages権限がありません`);
       return;
     }
-    
+  }
+  
+    // 4. ボットの権限チェック
+  if (!message.guild.members.me.permissions.has('ManageMessages')) {
+      console.log(`[画像代行] ボットにManageMessages権限がありません`);
+    return;
+  }
+  
     // 5. メッセージがまだ存在するか再確認（重複防止の追加チェック）
     try {
       const messageExists = await message.fetch().catch(() => null);
@@ -1292,30 +1292,30 @@ client.on('messageCreate', async message => {
     const finalMessageCheck = await message.fetch().catch(() => null);
     if (!finalMessageCheck) {
       console.log(`[画像代行] 送信前にメッセージ ${messageId} が削除されました - 送信をキャンセル`);
-      return;
-    }
-    
-    const webhookMessage = await webhook.send({
-      content: sanitizedContent,
-      username: displayName,
-      avatarURL: originalAuthor.displayAvatarURL(),
-      files: files,
-      components: [actionRow],
+        return;
+      }
+      
+      const webhookMessage = await webhook.send({
+        content: sanitizedContent,
+        username: displayName,
+        avatarURL: originalAuthor.displayAvatarURL(),
+        files: files,
+        components: [actionRow],
       allowedMentions: { parse: [] }
-    });
-    
+      });
+      
     console.log(`[画像代行] Webhook送信成功: ${webhookMessage.id} (元メッセージ: ${messageId})`);
     
     // 12. 削除ボタン用の情報を保存
-    deletedMessageInfo.set(webhookMessage.id, {
-      content: originalContent,
-      author: originalAuthor,
-      attachments: originalAttachments,
-      channel: message.channel,
-      originalMessageId: message.id,
-      timestamp: Date.now()
-    });
-    
+      deletedMessageInfo.set(webhookMessage.id, {
+        content: originalContent,
+        author: originalAuthor,
+        attachments: originalAttachments,
+        channel: message.channel,
+        originalMessageId: message.id,
+        timestamp: Date.now()
+      });
+      
     // 13. クールダウンを設定（送信成功後）
     const userId = message.author.id;
     autoProxyCooldowns.set(userId, Date.now());
