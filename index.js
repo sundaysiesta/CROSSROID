@@ -88,7 +88,7 @@ client.once('ready', async () => {
   // スラッシュコマンドを登録
   const commands = [
     {
-      name: 'cronymous',
+      name: 'anonymous',
       description: '匿名でメッセージを送信します',
       options: [
         {
@@ -100,7 +100,7 @@ client.once('ready', async () => {
       ]
     },
     {
-      name: 'cronymous_resolve',
+      name: 'anonymous_resolve',
       description: '匿名IDから送信者を特定（運営専用）',
       options: [
         {

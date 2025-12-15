@@ -8,7 +8,9 @@ const {
     FILTERED_WORDS,
     ALLOWED_ROLE_IDS,
     FORCE_PROXY_ROLE_ID,
-    SECRET_SALT
+    SECRET_SALT,
+    ANONYMOUS_NAMING_PREFIXES,
+    ANONYMOUS_NAMING_SUFFIXES
 } = require('./constants');
 
 // 祝日判定関数
@@ -177,6 +179,21 @@ function isImageOrVideo(attachment) {
     return imageExtensions.includes(extension) || videoExtensions.includes(extension);
 }
 
+// ハッシュから「ダサい名前」を生成する関数
+function getAnonymousName(dailyId) {
+    const num = parseInt(dailyId, 36);
+    if (isNaN(num)) return '名無しのバグ';
+
+    const pLen = ANONYMOUS_NAMING_PREFIXES.length;
+    const sLen = ANONYMOUS_NAMING_SUFFIXES.length;
+
+    // 偏りを減らすために少し混ぜる (dailyIdは可変なのでそのままで十分ランダムだが)
+    const prefixIndex = num % pLen;
+    const suffixIndex = (Math.floor(num / pLen)) % sLen;
+
+    return `${ANONYMOUS_NAMING_PREFIXES[prefixIndex]}${ANONYMOUS_NAMING_SUFFIXES[suffixIndex]}`;
+}
+
 // ワイルドカード対応のワードマッチング関数
 function matchesFilteredWord(text, pattern) {
     // パターンからワイルドカードを除去して実際のワードを取得
@@ -229,5 +246,6 @@ module.exports = {
     isImageOrVideo,
     containsFilteredWords,
     hasAllowedRole,
-    hasForceProxyRole
+    hasForceProxyRole,
+    getAnonymousName
 };

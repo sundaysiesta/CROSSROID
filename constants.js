@@ -1,12 +1,30 @@
+// /anonymous のユーザーごとのクールダウン管理（30秒）
+const ANONYMOUS_COOLDOWN_MS = 20 * 1000;
 
-// /cronymous のユーザーごとのクールダウン管理（30秒）
-const CRONYMOUS_COOLDOWN_MS = 30 * 1000;
+// 匿名投稿の累積ペナルティ設定 (1日ごとの発言回数に基づく)
+const ANONYMOUS_COOLDOWN_TIERS = [
+    { limit: 3, time: 20 * 1000 },       // 1-3回目: 20秒
+    { limit: 10, time: 60 * 1000 },      // 4-10回目: 1分
+    { limit: 20, time: 5 * 60 * 1000 },  // 11-20回目: 5分
+    { limit: Infinity, time: 30 * 60 * 1000 } // 21回目以降: 30分
+];
+
+// 「ダサい名札」用の単語リスト
+const ANONYMOUS_NAMING_PREFIXES = [
+    '弱そうな', '陰湿な', '間の抜けた', '騒がしい', '哀れな', '勘違いした', '空気の読めない',
+    '不幸な', '無能な', '幼稚な', '自意識過剰な', '暇を持て余した', '必死な', '痛々しい',"チノ学院みたいな","アスペっぽい","オナニーずっとしてそうな"
+];
+
+const ANONYMOUS_NAMING_SUFFIXES = [
+    'スライム', 'ゴブリン',  '囚人', 'ピエロ', '量産型', 'ニート',
+    'オタク', '子供おじさん', 'ネット弁慶', 'かまってちゃん', '被害妄想', '見習い', 'モブ',"弱者男性"
+];
 
 // 自動代行投稿（メディア）のユーザーごとのクールダウン管理（20秒）
-const AUTO_PROXY_COOLDOWN_MS = 20 * 1000;
+const AUTO_PROXY_COOLDOWN_MS = 15 * 1000;
 
 // 特定ワード自動代行のユーザーごとのクールダウン管理（30秒）
-const WORD_PROXY_COOLDOWN_MS = 30 * 1000;
+const WORD_PROXY_COOLDOWN_MS = 15 * 1000;
 
 // フィルタリング対象のワードリスト（ワイルドカード対応）
 const FILTERED_WORDS = [
@@ -92,7 +110,10 @@ const VC_NOTIFY_THRESHOLDS = [10, 15, 20, 25];
 const RANDOM_MENTION_COOLDOWN_MS = 30 * 1000; // 30秒
 
 module.exports = {
-    CRONYMOUS_COOLDOWN_MS,
+    ANONYMOUS_COOLDOWN_MS,
+    ANONYMOUS_COOLDOWN_TIERS,
+    ANONYMOUS_NAMING_PREFIXES,
+    ANONYMOUS_NAMING_SUFFIXES,
     AUTO_PROXY_COOLDOWN_MS,
     WORD_PROXY_COOLDOWN_MS,
     FILTERED_WORDS,

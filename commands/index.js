@@ -1,7 +1,8 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName } = require('../utils');
+const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName, getAnonymousName } = require('../utils');
 const {
-    CRONYMOUS_COOLDOWN_MS,
+    ANONYMOUS_COOLDOWN_MS,
+    ANONYMOUS_COOLDOWN_TIERS,
     BUMP_COOLDOWN_MS,
     RANDOM_MENTION_COOLDOWN_MS,
     CLUB_CATEGORY_IDS,
@@ -16,7 +17,8 @@ const {
 const { generateTimeReportMessage } = require('../features/timeSignal');
 
 // コマンドごとのクールダウン管理
-const cronymousCooldowns = new Map();
+const anonymousCooldowns = new Map(); // lastUsed time
+const anonymousUsageCounts = new Map(); // { count: number, date: string(YYYYMMDD) }
 const bumpCooldowns = new Map();
 const randomMentionCooldowns = new Map();
 const processingCommands = new Set();
@@ -24,9 +26,9 @@ const processingCommands = new Set();
 async function handleCommands(interaction, client) {
     if (!interaction.isChatInputCommand()) return;
 
-    // cronymous コマンド
-    if (interaction.commandName === 'cronymous') {
-        const commandKey = `cronymous_${interaction.user.id}_${interaction.id}`;
+    // anonymous コマンド
+    if (interaction.commandName === 'anonymous') {
+        const commandKey = `anonymous_${interaction.user.id}_${interaction.id}`;
         if (processingCommands.has(commandKey)) {
             return interaction.reply({ content: 'このコマンドは既に処理中です。', ephemeral: true });
         }
@@ -34,12 +36,44 @@ async function handleCommands(interaction, client) {
         processingCommands.add(commandKey);
 
         const now = Date.now();
-        const lastUsed = cronymousCooldowns.get(interaction.user.id) || 0;
+        const dateObj = new Date();
+        const y = dateObj.getFullYear();
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dateObj.getDate()).padStart(2, '0');
+        const todayKey = `${y}${m}${d}`;
+
+        // 1. 回数カウントの取得とリセット
+        let usageData = anonymousUsageCounts.get(interaction.user.id) || { count: 0, date: todayKey };
+        if (usageData.date !== todayKey) {
+            usageData = { count: 0, date: todayKey };
+        }
+
+        // 2. 現在の回数に基づくクールダウン時間の決定
+        // usageData.count は「これからの発言が何回目か」 (0なら1回目)
+        const currentCount = usageData.count + 1;
+        let cooldownTime = ANONYMOUS_COOLDOWN_TIERS[0].time; // デフォルト
+
+        for (const tier of ANONYMOUS_COOLDOWN_TIERS) {
+            if (currentCount <= tier.limit) {
+                cooldownTime = tier.time;
+                break;
+            }
+        }
+
+        const lastUsed = anonymousCooldowns.get(interaction.user.id) || 0;
         const elapsed = now - lastUsed;
-        if (elapsed < CRONYMOUS_COOLDOWN_MS) {
-            const remainSec = Math.ceil((CRONYMOUS_COOLDOWN_MS - elapsed) / 1000);
+
+        if (elapsed < cooldownTime) {
+            const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
             processingCommands.delete(commandKey);
-            return interaction.reply({ content: `エラー: クールダウン中です。${remainSec}秒後に再度お試しください。`, ephemeral: true });
+
+            // クールダウン理由の説明
+            let reason = '';
+            if (currentCount >= 21) reason = ' (21回目以降: 30分制限)';
+            else if (currentCount >= 11) reason = ' (11回目以降: 5分制限)';
+            else if (currentCount >= 4) reason = ' (4回目以降: 1分制限)';
+
+            return interaction.reply({ content: `エラー: 連投制限中です${reason}。あと${remainSec}秒お待ちください。`, ephemeral: true });
         }
 
         const content = interaction.options.getString('内容');
@@ -49,9 +83,9 @@ async function handleCommands(interaction, client) {
             return interaction.reply({ content: 'エラー: 改行は使用できません。', ephemeral: true });
         }
 
-        if (content.length > 144) {
+        if (content.length > 256) {
             processingCommands.delete(commandKey);
-            return interaction.reply({ content: 'エラー: メッセージは144文字以下である必要があります。', ephemeral: true });
+            return interaction.reply({ content: 'エラー: メッセージは256文字以下である必要があります。', ephemeral: true });
         }
 
         if (content.includes('@everyone') || content.includes('@here') || content.includes('<@&')) {
@@ -62,7 +96,10 @@ async function handleCommands(interaction, client) {
         try {
             const wacchoi = generateWacchoi(interaction.user.id);
             const dailyId = generateDailyUserId(interaction.user.id);
-            const displayName = `名無しの障害者 ID: ${dailyId} (ﾜｯﾁｮｲ ${wacchoi.full})`;
+
+            // ダサい名前の決定
+            const uglyName = getAnonymousName(wacchoi.daily);
+            const displayName = `${uglyName} ID:${dailyId} (ﾜｯﾁｮｲ ${wacchoi.full})`;
             const avatarURL = client.user.displayAvatarURL();
 
             const webhooks = await interaction.channel.fetchWebhooks();
@@ -87,8 +124,12 @@ async function handleCommands(interaction, client) {
                 allowedMentions: { parse: [] }
             });
 
-            cronymousCooldowns.set(interaction.user.id, Date.now());
-            await interaction.reply({ content: '匿名メッセージを送信しました。', ephemeral: true });
+            anonymousCooldowns.set(interaction.user.id, Date.now());
+            // 回数カウントアップ
+            usageData.count++;
+            anonymousUsageCounts.set(interaction.user.id, usageData);
+
+            await interaction.reply({ content: `匿名メッセージを送信しました。(本日${usageData.count}回目)`, ephemeral: true });
 
         } catch (error) {
             console.error('エラーが発生しました:', error);
@@ -99,8 +140,8 @@ async function handleCommands(interaction, client) {
         return;
     }
 
-    // cronymous_resolve コマンド
-    if (interaction.commandName === 'cronymous_resolve') {
+    // anonymous_resolve コマンド
+    if (interaction.commandName === 'anonymous_resolve') {
         try {
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
             if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -141,7 +182,7 @@ async function handleCommands(interaction, client) {
             const list = matches.map(m => `${m.user.tag} (${m.user.id})`).join('\n');
             return interaction.editReply({ content: `一致ユーザー:\n${list}` });
         } catch (e) {
-            console.error('cronymous_resolve エラー:', e);
+            console.error('anonymous_resolve エラー:', e);
             if (interaction.deferred || interaction.replied) {
                 return interaction.editReply({ content: 'エラーが発生しました。' });
             }
@@ -453,8 +494,8 @@ async function handleCommands(interaction, client) {
 setInterval(() => {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
 
-    for (const [userId, lastUsed] of cronymousCooldowns.entries()) {
-        if (lastUsed < oneHourAgo) cronymousCooldowns.delete(userId);
+    for (const [userId, lastUsed] of anonymousCooldowns.entries()) {
+        if (lastUsed < oneHourAgo) anonymousCooldowns.delete(userId);
     }
     for (const [userId, lastBump] of bumpCooldowns.entries()) {
         if (lastBump < oneHourAgo) bumpCooldowns.delete(userId);
