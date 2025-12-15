@@ -107,6 +107,23 @@ function getDayType(date) {
     }
 }
 
+// ユーザーごと日替わりの英数字IDを生成（旧方式: UTC日基準、英小文字+数字）
+function generateDailyUserIdForDate(userId, dateUtc) {
+    const y = dateUtc.getUTCFullYear();
+    const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dateUtc.getUTCDate()).padStart(2, '0');
+    const dayKey = `${y}${m}${d}`;
+    const hash = crypto.createHash('sha256').update(`${userId}:${dayKey}`).digest('hex');
+    const segment = hash.slice(0, 10);
+    const num = parseInt(segment, 16);
+    const id36 = num.toString(36).toLowerCase();
+    return id36.slice(0, 8).padStart(6, '0');
+}
+
+function generateDailyUserId(userId) {
+    return generateDailyUserIdForDate(userId, new Date());
+}
+
 // ユーザーごと日替わりの英数字IDを生成（ワッチョイ形式）
 // 形式: WWWW-DDDD (例: 8f3a-x92z)
 // WWWW: 木曜日切替の週次ID
@@ -205,6 +222,8 @@ module.exports = {
     getHolidayName,
     getSchoolVacationType,
     getDayType,
+    generateDailyUserId,
+    generateDailyUserIdForDate,
     generateWacchoi,
     isImageOrVideo,
     containsFilteredWords,

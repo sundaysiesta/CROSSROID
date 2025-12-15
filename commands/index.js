@@ -1,5 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { generateWacchoi, getHolidayName } = require('../utils');
+const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName } = require('../utils');
 const {
     CRONYMOUS_COOLDOWN_MS,
     BUMP_COOLDOWN_MS,
@@ -57,7 +57,8 @@ async function handleCommands(interaction, client) {
 
         try {
             const wacchoi = generateWacchoi(interaction.user.id);
-            const displayName = `名無しの障害者 (ﾜｯﾁｮｲ ${wacchoi.full})`;
+            const dailyId = generateDailyUserId(interaction.user.id);
+            const displayName = `名無しの障害者 ID: ${dailyId} (ﾜｯﾁｮｲ ${wacchoi.full})`;
             const avatarURL = client.user.displayAvatarURL();
 
             const webhooks = await interaction.channel.fetchWebhooks();
@@ -121,9 +122,10 @@ async function handleCommands(interaction, client) {
             members.forEach(guildMember => {
                 const uid = guildMember.user.id;
                 const wacchoi = generateWacchoi(uid, targetDate);
-                // 完全一致 (WWWW-DDDD) または 部分一致 (WWWW) も許容するか検討だが、
-                // 運営用なのでID(WWWW-DDDD)をそのまま検索することを想定
-                if (wacchoi.full.toLowerCase().includes(idArg.toLowerCase())) {
+                const did = generateDailyUserIdForDate(uid, targetDate);
+
+                // 完全一致 (WWWW-DDDD) または 部分一致 (WWWW) または 旧ID一致
+                if (wacchoi.full.toLowerCase().includes(idArg.toLowerCase()) || did.toLowerCase() === idArg.toLowerCase()) {
                     matches.push(guildMember);
                 }
             });
