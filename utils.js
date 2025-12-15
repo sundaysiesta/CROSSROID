@@ -107,22 +107,49 @@ function getDayType(date) {
     }
 }
 
-// ユーザーごと日替わりの英数字IDを生成（UTC日基準、英小文字+数字）
-function generateDailyUserIdForDate(userId, dateUtc) {
+// ユーザーごと日替わりの英数字IDを生成（ワッチョイ形式）
+// 形式: WWWW-DDDD (例: 8f3a-x92z)
+// WWWW: 木曜日切替の週次ID
+// DDDD: 毎日切替の日次ID
+
+function generateWacchoi(userId, date = new Date()) {
+    const dateUtc = new Date(date);
+
+    // --- Weekly ID (Thursday Reset) ---
+    // 1970-01-01 is Thursday.
+    // We can just take Unix Time / (7 days).
+    // However, to ensure it aligns with JST "Thursday 00:00" might be complex,
+    // but strictly speaking 5ch uses a specific logic.
+    // Here we assume UTC Thursday 00:00 reset for simplicity and consistency.
+    const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+    const weekIndex = Math.floor(dateUtc.getTime() / oneWeekMs);
+
+    const weeklyHash = crypto.createHash('sha256').update(`${userId}:week:${weekIndex}`).digest('hex');
+    // Use first 4 chars, base36 conversion to make it look "ID-like" (alphanumeric)
+    // Parsing hex to int then to base36 ensures valid alphanumeric
+    const weeklySegment = weeklyHash.slice(0, 10);
+    const weeklyNum = parseInt(weeklySegment, 16);
+    const weeklyId = weeklyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
+
+    // --- Daily ID (Daily Reset) ---
     const y = dateUtc.getUTCFullYear();
     const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
     const d = String(dateUtc.getUTCDate()).padStart(2, '0');
     const dayKey = `${y}${m}${d}`;
-    const hash = crypto.createHash('sha256').update(`${userId}:${dayKey}`).digest('hex');
-    const segment = hash.slice(0, 10);
-    const num = parseInt(segment, 16);
-    const id36 = num.toString(36).toLowerCase();
-    return id36.slice(0, 8).padStart(6, '0');
+
+    const dailyHash = crypto.createHash('sha256').update(`${userId}:day:${dayKey}`).digest('hex');
+    const dailySegment = dailyHash.slice(0, 10);
+    const dailyNum = parseInt(dailySegment, 16);
+    const dailyId = dailyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
+
+    return {
+        full: `${weeklyId}-${dailyId}`,
+        weekly: weeklyId,
+        daily: dailyId
+    };
 }
 
-function generateDailyUserId(userId) {
-    return generateDailyUserIdForDate(userId, new Date());
-}
+
 
 // 画像・動画ファイルの拡張子をチェック
 function isImageOrVideo(attachment) {
@@ -178,8 +205,7 @@ module.exports = {
     getHolidayName,
     getSchoolVacationType,
     getDayType,
-    generateDailyUserId,
-    generateDailyUserIdForDate,
+    generateWacchoi,
     isImageOrVideo,
     containsFilteredWords,
     hasAllowedRole,

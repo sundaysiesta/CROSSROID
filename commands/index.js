@@ -1,5 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { generateDailyUserId, generateDailyUserIdForDate, getHolidayName } = require('../utils');
+const { generateWacchoi, getHolidayName } = require('../utils');
 const {
     CRONYMOUS_COOLDOWN_MS,
     BUMP_COOLDOWN_MS,
@@ -56,8 +56,8 @@ async function handleCommands(interaction, client) {
         }
 
         try {
-            const dailyId = generateDailyUserId(interaction.user.id);
-            const displayName = `名無しの障害者 ID: ${dailyId}`;
+            const wacchoi = generateWacchoi(interaction.user.id);
+            const displayName = `名無しの障害者 (ﾜｯﾁｮｲ ${wacchoi.full})`;
             const avatarURL = client.user.displayAvatarURL();
 
             const webhooks = await interaction.channel.fetchWebhooks();
@@ -120,8 +120,10 @@ async function handleCommands(interaction, client) {
             const matches = [];
             members.forEach(guildMember => {
                 const uid = guildMember.user.id;
-                const did = generateDailyUserIdForDate(uid, targetDate);
-                if (did.toLowerCase() === idArg.toLowerCase()) {
+                const wacchoi = generateWacchoi(uid, targetDate);
+                // 完全一致 (WWWW-DDDD) または 部分一致 (WWWW) も許容するか検討だが、
+                // 運営用なのでID(WWWW-DDDD)をそのまま検索することを想定
+                if (wacchoi.full.toLowerCase().includes(idArg.toLowerCase())) {
                     matches.push(guildMember);
                 }
             });
