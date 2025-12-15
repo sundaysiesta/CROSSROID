@@ -3,6 +3,18 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 const { execSync } = require('child_process');
 
+// 環境変数の読み込み（ローカル開発時のみ、他のモジュール読み込み前に実行）
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    require('dotenv').config();
+    console.log('✅ .envファイルから環境変数を読み込みました');
+  } catch (error) {
+    console.log('⚠️ .envファイルの読み込みに失敗しました:', error.message);
+  }
+} else {
+  console.log('🚀 本番環境で実行中（.envファイルは読み込みません）');
+}
+
 // Config & Constants
 const { LEVEL_10_ROLE_ID, CURRENT_GENERATION_ROLE_ID, MAIN_CHANNEL_ID } = require('./constants');
 
@@ -18,17 +30,7 @@ const legacyMigration = require('./features/legacyMigration');
 // Command Handler
 const { handleCommands } = require('./commands');
 
-// 環境変数の読み込み（ローカル開発時のみ）
-if (process.env.NODE_ENV !== 'production') {
-  try {
-    require('dotenv').config();
-    console.log('✅ .envファイルから環境変数を読み込みました');
-  } catch (error) {
-    console.log('⚠️ .envファイルの読み込みに失敗しました:', error.message);
-  }
-} else {
-  console.log('🚀 本番環境で実行中（.envファイルは読み込みません）');
-}
+
 
 // デバッグ用: 環境変数の確認
 console.log('=== 環境変数の確認 ===');
