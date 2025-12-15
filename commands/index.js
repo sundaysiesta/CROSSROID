@@ -372,8 +372,9 @@ async function handleCommands(interaction, client) {
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
             const hasRole = member && member.roles.cache.has(EVENT_ADMIN_ROLE_ID);
             const isAdmin = member && member.permissions.has(PermissionFlagsBits.Administrator);
+            const isDev = interaction.user.id === '1122179390403510335';
 
-            if (!hasRole && !isAdmin) {
+            if (!hasRole && !isAdmin && !isDev) {
                 return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
             }
 
