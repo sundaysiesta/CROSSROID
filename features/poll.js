@@ -24,13 +24,25 @@ function parseDuration(str) {
     return 24 * 60 * 60 * 1000;
 }
 
+// --- Helper: Date Parser ---
+function parseDate(str) {
+    if (!str) return null;
+    // Try standard constructor
+    let date = new Date(str);
+    if (!isNaN(date.getTime())) return date.getTime();
+    // Try simple formats (optional, standard string works well for ISO)
+    return null;
+}
+
 class PollParser {
     static parse(text) {
         const lines = text.split(/\r?\n/);
         const config = {
             title: 'No Title',
             duration: 24 * 60 * 60 * 1000,
+            startDate: null, // Timestamp if future
             mode: 'multi', // single, multi
+            maxVotes: 0, // 0 = Unlimited (if multi), 1 if single
             public: true, // true=public, false=blind
             accountAgeLimit: 0, // days
             allowSelfVote: false,
@@ -61,6 +73,7 @@ class PollParser {
 
                 if (key === 'タイトル' || key === 'Title') config.title = val;
                 if (key === '終了' || key === 'End') config.duration = parseDuration(val);
+                if (key === '開始' || key === 'Start') config.startDate = parseDate(val);
             } else if (section === 'settings') {
                 const parts = line.split(':');
                 if (parts.length < 2) continue;
@@ -69,6 +82,10 @@ class PollParser {
 
                 if (key === '投票モード') {
                     if (val.includes('単一')) config.mode = 'single';
+                }
+                if (key === '一人あたりの票数' || key === 'MaxVotes') {
+                    const limit = parseInt(val);
+                    if (!isNaN(limit)) config.maxVotes = limit;
                 }
                 if (key === '公開設定') {
                     if (val.includes('ブラインド') || val.includes('非公開') || val.includes('完全非公開')) config.public = false;
@@ -136,11 +153,16 @@ class PollManager {
             c.id = `cand_${i}`;
         });
 
+        // Set effective start date (now if null)
+        const now = Date.now();
+        const effectiveStart = config.startDate && config.startDate > now ? config.startDate : now;
+
         const pollState = {
             id: pollId,
             config: config,
             votes: {},
-            createdAt: Date.now(),
+            createdAt: now,
+            startsAt: effectiveStart,
             authorId: interaction.user.id,
             channelId: interaction.channel.id,
             messageId: null,
@@ -156,12 +178,18 @@ class PollManager {
         this.polls.set(pollId, pollState);
         this.save();
 
-        await interaction.editReply({ content: '✅ 投票を作成しました。' });
+        let replyMsg = '✅ 投票を作成しました。';
+        if (pollState.startsAt > now) {
+            replyMsg += `\n開始日時: <t:${Math.floor(pollState.startsAt / 1000)}:f>`;
+        }
+        await interaction.editReply({ content: replyMsg });
     }
 
     generateEmbed(poll, forceReveal = false) {
-        const { config, votes, ended } = poll;
+        const { config, votes, ended, startsAt } = poll;
         const totalVotes = Object.keys(votes).length;
+        const now = Date.now();
+        const isStarted = now >= startsAt;
 
         const tally = {};
         config.candidates.forEach(c => tally[c.id] = 0);
@@ -171,13 +199,14 @@ class PollManager {
             });
         });
 
+        const statusColor = ended ? 0x999999 : (isStarted ? 0x00BFFF : 0xFFA500); // Grey(End), Blue(Active), Orange(Waiting)
         const embed = new EmbedBuilder()
             .setTitle(`📊 ${config.title}`)
-            .setColor(ended ? 0x999999 : 0x00BFFF)
+            .setColor(statusColor)
             .setTimestamp(poll.createdAt)
             .setFooter({ text: `Poll ID: ${poll.id} | Mode: ${config.mode}` });
 
-        const showResults = forceReveal || (config.public && ended);
+        const showResults = forceReveal || (config.public && ended && isStarted);
 
         if (showResults) {
             let desc = '';
@@ -200,7 +229,15 @@ class PollManager {
             });
             embed.setDescription(desc);
         } else {
-            let desc = ended ? '投票は終了しました。結果発表をお待ちください。\n\n' : '投票受付中... (結果は非公開です)\n\n';
+            let desc = '';
+            if (!isStarted) {
+                desc = `⏳ **開始待機中**\n開始まですこしお待ちください。\nTime: <t:${Math.floor(startsAt / 1000)}:R>\n\n`;
+            } else if (ended) {
+                desc = '投票は終了しました。結果発表をお待ちください。\n\n';
+            } else {
+                desc = '投票受付中... (結果は非公開です)\n\n';
+            }
+
             config.candidates.forEach(c => {
                 desc += `${c.emoji} **${c.name}**\n`;
             });
@@ -208,17 +245,27 @@ class PollManager {
         }
 
         embed.addFields({ name: 'Total Votes', value: totalVotes.toString(), inline: true });
-        if (!ended) {
-            const endsAt = poll.createdAt + config.duration;
+
+        if (!isStarted) {
+            embed.addFields({ name: 'Starts', value: `<t:${Math.floor(startsAt / 1000)}:F>`, inline: true });
+        } else if (!ended) {
+            // Duration is relative to Start Time? Or Creation? Usually Creation + Duration.
+            // If Start Date is used, End Date should probably be explicit or Start + Duration.
+            // Logic: EndTime = startsAt + duration
+            const endsAt = startsAt + config.duration;
             embed.addFields({ name: 'Ends', value: `<t:${Math.floor(endsAt / 1000)}:R>`, inline: true });
         }
+
         return embed;
     }
 
     generateComponents(poll) {
         if (poll.ended) return [];
-        const { config, id } = poll;
+        const { config, id, startsAt } = poll;
+        const now = Date.now();
+        const isStarted = now >= startsAt;
         const components = [];
+        const disabled = !isStarted;
 
         if (config.candidates.length <= 20) {
             let row = new ActionRowBuilder();
@@ -231,7 +278,8 @@ class PollManager {
                     .setCustomId(`poll_vote_${id}_${c.id}`)
                     .setLabel(c.name.substring(0, 80))
                     .setEmoji(c.emoji)
-                    .setStyle(ButtonStyle.Primary);
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(disabled); // Disable if not started
                 row.addComponents(btn);
             });
             components.push(row);
@@ -241,9 +289,10 @@ class PollManager {
                 const chunk = config.candidates.slice(i, i + chunkSize);
                 const menu = new StringSelectMenuBuilder()
                     .setCustomId(`poll_select_${id}_${i}`)
-                    .setPlaceholder(`候補者を選択 ${i + 1}〜${i + chunk.length}`)
+                    .setPlaceholder(disabled ? '開始待機中...' : `候補者を選択 ${i + 1}〜${i + chunk.length}`)
                     .setMinValues(1)
                     .setMaxValues(config.mode === 'single' ? 1 : chunk.length)
+                    .setDisabled(disabled) // Disable if not started
                     .addOptions(chunk.map(c => ({
                         label: c.name.substring(0, 100),
                         value: c.id,
@@ -261,6 +310,11 @@ class PollManager {
         const poll = this.polls.get(pollId);
 
         if (!poll) return interaction.reply({ content: 'この投票は終了しているか、存在しません。', ephemeral: true });
+
+        // Check Start Time
+        if (Date.now() < poll.startsAt) {
+            return interaction.reply({ content: `⏳ 投票はまだ開始されていません。\n開始時刻: <t:${Math.floor(poll.startsAt / 1000)}:R>`, ephemeral: true });
+        }
 
         const member = interaction.member;
 
@@ -298,25 +352,39 @@ class PollManager {
             votedCands = interaction.values;
         }
 
-        // Improved Logic:
-        // Multi Mode with Button -> Toggle
-        // Multi Mode with Select -> Replace (Discord UI limitation implies replacement)
+        // Logic switch for Single/Multi
+        // Also check MaxVotes
+        let currentVotes = poll.votes[interaction.user.id] || [];
+
         if (poll.config.mode === 'single') {
+            // Replace always
             poll.votes[interaction.user.id] = votedCands;
         } else {
+            // Multi Mode
             if (interaction.isButton()) {
-                const current = poll.votes[interaction.user.id] || [];
+                // Toggle logic
                 const cid = votedCands[0];
-                if (current.includes(cid)) {
-                    poll.votes[interaction.user.id] = current.filter(id => id !== cid);
+                if (currentVotes.includes(cid)) {
+                    // Remove
+                    poll.votes[interaction.user.id] = currentVotes.filter(id => id !== cid);
                 } else {
-                    poll.votes[interaction.user.id] = [...current, cid];
+                    // Add - CHECK LIMIT
+                    if (poll.config.maxVotes > 0 && currentVotes.length >= poll.config.maxVotes) {
+                        return interaction.reply({ content: `⛔ 一人あたり最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
+                    }
+                    poll.votes[interaction.user.id] = [...currentVotes, cid];
                 }
-                votedCands = poll.votes[interaction.user.id];
             } else {
+                // Select Menu - CHECK LIMIT
+                if (poll.config.maxVotes > 0 && votedCands.length > poll.config.maxVotes) {
+                    return interaction.reply({ content: `⛔ 選択数が多すぎます。最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
+                }
                 poll.votes[interaction.user.id] = votedCands;
             }
         }
+
+        // Re-read votes for feedback
+        votedCands = poll.votes[interaction.user.id] || [];
 
         this.save();
 
@@ -329,40 +397,34 @@ class PollManager {
 
         const msg = await interaction.channel.messages.fetch(poll.messageId).catch(() => null);
         if (msg) {
-            await msg.edit({ embeds: [this.generateEmbed(poll)] });
+            await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
         }
     }
 
-    // New Method: Show Status (Admin Only)
     async showStatus(interaction, pollId) {
         const poll = this.polls.get(pollId);
         if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
-        if (poll.config.public && poll.ended) return interaction.reply({ content: 'この投票は既に結果が公開されています。', ephemeral: true });
 
-        // Show embed with forceReveal=true
         const embed = this.generateEmbed(poll, true);
         embed.setTitle(`🕵️ [Admin Peek] ${poll.config.title}`);
         await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // New Method: Publish Result (Admin Only)
     async publishResult(interaction, pollId) {
         const poll = this.polls.get(pollId);
         if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
 
-        // Send a NEW message with the results
         const embed = this.generateEmbed(poll, true);
         embed.setTitle(`🏆 結果発表: ${poll.config.title}`);
 
         await interaction.channel.send({ content: '## ⚡ 投票結果発表！', embeds: [embed] });
         await interaction.reply({ content: '✅ 結果を公開しました。', ephemeral: true });
 
-        // Optionally update the original message to closed state (if not already)
         if (!poll.ended) {
             poll.ended = true;
             this.save();
             const msg = await interaction.channel.messages.fetch(poll.messageId).catch(() => null);
-            if (msg) await msg.edit({ components: [] }); // Remove buttons
+            if (msg) await msg.edit({ components: [] });
         }
     }
 }
