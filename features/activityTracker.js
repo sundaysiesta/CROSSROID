@@ -66,7 +66,7 @@ async function backfill(client) {
         // If scanned within last 2 hours AND reached Start of Month (with 1 hour margin)
         if (scanAge < 2 * 60 * 60 * 1000 && oldestScanDepth <= startOfMonthTimestamp + (60 * 60 * 1000)) {
             console.log(`[ActivityTracker] ✅ Skipping Deep Scan (Data is fresh, scanned ${Math.floor(scanAge / 60000)} mins ago).`);
-            require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Scanned: ${new Date(lastDeepScan).toLocaleTimeString('ja-JP')}).\nStarting normal tracking.`, 'ActivityTracker');
+            require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Scanned: ${new Date(lastDeepScan).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo' })}).\nStarting normal tracking.`, 'ActivityTracker');
             isBackfilling = false;
             return;
         }
@@ -82,7 +82,7 @@ async function backfill(client) {
     let oldestReached = Date.now();
 
     try {
-        const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP');
+        const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
         require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: Until ${dateStr} (Start of Month)\n(Timestamp: ${startOfMonthTimestamp})`, 'ActivityTracker');
 
         while (loops < MAX_LOOPS) {
@@ -94,7 +94,7 @@ async function backfill(client) {
 
             for (const msg of msgs.values()) {
                 if (msg.createdTimestamp < startOfMonthTimestamp) {
-                    console.log(`[ActivityTracker] Stop Reason: Reached cutoff date. MsgDate: ${new Date(msg.createdTimestamp).toLocaleString('ja-JP')}`);
+                    console.log(`[ActivityTracker] Stop Reason: Reached cutoff date. MsgDate: ${new Date(msg.createdTimestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`);
                     lastId = null; // Signal stop
                     break;
                 }
@@ -139,7 +139,8 @@ async function backfill(client) {
 
         saveData();
         console.log('[ActivityTracker] Backfill complete.');
-        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.\nDepth: ${new Date(oldestReached).toLocaleDateString('ja-JP')}\n(Target was: ${dateStr})`, 'ActivityTracker');
+        const reachedDateStr = new Date(oldestReached).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.\nDepth: ${reachedDateStr}\n(Target was: ${dateStr})`, 'ActivityTracker');
     } catch (e) {
         console.error('[ActivityTracker] Backfill error:', e);
         require('../utils').logError(e, 'ActivityTracker Backfill');
