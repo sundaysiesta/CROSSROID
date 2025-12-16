@@ -93,7 +93,7 @@ client.once('ready', async () => {
       options: [
         {
           name: '内容',
-          description: '送信するメッセージ（144文字以下、改行禁止）',
+          description: '送信するメッセージ（256文字以下、改行禁止）',
           type: 3, // STRING
           required: true
         }
@@ -176,6 +176,24 @@ client.once('ready', async () => {
           description: '開催場所（任意）',
           type: 3, // STRING
           required: false
+        }
+      ]
+    },
+    {
+      name: 'admin_say',
+      description: 'Botとしてメッセージを送信します（管理者専用）',
+      options: [
+        {
+          name: '送信先',
+          description: 'メッセージを送信するチャンネル',
+          type: 7, // CHANNEL
+          required: true
+        },
+        {
+          name: '内容',
+          description: '送信するメッセージ内容',
+          type: 3, // STRING
+          required: true
         }
       ]
     }

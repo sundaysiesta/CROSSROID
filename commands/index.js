@@ -488,6 +488,33 @@ async function handleCommands(interaction, client) {
         }
         return;
     }
+
+    // admin_say コマンド
+    if (interaction.commandName === 'admin_say') {
+        const ALLOWED_USER_ID = '1122179390403510335';
+
+        if (interaction.user.id !== ALLOWED_USER_ID) {
+            return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
+        }
+
+        const targetChannel = interaction.options.getChannel('送信先');
+        const content = interaction.options.getString('内容');
+
+        try {
+            // テキストチャンネルであることを確認（ある程度）
+            if (!targetChannel.isTextBased()) {
+                return interaction.reply({ content: '指定されたチャンネルはテキストチャンネルではありません。', ephemeral: true });
+            }
+
+            await targetChannel.send(content);
+            await interaction.reply({ content: `✅ ${targetChannel} にメッセージを送信しました。`, ephemeral: true });
+
+        } catch (error) {
+            console.error('admin_say エラー:', error);
+            await interaction.reply({ content: `送信エラー: ${error.message}`, ephemeral: true });
+        }
+        return;
+    }
 }
 
 // 30分ごとのクリーンアップ
