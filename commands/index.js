@@ -526,7 +526,7 @@ async function handleCommands(interaction, client) {
         }
 
         const name = interaction.options.getString('名前');
-        const category = interaction.options.getChannel('カテゴリ');
+        const categoryId = interaction.options.getString('カテゴリid');
         const typeStr = interaction.options.getString('タイプ') || 'text';
 
         // ChannelType.GuildText = 0, GuildVoice = 2
@@ -542,10 +542,13 @@ async function handleCommands(interaction, client) {
                 type: type,
             };
 
-            if (category) {
-                // カテゴリチャンネルか確認 (ChannelType.GuildCategory = 4)
+            if (categoryId) {
+                const category = await interaction.guild.channels.fetch(categoryId).catch(() => null);
+                if (!category) {
+                    return interaction.editReply(`エラー: 指定されたID (${categoryId}) のチャンネルが見つかりません。`);
+                }
                 if (category.type !== ChannelType.GuildCategory) {
-                    return interaction.editReply('エラー: 指定されたチャンネルはカテゴリではありません。');
+                    return interaction.editReply(`エラー: 指定されたID (${categoryId}) はカテゴリではありません。`);
                 }
                 createOptions.parent = category.id;
             }

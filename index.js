@@ -208,9 +208,9 @@ client.once('ready', async () => {
           required: true
         },
         {
-          name: 'カテゴリ',
-          description: '作成先のカテゴリ',
-          type: 7, // CHANNEL
+          name: 'カテゴリid',
+          description: '作成先のカテゴリID（指定する場合）',
+          type: 3, // STRING
           required: false
         },
         {
