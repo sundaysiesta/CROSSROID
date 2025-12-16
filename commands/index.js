@@ -168,7 +168,22 @@ async function handleCommands(interaction, client) {
                 name: eventName,
                 type: 0, // GUILD_TEXT
                 parent: EVENT_CATEGORY_ID,
-                topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`
+                topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`,
+                permissionOverwrites: [
+                    {
+                        id: guild.id, // @everyone
+                        allow: [PermissionFlagsBits.ViewChannel],
+                        deny: [PermissionFlagsBits.SendMessages]
+                    },
+                    {
+                        id: interaction.user.id, // Host
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                    },
+                    {
+                        id: ADMIN_ROLE_ID, // Admin Role
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                    }
+                ]
             });
 
             // 2. イベント詳細Embed (新チャンネル用)
@@ -217,6 +232,76 @@ async function handleCommands(interaction, client) {
                 return interaction.editReply('イベント作成中にエラーが発生しました。');
             }
             return interaction.reply({ content: 'イベント作成中にエラーが発生しました。', ephemeral: true });
+        }
+        return;
+    }
+
+    // === POLL COMMAND ===
+    if (interaction.commandName === 'poll') {
+        const subcommand = interaction.options.getSubcommand();
+
+        if (subcommand === 'create') {
+            // Check Admin/Elite? Let's restrict to Admin/Elite for now to prevent spam
+            if (!(await checkAdmin(interaction)) && !interaction.member.roles.cache.has(ELITE_ROLE_ID)) {
+                return interaction.reply({ content: '⛔ 投票を作成する権限がありません。', ephemeral: true });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+            let configText = interaction.options.getString('config');
+            const file = interaction.options.getAttachment('file');
+
+            if (file) {
+                // Fetch file content
+                try {
+                    const response = await fetch(file.url);
+                    if (!response.ok) throw new Error('Failed to fetch file');
+                    configText = await response.text();
+                } catch (e) {
+                    return interaction.editReply('❌ 設定ファイルの読み込みに失敗しました。');
+                }
+            }
+
+            if (!configText) return interaction.editReply('❌ 設定テキストまたはファイルを指定してください。');
+
+            const PollManager = require('../features/poll');
+            await PollManager.createPoll(interaction, configText);
+        } else if (subcommand === 'end') {
+            if (!(await checkAdmin(interaction))) {
+                return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+            }
+            const pollId = interaction.options.getString('id');
+            const PollManager = require('../features/poll');
+            const poll = PollManager.polls.get(pollId);
+
+            if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
+
+            poll.ended = true;
+            PollManager.save();
+
+            // Update Message
+            const channel = await client.channels.fetch(poll.channelId).catch(() => null);
+            if (channel) {
+                const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
+                if (msg) {
+                    await msg.edit({ embeds: [PollManager.generateEmbed(poll)], components: [] });
+                    await msg.reply('🛑 投票は終了しました。');
+                }
+            }
+            await interaction.reply({ content: `✅ 投票(ID: ${pollId})を終了しました。`, ephemeral: true });
+        } else if (subcommand === 'status') {
+            if (!(await checkAdmin(interaction))) {
+                return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+            }
+            const pollId = interaction.options.getString('id');
+            const PollManager = require('../features/poll');
+            await PollManager.showStatus(interaction, pollId);
+        } else if (subcommand === 'result') {
+            if (!(await checkAdmin(interaction))) {
+                return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+            }
+            const pollId = interaction.options.getString('id');
+            const PollManager = require('../features/poll');
+            await PollManager.publishResult(interaction, pollId);
         }
         return;
     }
