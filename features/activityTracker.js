@@ -58,19 +58,7 @@ async function backfill(client) {
     const startOfMonthTimestamp = new Date(`${y}-${m.padStart(2, '0')}-01T00:00:00+09:00`).getTime();
 
 
-    // --- SMART SKIP LOGIC ---
-    if (activityCache._meta) {
-        const { lastDeepScan, oldestScanDepth } = activityCache._meta;
-        const scanAge = Date.now() - (lastDeepScan || 0);
-
-        // If scanned within last 2 hours AND reached Start of Month (with 1 hour margin)
-        if (scanAge < 2 * 60 * 60 * 1000 && oldestScanDepth <= startOfMonthTimestamp + (60 * 60 * 1000)) {
-            console.log(`[ActivityTracker] ✅ Skipping Deep Scan (Data is fresh, scanned ${Math.floor(scanAge / 60000)} mins ago).`);
-            require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Scanned: ${new Date(lastDeepScan).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo' })}).\nStarting normal tracking.`, 'ActivityTracker');
-            isBackfilling = false;
-            return;
-        }
-    }
+    
     // ------------------------
 
     let lastId = undefined;
