@@ -68,7 +68,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-  res.send('CROSSROID is alive!');
+  res.send({'status': 'alive', 'uptime': `${client.uptime}ms`, 'ping': `${client.ws.ping}ms`});
 });
 
 // ボットが準備完了したときに一度だけ実行されるイベント
