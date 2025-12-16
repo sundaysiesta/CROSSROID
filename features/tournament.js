@@ -2,6 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const crypto = require('crypto');
 const { MAIN_CHANNEL_ID, CURRENT_GENERATION_ROLE_ID } = require('../constants');
 const ActivityTracker = require('./activityTracker');
+const NotionManager = require('./notion');
 
 class TournamentManager {
     async start(interaction, config) {
@@ -9,22 +10,18 @@ class TournamentManager {
 
         const guild = interaction.guild;
 
-        // --- Activity Ranking Selection ---
-        await interaction.editReply({ content: '📊 メインチャンネルの活動状況を取得しています...' });
+        // --- 0. Pre-fetch Notion Data (Name Resolution) ---
+        await interaction.editReply({ content: '📚 Notionデータベースから名簿を取得しています...' });
+        const notionMap = await NotionManager.getNameMap();
 
-        // 1. Get Ranking (30 days)
-        const ranking = ActivityTracker.getUserRanking(30);
+        // --- 1. Activity Ranking (Current Month) ---
+        await interaction.editReply({ content: '📊 メインチャンネルの活動状況(今月)を取得しています...' });
 
-        // 2. Fetch Generation Role Members (to intersect)
+        // Use 'month' mode for strictly this month's activity
+        const ranking = ActivityTracker.getUserRanking('month');
+
+        // --- 2. Filter & Resolve Names ---
         const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-
-        // Optimizing fetch: Fetch only ranked users? 
-        // No, we need to check roles. We can fetch ALL or fetch ranked.
-        // If ranking is large (thousands), fetching all is better.
-        // If ranking is small (hundreds), fetching specific is better.
-        // Assuming hundreds for "regulars".
-        // But guild could have 10k members.
-        // We'll fetch ALL members for safety regarding role checks logic consistency.
         const allMembers = await guild.members.fetch();
 
         const eligibleCandidates = [];
@@ -41,8 +38,12 @@ class TournamentManager {
             const hasCurrentGen = member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
 
             if (hasGenRole || hasCurrentGen) {
+                // NAME RESOLUTION: Notion > DisplayName
+                const notionName = notionMap.get(member.id);
+                const finalName = notionName || member.displayName;
+
                 eligibleCandidates.push({
-                    name: member.displayName,
+                    name: finalName,
                     userId: member.id,
                     emoji: null,
                     messageCount: count
@@ -157,7 +158,7 @@ class TournamentManager {
                 const channel = await client.channels.fetch(seriesPolls[0].channelId).catch(() => null);
                 if (channel) {
                     await channel.send('# 🏆 予選終了！ 決勝戦開始！');
-                    await PollManager.createPollInternal(channel, finalConfig);
+                    await PollManager.createPollInternal(channel, finalConfig, seriesPolls[0].authorId);
                 }
             }
         }

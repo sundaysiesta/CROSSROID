@@ -67,11 +67,14 @@ async function backfill(client) {
 
     let lastId = undefined;
     let loops = 0;
-    const LIMIT_MSGS = 5000; // Backfill 5000 messages
+    const LIMIT_MSGS = 100000; // Deep Backfill: 100k messages
+    const MAX_LOOPS = LIMIT_MSGS / 100;
     const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
     try {
-        while (loops < 50) { // 50 * 100 = 5000
+        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: ${LIMIT_MSGS} msgs (or 30 days depth)`, 'ActivityTracker');
+
+        while (loops < MAX_LOOPS) {
             const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
             if (msgs.size === 0) break;
 
@@ -98,12 +101,20 @@ async function backfill(client) {
             }
             if (!lastId) break;
             loops++;
-            if (loops % 10 === 0) console.log(`[ActivityTracker] Backfill progress: ${loops * 100} msgs`);
+            if (loops % 50 === 0) { // Log every 5000 messages
+                const progress = Math.round((loops / MAX_LOOPS) * 100);
+                console.log(`[ActivityTracker] Backfill progress: ${loops * 100} msgs`);
+                if (loops % 100 === 0) { // Log to Discord every 10k messages to avoid spam
+                    require('../utils').logSystem(`📊 **Backfill Progress**\nScanned: ${loops * 100} / ${LIMIT_MSGS} messages`, 'ActivityTracker');
+                }
+            }
         }
         saveData();
         console.log('[ActivityTracker] Backfill complete.');
+        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.`, 'ActivityTracker');
     } catch (e) {
         console.error('[ActivityTracker] Backfill error:', e);
+        require('../utils').logError(e, 'ActivityTracker Backfill');
     } finally {
         isBackfilling = false;
     }
@@ -138,9 +149,18 @@ function setup(client) {
     }, 5 * 60 * 1000);
 }
 
-function getUserRanking(days = 30) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
+function getUserRanking(mode = 30) {
+    let cutoff = new Date();
+
+    if (mode === 'month') {
+        // First day of current month
+        cutoff.setDate(1);
+        cutoff.setHours(0, 0, 0, 0);
+    } else {
+        // Last N days
+        const days = typeof mode === 'number' ? mode : 30;
+        cutoff.setDate(cutoff.getDate() - days);
+    }
 
     const ranking = [];
 
