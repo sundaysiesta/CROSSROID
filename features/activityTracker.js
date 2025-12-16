@@ -68,7 +68,7 @@ async function backfill(client) {
                     lastId = null;
                     break;
                 }
-                if (msg.author.bot) {
+                if (!msg.author || msg.author.bot) {
                     lastId = msg.id;
                     continue;
                 }

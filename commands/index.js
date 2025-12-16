@@ -141,6 +141,8 @@ async function handleCommands(interaction, client) {
 
     if (interaction.commandName === 'event_create') {
         try {
+            await interaction.deferReply({ ephemeral: true });
+
             // 権限チェック (管理者 または 特定ロール)
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
             const hasRole = member && member.roles.cache.has(EVENT_ADMIN_ROLE_ID);
@@ -150,10 +152,10 @@ async function handleCommands(interaction, client) {
             console.log(`[EventCreate] User: ${interaction.user.id}, Role: ${hasRole}, Admin: ${isAdmin}, Dev: ${isDev}`);
 
             if (!hasRole && !isAdmin && !isDev) {
-                return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
+                return interaction.editReply({ content: '⛔ 権限がありません。' });
             }
-
-            await interaction.deferReply({ ephemeral: true });
+            // Defer was already called at start
+            // await interaction.deferReply({ ephemeral: true }); // Removed redundant call
 
             const eventName = interaction.options.getString('イベント名');
             const eventContent = interaction.options.getString('内容');
@@ -203,8 +205,8 @@ async function handleCommands(interaction, client) {
                                 PermissionFlagsBits.AttachFiles,
                                 PermissionFlagsBits.ReadMessageHistory,
                                 PermissionFlagsBits.ManageChannels,
-                                
-                                
+
+
                             ]
                         }
                     ]
