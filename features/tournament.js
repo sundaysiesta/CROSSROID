@@ -1,82 +1,61 @@
 const { EmbedBuilder } = require('discord.js');
 const crypto = require('crypto');
+const { MAIN_CHANNEL_ID, CURRENT_GENERATION_ROLE_ID } = require('../constants');
+const ActivityTracker = require('./activityTracker');
 
 class TournamentManager {
     async start(interaction, config) {
         await interaction.editReply({ content: '🏆 選手権モードの準備中... 参加者を収集中です。' });
 
         const guild = interaction.guild;
-        // Fetch all members
-        const { MAIN_CHANNEL_ID } = require('../constants');
 
         // --- Activity Ranking Selection ---
-        await interaction.editReply({ content: '📊 直近1ヶ月の発言数を集計しています... (これには数分かかる場合があります)' });
+        await interaction.editReply({ content: '📊 メインチャンネルの活動状況を取得しています...' });
 
-        const mainChannel = guild.channels.cache.get(MAIN_CHANNEL_ID);
-        if (!mainChannel) {
-            return interaction.followUp({ content: '❌ メインチャンネルが見つかりません。', ephemeral: true });
-        }
+        // 1. Get Ranking (30 days)
+        const ranking = ActivityTracker.getUserRanking(30);
 
-        const counts = {};
-        let lastId = undefined;
-        const now = Date.now();
-        const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
-        let loops = 0;
-        const FETCH_LIMIT = 100; // 100 * 100 = 10,000 messages max
+        // 2. Fetch Generation Role Members (to intersect)
+        const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
 
-        try {
-            while (loops < FETCH_LIMIT) {
-                const msgs = await mainChannel.messages.fetch({ limit: 100, before: lastId });
-                if (msgs.size === 0) break;
+        // Optimizing fetch: Fetch only ranked users? 
+        // No, we need to check roles. We can fetch ALL or fetch ranked.
+        // If ranking is large (thousands), fetching all is better.
+        // If ranking is small (hundreds), fetching specific is better.
+        // Assuming hundreds for "regulars".
+        // But guild could have 10k members.
+        // We'll fetch ALL members for safety regarding role checks logic consistency.
+        const allMembers = await guild.members.fetch();
 
-                let stop = false;
-                for (const msg of msgs.values()) {
-                    if (msg.createdTimestamp < oneMonthAgo) {
-                        stop = true;
-                        break;
-                    }
-                    if (msg.author.bot) continue;
-                    counts[msg.author.id] = (counts[msg.author.id] || 0) + 1;
-                    lastId = msg.id;
-                }
+        const eligibleCandidates = [];
 
-                if (stop) break;
-                loops++;
+        for (const { userId, count } of ranking) {
+            // Cutoff: Minimum 5 messages
+            if (count < 5) continue;
 
-                if (loops % 5 === 0) {
-                    await interaction.editReply({ content: `📊 発言数集計中... (${loops * 100}件 完了)` });
-                }
-            }
-        } catch (e) {
-            console.error('Message fetch failed:', e);
-            await interaction.followUp({ content: '⚠️ 集計中にエラーが発生しましたが、取得できたデータで続行します。', ephemeral: true });
-        }
+            const member = allMembers.get(userId);
+            if (!member) continue;
 
-        // Sort by count
-        const sortedIds = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-        const TOP_N = 80; // 20 * 4
-        const topIds = sortedIds.slice(0, TOP_N);
+            // Check Generation Role
+            const hasGenRole = member.roles.cache.some(r => romanRegex.test(r.name));
+            const hasCurrentGen = member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
 
-        const participants = [];
-        if (topIds.length > 0) {
-            const fetchedMembers = await guild.members.fetch({ user: topIds });
-            // Preserve Rank Order? User said "Participate in ranking order".
-            // We need to map back to sortedIds order
-            for (const id of topIds) {
-                const m = fetchedMembers.get(id);
-                if (m) {
-                    participants.push({
-                        name: m.displayName,
-                        userId: m.id,
-                        emoji: null,
-                        messageCount: counts[id] // Optional: Store count for debug/display?
-                    });
-                }
+            if (hasGenRole || hasCurrentGen) {
+                eligibleCandidates.push({
+                    name: member.displayName,
+                    userId: member.id,
+                    emoji: null,
+                    messageCount: count
+                });
             }
         }
+
+        // Limit to Top 80
+        const TOP_N = 80;
+        const participants = eligibleCandidates.slice(0, TOP_N);
 
         if (participants.length < 4) {
-            return interaction.followUp({ content: '❌ 参加者が足りません（最低4名）。世代ロールを確認してください。', ephemeral: true });
+            return interaction.followUp({ content: '❌ 参加条件を満たすメンバーが見つかりませんでした (4名未満)。\n・データ集計中(初回起動後5分)\n・または発言不足\n・世代ロール欠如', ephemeral: true });
         }
 
         // Shuffle
@@ -118,22 +97,15 @@ class TournamentManager {
                 ...config,
                 title: `${config.title} - 予選ブロック: ${house}`,
                 candidates: groupCandidates,
-                mode: 'multi', // Qualifiers usually multi? Or single? Let's default to Multi as per generic settings, or override to Single if user specified.
+                mode: 'multi', // Qualifiers usually multi
                 // Inherit mode from parent config
                 seriesId: seriesId,
                 stage: 'qualifier',
                 house: house,
-                maxVotes: config.maxVotes || 2 // Allow 2 votes in qualifiers? Or inherit.
+                maxVotes: config.maxVotes || 2
             };
 
-            // We need to send this as a "New Poll".
-            // Note: PollManager.createPoll usually takes interaction.
-            // We should use a lower level method `createPollFromConfig`.
-            // But `createPoll` does interaction reply.
-            // We want to post multiple messages.
-
-            // We will add `createPollInternal(channel, config)` to PollManager.
-            await PollManager.createPollInternal(interaction.channel, pollConfig);
+            await PollManager.createPollInternal(interaction.channel, pollConfig, interaction.user.id);
         }
 
         await interaction.followUp({ content: '✅ 予選ブロックを作成しました！' });

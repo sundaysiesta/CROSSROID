@@ -449,6 +449,9 @@ client.once('ready', async () => {
   roleAward.setup(client);
   legacyMigration.setup(client);
 
+  const activityTracker = require('./features/activityTracker');
+  activityTracker.setup(client);
+
   const PollManager = require('./features/poll');
   PollManager.startTicker(client);
 });
