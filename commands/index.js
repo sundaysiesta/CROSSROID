@@ -164,41 +164,78 @@ async function handleCommands(interaction, client) {
             if (!guild) return interaction.editReply('サーバー内でのみ使用可能です。');
 
             // 1. チャンネル作成
-            const newChannel = await guild.channels.create({
-                name: eventName,
-                type: 0, // GUILD_TEXT
-                parent: EVENT_CATEGORY_ID,
-                topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`,
-                permissionOverwrites: [
-                    {
-                        id: guild.id, // @everyone
-                        allow: [PermissionFlagsBits.ViewChannel],
-                        deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.CreatePrivateThreads, PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendPolls,PermissionFlagsBits.SendMessagesInThreads,PermissionFlagsBits.SendMessagesInThreads]
-                    },
-                    {
-                        id: interaction.user.id, // Host
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-                    },
-                    {
-                        id: ADMIN_ROLE_ID, // Admin Role
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-                    },
-                    {
-                        id: client.user.id, // Bot itself
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.EmbedLinks,
-                            PermissionFlagsBits.AttachFiles,
-                            PermissionFlagsBits.ReadMessageHistory,
-                            PermissionFlagsBits.Administrator,
-                            PermissionFlagsBits.ManageChannels,
-                            PermissionFlagsBits.ManageRoles,
-                            PermissionFlagsBits.ManageMessages
+            // 1. チャンネル作成
+            let newChannel;
+            try {
+                newChannel = await guild.channels.create({
+                    name: eventName,
+                    type: 0, // GUILD_TEXT
+                    parent: EVENT_CATEGORY_ID,
+                    topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`,
+                    permissionOverwrites: [
+                        {
+                            id: guild.id, // @everyone
+                            allow: [PermissionFlagsBits.ViewChannel],
+                            deny: [
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.EmbedLinks,
+                                PermissionFlagsBits.AttachFiles,
+                                PermissionFlagsBits.CreatePrivateThreads,
+                                PermissionFlagsBits.CreatePublicThreads,
+                                PermissionFlagsBits.SendPolls,
+                                PermissionFlagsBits.SendMessagesInThreads
+                            ]
+                        },
+                        {
+                            id: interaction.user.id, // Host
+                            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                        },
+                        {
+                            id: ADMIN_ROLE_ID, // Admin Role
+                            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                        },
+                        {
+                            id: client.user.id, // Bot itself
+                            allow: [
+                                PermissionFlagsBits.ViewChannel,
+                                PermissionFlagsBits.SendMessages,
+                                PermissionFlagsBits.EmbedLinks,
+                                PermissionFlagsBits.AttachFiles,
+                                PermissionFlagsBits.ReadMessageHistory,
+                                PermissionFlagsBits.Administrator,
+                                PermissionFlagsBits.ManageChannels,
+                                PermissionFlagsBits.ManageRoles,
+                                PermissionFlagsBits.ManageMessages
+                            ]
+                        }
+                    ]
+                });
+            } catch (err) {
+                if (err.code === 50013) {
+                    // Fallback: Create without category
+                    console.warn('Category permission missing, creating in root.');
+                    newChannel = await guild.channels.create({
+                        name: eventName,
+                        type: 0,
+                        // No parent
+                        topic: `イベント: ${eventName} | 作成者: ${interaction.user.username} (カテゴリ権限エラーによりルートに作成)`,
+                        permissionOverwrites: [
+                            {
+                                id: guild.id,
+                                allow: [PermissionFlagsBits.ViewChannel],
+                                deny: [PermissionFlagsBits.SendMessages]
+                            },
+                            {
+                                id: client.user.id,
+                                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.Administrator]
+                            }
                         ]
-                    }
-                ]
-            });
+                    });
+                    await interaction.followUp({ content: '⚠️ イベントカテゴリへのアクセス権限がありませんでした。チャンネルをカテゴリ外に作成しました。', ephemeral: true });
+                } else {
+                    throw err;
+                }
+            }
 
             // 2. イベント詳細Embed (新チャンネル用)
             const detailEmbed = new EmbedBuilder()
