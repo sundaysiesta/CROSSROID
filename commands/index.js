@@ -200,7 +200,7 @@ async function handleCommands(interaction, client) {
                 .setFooter({ text: 'CROSSROID Event System', iconURL: client.user.displayAvatarURL() });
 
             await newChannel.send({
-                content: '@everyone 新しいイベントが作成されました！',
+                content: '新しいイベントが作成されました！',
                 embeds: [detailEmbed]
             });
 

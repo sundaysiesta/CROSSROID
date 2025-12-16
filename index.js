@@ -10,6 +10,7 @@ if (process.env.NODE_ENV !== 'production') {
     console.log('✅ .envファイルから環境変数を読み込みました');
   } catch (error) {
     console.log('⚠️ .envファイルの読み込みに失敗しました:', error.message);
+    require('./utils').logSystem(`⚠️ .envファイルの読み込みに失敗しました: ${error.message}`, 'Env Config');
   }
 } else {
   console.log('🚀 本番環境で実行中（.envファイルは読み込みません）');
@@ -75,6 +76,7 @@ app.get('/', (req, res) => {
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   console.log(`CROSSROID, ready for duty.`);
+  require('./utils').logSystem(`Logged in as **${client.user.tag}**!\nCROSSROID, ready for duty.`, 'Startup');
 
   const guild = client.guilds.cache.first();
   if (guild) {
@@ -372,8 +374,10 @@ client.once('ready', async () => {
     console.log('スラッシュコマンドを登録中...');
     await client.application.commands.set(commands);
     console.log('スラッシュコマンドの登録が完了しました！');
+    require('./utils').logSystem('✅ Slash commands registered successfully.', 'Command Registry');
   } catch (error) {
     console.error('スラッシュコマンドの登録に失敗しました:', error);
+    require('./utils').logError(error, 'Command Registry');
   }
 
   // 再起動通知を送信
@@ -409,6 +413,7 @@ client.once('ready', async () => {
     }
   } catch (e) {
     console.error('再起動通知の送信に失敗しました:', e);
+    require('./utils').logError(e, 'Restart Notification');
   }
 
   // 各機能のセットアップ
@@ -438,26 +443,31 @@ client.on('interactionCreate', async interaction => {
 // エラーハンドリング（未捕捉の例外）
 process.on('uncaughtException', (error) => {
   console.error('【CRASH PREVENTION】Uncaught Exception:', error);
+  require('./utils').logError(error, 'Uncaught Exception');
   // プロセスを終了させない
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('【CRASH PREVENTION】Unhandled Rejection:', reason);
+  require('./utils').logError(reason, 'Unhandled Rejection');
   // プロセスを終了させない
 });
 
 // ログイン
 if (!process.env.DISCORD_TOKEN) {
   console.error('❌ DISCORD_TOKENがありません。終了します。');
+  require('./utils').logError(new Error('DISCORD_TOKEN is missing'), 'Startup');
   process.exit(1);
 }
 
 client.login(process.env.DISCORD_TOKEN).catch(error => {
   console.error('❌ ログイン失敗:', error);
+  require('./utils').logError(error, 'Login');
   process.exit(1);
 });
 
 // Webサーバー起動
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}. Ready for Uptime Robot.`);
+  require('./utils').logSystem(`Server is running on port ${PORT}.`, 'Web Server');
 });
