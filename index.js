@@ -187,8 +187,14 @@ client.once('ready', async () => {
         },
         {
           name: 'poll_manifesto',
-          description: '投票設定（省略時はイベント内容を使用）',
+          description: '投票設定テキスト（またはファイルを添付）',
           type: 3, // STRING
+          required: false
+        },
+        {
+          name: 'poll_manifesto_file',
+          description: '投票設定ファイル（.txt）',
+          type: 11, // ATTACHMENT
           required: false
         }
       ]
@@ -377,6 +383,12 @@ client.once('ready', async () => {
           description: '投票結果を公開・発表します（管理者専用）',
           type: 1,
           options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
+        },
+        {
+          name: 'preview',
+          description: 'デザイン確認用のプレビュー画像を生成します',
+          type: 1,
+          options: [{ name: 'count', description: '候補者数 (Default: 5)', type: 4, required: false }]
         }
       ]
     }

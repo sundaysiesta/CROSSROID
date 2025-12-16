@@ -476,6 +476,64 @@ class PollManager {
             }
         }, 60 * 1000); // Check every minute
     }
+
+    async previewPoll(interaction, count = 5) {
+        await interaction.deferReply({ ephemeral: true });
+
+        // Mock Data
+        const emojis = ['🍎', '🍊', '🍇', '🍓', '🍌', '🍉', '🥝', '🍒', '🍑', '🍍', '🍈', '🍋', '🍐', '🥭'];
+        const names = ['Sample Candidate A', 'Dr. Mario', 'Super Long Name User Who Has Too Many Titles', 'The Underrated', 'Newcomer', 'Legendary Hero', 'Villain'];
+
+        const candidates = [];
+        for (let i = 0; i < count; i++) {
+            candidates.push({
+                id: `mock${i}`,
+                name: names[i % names.length] + (i > 6 ? ` ${i}` : ''),
+                emoji: emojis[i % emojis.length]
+            });
+        }
+
+        const config = {
+            title: '【Preview】 人気投票選手権',
+            mode: 'multi',
+            candidates: candidates
+        };
+
+        // Mock Votes
+        const votes = {};
+        const totalVotes = 100 + Math.floor(Math.random() * 500);
+
+        // Random distribution (Weighted to make rank 1 clear)
+        for (let v = 0; v < totalVotes; v++) {
+            // Weighted random
+            let targetIndex = 0;
+            const r = Math.random();
+            if (r < 0.3) targetIndex = 0;
+            else if (r < 0.5) targetIndex = 1;
+            else if (r < 0.65) targetIndex = 2;
+            else targetIndex = Math.floor(Math.random() * count);
+
+            const uid = `voter_${v}`;
+            votes[uid] = [candidates[targetIndex].id];
+        }
+
+        const mockPoll = {
+            config: config,
+            votes: votes
+        };
+
+        const PollVisualizer = require('./pollVisualizer');
+        try {
+            const imageBuffer = await PollVisualizer.generateRankingImage(mockPoll);
+            await interaction.editReply({
+                content: '✅ **Design Preview Generated**\n実際のデザインを確認してください。',
+                files: [{ attachment: imageBuffer, name: 'preview.png' }]
+            });
+        } catch (e) {
+            console.error('Preview Generation Failed:', e);
+            await interaction.editReply({ content: `❌ 生成失敗: ${e.message}` });
+        }
+    }
 }
 
 module.exports = new PollManager();

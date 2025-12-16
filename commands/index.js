@@ -227,10 +227,28 @@ async function handleCommands(interaction, client) {
             });
 
             // 4. 自動投票イベントの開始
+            // 4. 自動投票イベントの開始
             const isPoll = interaction.options.getBoolean('poll_mode');
             if (isPoll) {
                 const PollManager = require('../features/poll');
-                const pollManifesto = interaction.options.getString('poll_manifesto') || eventContent;
+                let pollManifesto = interaction.options.getString('poll_manifesto');
+                const pollFile = interaction.options.getAttachment('poll_manifesto_file');
+
+                if (pollFile) {
+                    try {
+                        const response = await fetch(pollFile.url);
+                        if (response.ok) {
+                            pollManifesto = await response.text();
+                        } else {
+                            await interaction.followUp({ content: '⚠️ 添付ファイルの読み込みに失敗しました。', ephemeral: true });
+                        }
+                    } catch (e) {
+                        console.error('File fetch error:', e);
+                        await interaction.followUp({ content: '⚠️ 添付ファイルの取得エラーが発生しました。', ephemeral: true });
+                    }
+                }
+
+                pollManifesto = pollManifesto || eventContent;
 
                 // Proxy Interaction object to redirect Poll to new channel
                 const proxyInteraction = {
@@ -323,6 +341,10 @@ async function handleCommands(interaction, client) {
             const pollId = interaction.options.getString('id');
             const PollManager = require('../features/poll');
             await PollManager.publishResult(interaction, pollId);
+        } else if (subcommand === 'preview') {
+            const count = interaction.options.getInteger('count') || 5;
+            const PollManager = require('../features/poll');
+            await PollManager.previewPoll(interaction, count);
         }
         return;
     }
