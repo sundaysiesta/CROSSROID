@@ -203,8 +203,8 @@ async function handleCommands(interaction, client) {
                                 PermissionFlagsBits.AttachFiles,
                                 PermissionFlagsBits.ReadMessageHistory,
                                 PermissionFlagsBits.ManageChannels,
-                                PermissionFlagsBits.ManageRoles,
-                                PermissionFlagsBits.ManageMessages
+                                
+                                
                             ]
                         }
                     ]
