@@ -99,7 +99,9 @@ class PollParser {
                 }
                 if (key === '参加資格') {
                     const ids = val.match(/\d{17,19}/g);
-                    if (ids) config.roles = ids;
+                    if (ids) {
+                        config.roles.push(...ids);
+                    }
                 }
             } else if (section === 'candidates') {
                 // CSV: Name, Emoji

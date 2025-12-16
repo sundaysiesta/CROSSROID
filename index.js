@@ -331,41 +331,40 @@ client.once('ready', async () => {
             { name: 'role', description: 'ロール', type: 8, required: true },
             { name: 'action', description: '操作', type: 3, required: true, choices: [{ name: 'give', value: 'give' }, { name: 'take', value: 'take' }] }
           ]
-        },
-        // === Poll System ===
+        }
+      ]
+    },
+    // === Poll System ===
+    {
+      name: 'poll',
+      description: '投票を作成・管理します',
+      options: [
         {
-          name: 'poll',
-          description: '投票を作成・管理します',
-          type: 2, // SUB_COMMAND_GROUP
+          name: 'create',
+          description: '投票を作成します',
+          type: 1,
           options: [
-            {
-              name: 'create',
-              description: '投票を作成します',
-              type: 1,
-              options: [
-                { name: 'config', description: '設定テキスト(Manifesto)', type: 3, required: false },
-                { name: 'file', description: '設定ファイル(.txt)', type: 11, required: false }
-              ]
-            },
-            {
-              name: 'end',
-              description: '投票を終了します',
-              type: 1,
-              options: [{ name: 'id', description: 'Poll ID (Footer参照)', type: 3, required: true }]
-            },
-            {
-              name: 'status',
-              description: '投票の途中経過を確認します（管理者専用）',
-              type: 1,
-              options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
-            },
-            {
-              name: 'result',
-              description: '投票結果を公開・発表します（管理者専用）',
-              type: 1,
-              options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
-            }
+            { name: 'config', description: '設定テキスト(Manifesto)', type: 3, required: false },
+            { name: 'file', description: '設定ファイル(.txt)', type: 11, required: false }
           ]
+        },
+        {
+          name: 'end',
+          description: '投票を終了します',
+          type: 1,
+          options: [{ name: 'id', description: 'Poll ID (Footer参照)', type: 3, required: true }]
+        },
+        {
+          name: 'status',
+          description: '投票の途中経過を確認します（管理者専用）',
+          type: 1,
+          options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
+        },
+        {
+          name: 'result',
+          description: '投票結果を公開・発表します（管理者専用）',
+          type: 1,
+          options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
         }
       ]
     }
