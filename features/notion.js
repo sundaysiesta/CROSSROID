@@ -94,7 +94,6 @@ class NotionManager {
 
         } catch (e) {
             console.error('[NotionManager] Failed to fetch:', e);
-            logError(e, 'NotionManager');
             return new Map();
         }
     }
