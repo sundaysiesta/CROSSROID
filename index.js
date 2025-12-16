@@ -179,162 +179,156 @@ client.once('ready', async () => {
         }
       ]
     },
+    
+    // === Admin Suite ===
     {
-      name: 'admin_say',
-      description: 'Botとしてメッセージを送信します（管理者専用）',
+      name: 'admin_control',
+      description: 'チャンネル管理（ロック/解除/低速/Wipe）',
       options: [
         {
-          name: '送信先',
-          description: 'メッセージを送信するチャンネル',
-          type: 7, // CHANNEL
-          required: true
+          name: 'lock',
+          description: 'チャンネルをロックします',
+          type: 1, // SUB_COMMAND
+          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: false }]
         },
         {
-          name: '内容',
-          description: '送信するメッセージ内容',
-          type: 3, // STRING
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'admin_create',
-      description: 'チャンネルを作成します（管理者専用）',
-      options: [
-        {
-          name: '名前',
-          description: '作成するチャンネルの名前',
-          type: 3, // STRING
-          required: true
+          name: 'unlock',
+          description: 'チャンネルのロックを解除します',
+          type: 1,
+          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: false }]
         },
         {
-          name: 'カテゴリid',
-          description: '作成先のカテゴリID（指定する場合）',
-          type: 3, // STRING
-          required: false
-        },
-        {
-          name: 'タイプ',
-          description: 'チャンネルタイプ（デフォルト: Text）',
-          type: 3, // STRING
-          required: false,
-          choices: [
-            { name: 'Text', value: 'text' },
-            { name: 'Voice', value: 'voice' }
-          ]
-        }
-      ]
-    },
-    {
-      name: 'admin_delete',
-      description: 'チャンネルを削除します（管理者専用）',
-      options: [
-        {
-          name: '対象',
-          description: '削除するチャンネル',
-          type: 7, // CHANNEL
-          required: true
-        },
-        {
-          name: '理由',
-          description: '削除の理由',
-          type: 3, // STRING
-          required: false
-        }
-      ]
-    },
-    {
-      name: 'admin_purge',
-      description: 'メッセージを一括削除します（管理者専用）',
-      options: [
-        {
-          name: '件数',
-          description: '削除する件数 (1-100)',
-          type: 4, // INTEGER
-          required: true,
-          minValue: 1,
-          maxValue: 100
-        },
-        {
-          name: '対象ユーザー',
-          description: '特定のユーザーのメッセージのみ削除する場合指定',
-          type: 6, // USER
-          required: false
-        },
-        {
-          name: 'キーワード',
-          description: 'この言葉を含むメッセージのみ削除',
-          type: 3, // STRING
-          required: false
-        },
-        {
-          name: 'チャンネル',
-          description: '削除を行うチャンネル（指定なければ現在のチャンネル）',
-          type: 7, // CHANNEL
-          required: false
-        }
-      ]
-    },
-    {
-      name: 'admin_role',
-      description: 'ロールを付与/剥奪します（管理者専用）',
-      options: [
-        {
-          name: 'ユーザー',
-          description: '対象ユーザー',
-          type: 6, // USER
-          required: true
-        },
-        {
-          name: 'ロール',
-          description: '対象ロール',
-          type: 8, // ROLE
-          required: true
-        },
-        {
-          name: '操作',
-          description: '付与するか剥奪するか',
-          type: 3, // STRING
-          required: true,
-          choices: [
-            { name: '付与 (Give)', value: 'give' },
-            { name: '剥奪 (Take)', value: 'take' }
-          ]
-        }
-      ]
-    },
-    {
-      name: 'admin_user',
-      description: 'ユーザーを管理（Kick/Ban/Timeout）します（管理者専用）',
-      options: [
-        {
-          name: 'ユーザー',
-          description: '対象ユーザー',
-          type: 6, // USER
-          required: true
-        },
-        {
-          name: '操作',
-          description: '実行する操作',
-          type: 3, // STRING
-          required: true,
-          choices: [
-            { name: 'Timeout (一時制限)', value: 'timeout' },
-            { name: 'Kick (追放)', value: 'kick' },
-            { name: 'Ban (禁止)', value: 'ban' }
+          name: 'slowmode',
+          description: '低速モードを設定します',
+          type: 1,
+          options: [
+            { name: 'seconds', description: '秒数(0解除)', type: 4, required: true },
+            { name: 'channel', description: '対象チャンネル', type: 7, required: false }
           ]
         },
         {
-          name: '理由',
-          description: '処分の理由',
-          type: 3, // STRING
-          required: false
+          name: 'wipe',
+          description: '【危険】チャンネルを再生成してログを消去します',
+          type: 1,
+          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: true }]
+        }
+      ]
+    },
+    {
+      name: 'admin_user_mgmt',
+      description: 'ユーザー管理（処罰/解除/情報/操作）',
+      options: [
+        {
+          name: 'action',
+          description: '処罰または解除を行います',
+          type: 1,
+          options: [
+            { name: 'target', description: '対象ユーザー', type: 6, required: true },
+            {
+              name: 'type',
+              description: '操作タイプ',
+              type: 3,
+              required: true,
+              choices: [
+                { name: 'Timeout', value: 'timeout' },
+                { name: 'Untimeout', value: 'untimeout' },
+                { name: 'Kick', value: 'kick' },
+                { name: 'Ban', value: 'ban' },
+                { name: 'Unban', value: 'unban' }
+              ]
+            },
+            { name: 'reason', description: '理由', type: 3, required: false },
+            { name: 'duration', description: 'Timeout期間(分)', type: 4, required: false }
+          ]
         },
         {
-          name: '期間',
-          description: 'Timeoutの期間（分）（Timeout時のみ有効）',
-          type: 4, // INTEGER
-          required: false
+          name: 'nick',
+          description: 'ニックネームを変更します',
+          type: 1,
+          options: [
+            { name: 'target', description: '対象ユーザー', type: 6, required: true },
+            { name: 'name', description: '新しい名前(空欄でリセット)', type: 3, required: false } // Discord allows empty to reset? Usually commands need content. Optional 'name'
+          ]
+        },
+        {
+          name: 'dm',
+          description: 'BotからDMを送信します',
+          type: 1,
+          options: [
+            { name: 'target', description: '送信先ユーザー', type: 6, required: true },
+            { name: 'content', description: '内容', type: 3, required: true },
+            { name: 'anonymous', description: '匿名(Bot名義)にするか', type: 5, required: false }
+          ]
+        },
+        {
+          name: 'whois',
+          description: 'ユーザーの詳細情報を表示します',
+          type: 1,
+          options: [{ name: 'target', description: '対象ユーザー', type: 6, required: true }]
+        }
+      ]
+    },
+    {
+      name: 'admin_logistics',
+      description: 'ロジスティクス（移動/作成/削除/発言）',
+      options: [
+        {
+          name: 'move_all',
+          description: 'VC参加者を全員移動させます',
+          type: 1,
+          options: [
+            { name: 'from', description: '移動元VC', type: 7, required: true }, // ChannelType check in logic
+            { name: 'to', description: '移動先VC', type: 7, required: true }
+          ]
+        },
+        {
+          name: 'say',
+          description: 'Botとして発言します',
+          type: 1,
+          options: [
+            { name: 'channel', description: '送信先', type: 7, required: true },
+            { name: 'content', description: '内容', type: 3, required: true }
+          ]
+        },
+        {
+          name: 'create',
+          description: 'チャンネル作成',
+          type: 1,
+          options: [
+            { name: 'name', description: '名前', type: 3, required: true },
+            { name: 'type', description: 'タイプ(text/voice)', type: 3, required: false, choices: [{ name: 'Text', value: 'text' }, { name: 'Voice', value: 'voice' }] },
+            { name: 'category', description: 'カテゴリID', type: 3, required: false }
+          ]
+        },
+        {
+          name: 'delete',
+          description: 'チャンネル削除',
+          type: 1,
+          options: [
+            { name: 'channel', description: '対象', type: 7, required: true },
+            { name: 'reason', description: '理由', type: 3, required: false }
+          ]
+        },
+        {
+          name: 'purge',
+          description: 'メッセージ一括削除',
+          type: 1,
+          options: [
+            { name: 'amount', description: '件数', type: 4, required: true, minValue: 1, maxValue: 100 },
+            { name: 'user', description: '対象ユーザー', type: 6, required: false },
+            { name: 'keyword', description: 'キーワード', type: 3, required: false },
+            { name: 'channel', description: 'チャンネル', type: 7, required: false }
+          ]
+        },
+        {
+          name: 'role',
+          description: 'ロール操作',
+          type: 1,
+          options: [
+            { name: 'target', description: 'ユーザー', type: 6, required: true },
+            { name: 'role', description: 'ロール', type: 8, required: true },
+            { name: 'action', description: '操作', type: 3, required: true, choices: [{ name: 'give', value: 'give' }, { name: 'take', value: 'take' }] }
+          ]
         }
       ]
     }

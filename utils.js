@@ -10,7 +10,9 @@ const {
     FORCE_PROXY_ROLE_ID,
     SECRET_SALT,
     ANONYMOUS_NAMING_PREFIXES,
-    ANONYMOUS_NAMING_SUFFIXES
+    ANONYMOUS_NAMING_SUFFIXES,
+    ELITE_NAMING_PREFIXES,
+    ELITE_NAMING_SUFFIXES
 } = require('./constants');
 
 // 祝日判定関数
@@ -180,18 +182,22 @@ function isImageOrVideo(attachment) {
 }
 
 // ハッシュから「ダサい名前」を生成する関数
-function getAnonymousName(dailyId) {
+// ハッシュから「ダサい名前」を生成する関数
+function getAnonymousName(dailyId, isElite = false) {
     const num = parseInt(dailyId, 36);
     if (isNaN(num)) return '名無しのバグ';
 
-    const pLen = ANONYMOUS_NAMING_PREFIXES.length;
-    const sLen = ANONYMOUS_NAMING_SUFFIXES.length;
+    const pLen = isElite ? ELITE_NAMING_PREFIXES.length : ANONYMOUS_NAMING_PREFIXES.length;
+    const sLen = isElite ? ELITE_NAMING_SUFFIXES.length : ANONYMOUS_NAMING_SUFFIXES.length;
 
-    // 偏りを減らすために少し混ぜる (dailyIdは可変なのでそのままで十分ランダムだが)
+    const prefixes = isElite ? ELITE_NAMING_PREFIXES : ANONYMOUS_NAMING_PREFIXES;
+    const suffixes = isElite ? ELITE_NAMING_SUFFIXES : ANONYMOUS_NAMING_SUFFIXES;
+
+    // 偏りを減らすために少し混ぜる
     const prefixIndex = num % pLen;
     const suffixIndex = (Math.floor(num / pLen)) % sLen;
 
-    return `${ANONYMOUS_NAMING_PREFIXES[prefixIndex]}${ANONYMOUS_NAMING_SUFFIXES[suffixIndex]}`;
+    return `${prefixes[prefixIndex]}${suffixes[suffixIndex]}`;
 }
 
 // ワイルドカード対応のワードマッチング関数

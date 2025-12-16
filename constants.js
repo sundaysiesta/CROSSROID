@@ -12,12 +12,22 @@ const ANONYMOUS_COOLDOWN_TIERS = [
 // 「ダサい名札」用の単語リスト
 const ANONYMOUS_NAMING_PREFIXES = [
     '弱そうな', '陰湿な', '間の抜けた', '騒がしい', '哀れな', '勘違いした', '空気の読めない',
-    '不幸な', '無能な', '幼稚な', '自意識過剰な', '暇を持て余した', '必死な', '痛々しい',"チノ学院みたいな","アスペっぽい","オナニーずっとしてそうな"
+    '不幸な', '無能な', '幼稚な', '自意識過剰な', '暇を持て余した', '必死な', '痛々しい', "チノ学院みたいな", "アスペっぽい", "オナニーずっとしてそうな"
 ];
 
 const ANONYMOUS_NAMING_SUFFIXES = [
-    'スライム', 'ゴブリン',  '囚人', 'ピエロ', '量産型', 'ニート',
-    'オタク', 'こどおじ', 'ネット弁慶', 'かまってちゃん', '被害妄想', '見習い', 'モブ',"弱者男性"
+    'スライム', 'ゴブリン', '囚人', 'ピエロ', '量産型', 'ニート',
+    'オタク', 'こどおじ', 'ネット弁慶', 'かまってちゃん', '被害妄想', '見習い', 'モブ', "弱者男性"
+];
+
+const ELITE_NAMING_PREFIXES = [
+    '高貴な', '選ばれし', '優雅な', '天才的な', '神に愛された', '伝説の', '覚醒した',
+    '至高の', '黄金の', 'SSR', '課金した', '徳を積んだ', '上級', 'エリート'
+];
+
+const ELITE_NAMING_SUFFIXES = [
+    '貴族', '騎士', '英雄', '覇者', '大富豪', '将軍', '賢者',
+    'マスター', 'キング', 'プレジデント', 'オーナー', '株主', 'VIP'
 ];
 
 // 自動代行投稿（メディア）のユーザーごとのクールダウン管理（20秒）
@@ -68,6 +78,9 @@ const ALLOWED_ROLE_IDS = [
 // 強制代行投稿ロールID（このロールを持っている人は代行投稿される）
 const FORCE_PROXY_ROLE_ID = '1431905155913089133';
 
+// 上級ロメダ民ロールID (ブーストロール)
+const ELITE_ROLE_ID = '1433804919315628032';
+
 // レベル10ロールID
 const LEVEL_10_ROLE_ID = '1369627346201481239';
 
@@ -114,6 +127,8 @@ module.exports = {
     ANONYMOUS_COOLDOWN_TIERS,
     ANONYMOUS_NAMING_PREFIXES,
     ANONYMOUS_NAMING_SUFFIXES,
+    ELITE_NAMING_PREFIXES,
+    ELITE_NAMING_SUFFIXES,
     AUTO_PROXY_COOLDOWN_MS,
     WORD_PROXY_COOLDOWN_MS,
     FILTERED_WORDS,
@@ -136,5 +151,8 @@ module.exports = {
     EVENT_NOTIFY_CHANNEL_ID: '1433779821363728505',
     EVENT_ADMIN_ROLE_ID: '1449783668049576107',
     EVENT_ADMIN_ROLE_ID: '1449783668049576107',
-    SECRET_SALT: process.env.SECRET_SALT || 'WiJr8dS5IHdtp1KiCKOLrmoE0gMK0Ib8X1NsplGcQfqcj1CUUdy3J3ok7h0Lu4CDPGbYnIxoq27N08OcLrf4IGK8v6aJ68VTnMh6Iymetm4NOvAio4WG7j17IWN7s8CO' // 環境変数から読み込みするけどフォールバックで直書ソルトある適当
+    SECRET_SALT: process.env.SECRET_SALT || 'WiJr8dS5IHdtp1KiCKOLrmoE0gMK0Ib8X1NsplGcQfqcj1CUUdy3J3ok7h0Lu4CDPGbYnIxoq27N08OcLrf4IGK8v6aJ68VTnMh6Iymetm4NOvAio4WG7j17IWN7s8CO',
+    ELITE_NAMING_PREFIXES,
+    ELITE_NAMING_SUFFIXES,
+    ELITE_ROLE_ID
 };

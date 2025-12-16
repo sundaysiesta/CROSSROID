@@ -1,6 +1,7 @@
 const {
     AUTO_PROXY_COOLDOWN_MS,
-    WORD_PROXY_COOLDOWN_MS
+    WORD_PROXY_COOLDOWN_MS,
+    ELITE_ROLE_ID
 } = require('../constants');
 const {
     isImageOrVideo,
@@ -43,7 +44,11 @@ function setup(client) {
                 const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
                 const timeSinceLastProxy = Date.now() - lastAutoProxyAt;
 
-                if (timeSinceLastProxy < AUTO_PROXY_COOLDOWN_MS) {
+                // 上級ロメダ民特典: クールダウン5秒に短縮 (通常15秒)
+                const isElite = member.roles.cache.has(ELITE_ROLE_ID);
+                const cooldown = isElite ? 5000 : AUTO_PROXY_COOLDOWN_MS;
+
+                if (timeSinceLastProxy < cooldown) {
                     return;
                 }
             }
@@ -54,7 +59,11 @@ function setup(client) {
             const originalContent = message.content || '';
             const originalAttachments = Array.from(message.attachments.values());
             const originalAuthor = message.author;
-            const displayName = member?.nickname || originalAuthor.displayName;
+            // 上級ロメダ民は王冠付き
+            let displayName = member?.nickname || originalAuthor.displayName;
+            if (member.roles.cache.has(ELITE_ROLE_ID)) {
+                displayName = `👑 ${displayName} 👑`;
+            }
 
             // Webhookを取得または作成
             let webhook;
