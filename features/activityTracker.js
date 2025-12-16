@@ -83,14 +83,18 @@ async function backfill(client) {
 
     try {
         const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP');
-        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: Until ${dateStr} (Start of Month)`, 'ActivityTracker');
+        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: Until ${dateStr} (Start of Month)\n(Timestamp: ${startOfMonthTimestamp})`, 'ActivityTracker');
 
         while (loops < MAX_LOOPS) {
             const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
-            if (msgs.size === 0) break;
+            if (msgs.size === 0) {
+                console.log('[ActivityTracker] Stop Reason: No more messages returned from Discord.');
+                break;
+            }
 
             for (const msg of msgs.values()) {
                 if (msg.createdTimestamp < startOfMonthTimestamp) {
+                    console.log(`[ActivityTracker] Stop Reason: Reached cutoff date. MsgDate: ${new Date(msg.createdTimestamp).toLocaleString('ja-JP')}`);
                     lastId = null; // Signal stop
                     break;
                 }
@@ -135,7 +139,7 @@ async function backfill(client) {
 
         saveData();
         console.log('[ActivityTracker] Backfill complete.');
-        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.\nDepth: ${new Date(oldestReached).toLocaleDateString('ja-JP')}`, 'ActivityTracker');
+        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.\nDepth: ${new Date(oldestReached).toLocaleDateString('ja-JP')}\n(Target was: ${dateStr})`, 'ActivityTracker');
     } catch (e) {
         console.error('[ActivityTracker] Backfill error:', e);
         require('../utils').logError(e, 'ActivityTracker Backfill');
