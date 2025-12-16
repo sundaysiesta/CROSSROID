@@ -140,8 +140,84 @@ async function handleCommands(interaction, client) {
     }
 
     if (interaction.commandName === 'event_create') {
-        // Simple logic for event create preservation
-        await interaction.reply({ content: 'イベント作成機能', ephemeral: true });
+        try {
+            // 権限チェック (管理者 または 特定ロール)
+            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+            const hasRole = member && member.roles.cache.has(EVENT_ADMIN_ROLE_ID);
+            const isAdmin = member && member.permissions.has(PermissionFlagsBits.Administrator);
+            const isDev = interaction.user.id === '1122179390403510335';
+
+            console.log(`[EventCreate] User: ${interaction.user.id}, Role: ${hasRole}, Admin: ${isAdmin}, Dev: ${isDev}`);
+
+            if (!hasRole && !isAdmin && !isDev) {
+                return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+
+            const eventName = interaction.options.getString('イベント名');
+            const eventContent = interaction.options.getString('内容');
+            const eventDate = interaction.options.getString('日時') || '未定';
+            const eventPlace = interaction.options.getString('場所') || '未定';
+
+            const guild = interaction.guild;
+            if (!guild) return interaction.editReply('サーバー内でのみ使用可能です。');
+
+            // 1. チャンネル作成
+            const newChannel = await guild.channels.create({
+                name: eventName,
+                type: 0, // GUILD_TEXT
+                parent: EVENT_CATEGORY_ID,
+                topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`
+            });
+
+            // 2. イベント詳細Embed (新チャンネル用)
+            const detailEmbed = new EmbedBuilder()
+                .setTitle(`📅 イベント: ${eventName}`)
+                .setDescription(eventContent)
+                .addFields(
+                    { name: '⏰ 日時', value: eventDate, inline: true },
+                    { name: '📍 場所', value: eventPlace, inline: true },
+                    { name: '主催者', value: interaction.user.toString(), inline: true }
+                )
+                .setColor(0x00FF00) // Green
+                .setTimestamp()
+                .setFooter({ text: 'CROSSROID Event System', iconURL: client.user.displayAvatarURL() });
+
+            await newChannel.send({
+                content: '@everyone 新しいイベントが作成されました！',
+                embeds: [detailEmbed]
+            });
+
+            // 3. 告知Embed (告知チャンネル用)
+            const notifyChannel = guild.channels.cache.get(EVENT_NOTIFY_CHANNEL_ID);
+            if (notifyChannel) {
+                const notifyEmbed = new EmbedBuilder()
+                    .setTitle('📢 新規イベント開催のお知らせ')
+                    .setDescription(`新しいイベント **[${eventName}](${newChannel.url})** が作成されました！\n詳細はリンク先のチャンネルを確認してください。`)
+                    .addFields(
+                        { name: 'イベント内容', value: eventContent.length > 100 ? eventContent.slice(0, 97) + '...' : eventContent, inline: false },
+                        { name: '日時', value: eventDate, inline: true },
+                        { name: 'チャンネル', value: newChannel.toString(), inline: true }
+                    )
+                    .setColor(0xFFA500) // Orange
+                    .setThumbnail(interaction.user.displayAvatarURL())
+                    .setTimestamp();
+
+                await notifyChannel.send({ embeds: [notifyEmbed] });
+            }
+
+            await interaction.editReply({
+                content: `✅ イベントチャンネルを作成しました: ${newChannel}\n告知メッセージを送信しました。`
+            });
+
+        } catch (error) {
+            console.error('イベント作成エラー:', error);
+            if (interaction.deferred || interaction.replied) {
+                return interaction.editReply('イベント作成中にエラーが発生しました。');
+            }
+            return interaction.reply({ content: 'イベント作成中にエラーが発生しました。', ephemeral: true });
+        }
         return;
     }
 
