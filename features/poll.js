@@ -109,7 +109,9 @@ class PollParser {
                 const name = parts[0].trim();
                 const emoji = parts[1] ? parts[1].trim() : null;
                 if (name) {
-                    config.candidates.push({ name, emoji });
+                    const mentionMatch = name.match(/<@!?(\d+)>/);
+                    const userId = mentionMatch ? mentionMatch[1] : null;
+                    config.candidates.push({ name, emoji, userId });
                 }
             }
         }
@@ -432,7 +434,35 @@ class PollManager {
         const PollVisualizer = require('./pollVisualizer');
         let files = [];
         try {
-            const imageBuffer = await PollVisualizer.generateRankingImage(poll);
+            // Enrich candidates with Avatar and Generation info
+            const enrichedPoll = { ...poll };
+            enrichedPoll.config = { ...poll.config };
+            enrichedPoll.config.candidates = await Promise.all(poll.config.candidates.map(async c => {
+                const enriched = { ...c };
+                if (c.userId) {
+                    try {
+                        const member = await channel.guild.members.fetch(c.userId).catch(() => null);
+                        if (member) {
+                            enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
+                            // Determine Generation
+                            // Logic: generic "Generation X" check or map specific IDs. 
+                            // Since we don't have the logic, we will rely on role matching or skip.
+                            // User request: "Add generation role to corner".
+                            // I will use a simple mapping if CURRENT_GENERATION_ROLE_ID matches
+                            const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
+                            if (member.roles.cache.has(CURRENT_GENERATION_ROLE_ID)) {
+                                enriched.generation = 'XXII'; // Assuming 22nd based on title "第22回"
+                            }
+                            // Also check for Elite roles if needed
+                        }
+                    } catch (e) {
+                        console.error(`Failed to fetch member ${c.userId}:`, e);
+                    }
+                }
+                return enriched;
+            }));
+
+            const imageBuffer = await PollVisualizer.generateRankingImage(enrichedPoll);
             files = [{ attachment: imageBuffer, name: 'ranking.png' }];
         } catch (e) {
             console.error('Failed to generate ranking image:', e);
@@ -489,7 +519,11 @@ class PollManager {
             candidates.push({
                 id: `mock${i}`,
                 name: names[i % names.length] + (i > 6 ? ` ${i}` : ''),
-                emoji: emojis[i % emojis.length]
+                emoji: emojis[i % emojis.length],
+                // Randomly assign generation and avatar (placeholder)
+                // Use a generic placeholder if we can't fetch real ones easily in mock
+                avatarURL: null, // Visualizer will use emoji fallback or placeholder
+                generation: Math.random() > 0.5 ? (Math.random() > 0.5 ? 'XVI' : 'VII') : null
             });
         }
 

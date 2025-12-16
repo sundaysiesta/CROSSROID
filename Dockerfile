@@ -4,6 +4,10 @@ FROM node:18
 # 作業ディレクトリを /app に
 WORKDIR /app
 
+# Download Japanese Font
+RUN mkdir -p resources/fonts \
+    && wget -q -O resources/fonts/NotoSansJP-Bold.otf https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf
+
 # 依存関係のインストール（キャッシュ最適化）
 COPY package*.json ./
 RUN npm ci || npm install
