@@ -7,29 +7,73 @@ class TournamentManager {
 
         const guild = interaction.guild;
         // Fetch all members
-        const members = await guild.members.fetch();
+        const { MAIN_CHANNEL_ID } = require('../constants');
 
-        // Filter by Roman Numeral Role (Generation Role)
-        // Regex from PollManager: /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i
-        const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+        // --- Activity Ranking Selection ---
+        await interaction.editReply({ content: '📊 直近1ヶ月の発言数を集計しています... (これには数分かかる場合があります)' });
+
+        const mainChannel = guild.channels.cache.get(MAIN_CHANNEL_ID);
+        if (!mainChannel) {
+            return interaction.followUp({ content: '❌ メインチャンネルが見つかりません。', ephemeral: true });
+        }
+
+        const counts = {};
+        let lastId = undefined;
+        const now = Date.now();
+        const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
+        let loops = 0;
+        const FETCH_LIMIT = 100; // 100 * 100 = 10,000 messages max
+
+        try {
+            while (loops < FETCH_LIMIT) {
+                const msgs = await mainChannel.messages.fetch({ limit: 100, before: lastId });
+                if (msgs.size === 0) break;
+
+                let stop = false;
+                for (const msg of msgs.values()) {
+                    if (msg.createdTimestamp < oneMonthAgo) {
+                        stop = true;
+                        break;
+                    }
+                    if (msg.author.bot) continue;
+                    counts[msg.author.id] = (counts[msg.author.id] || 0) + 1;
+                    lastId = msg.id;
+                }
+
+                if (stop) break;
+                loops++;
+
+                if (loops % 5 === 0) {
+                    await interaction.editReply({ content: `📊 発言数集計中... (${loops * 100}件 完了)` });
+                }
+            }
+        } catch (e) {
+            console.error('Message fetch failed:', e);
+            await interaction.followUp({ content: '⚠️ 集計中にエラーが発生しましたが、取得できたデータで続行します。', ephemeral: true });
+        }
+
+        // Sort by count
+        const sortedIds = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+        const TOP_N = 80; // 20 * 4
+        const topIds = sortedIds.slice(0, TOP_N);
 
         const participants = [];
-        members.forEach(m => {
-            const hasGenRole = m.roles.cache.some(r => romanRegex.test(r.name));
-            // Also check for fallback ID if needed, but User requested "Generation Role Members".
-            // We'll stick to regex + specific ID.
-            const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
-            const hasCurrentGen = m.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
-
-            if (hasGenRole || hasCurrentGen) {
-                // Determine display name and emoji (default)
-                participants.push({
-                    name: m.displayName,
-                    userId: m.id,
-                    emoji: null // Avatar will be used
-                });
+        if (topIds.length > 0) {
+            const fetchedMembers = await guild.members.fetch({ user: topIds });
+            // Preserve Rank Order? User said "Participate in ranking order".
+            // We need to map back to sortedIds order
+            for (const id of topIds) {
+                const m = fetchedMembers.get(id);
+                if (m) {
+                    participants.push({
+                        name: m.displayName,
+                        userId: m.id,
+                        emoji: null,
+                        messageCount: counts[id] // Optional: Store count for debug/display?
+                    });
+                }
             }
-        });
+        }
 
         if (participants.length < 4) {
             return interaction.followUp({ content: '❌ 参加者が足りません（最低4名）。世代ロールを確認してください。', ephemeral: true });

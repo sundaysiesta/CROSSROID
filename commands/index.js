@@ -251,14 +251,25 @@ async function handleCommands(interaction, client) {
                 pollManifesto = pollManifesto || eventContent;
 
                 // Proxy Interaction object to redirect Poll to new channel
+                // Proxy Interaction object to redirect Poll to new channel
                 const proxyInteraction = {
                     user: interaction.user,
                     channel: newChannel,
+                    guild: interaction.guild,
                     reply: async (payload) => { /* No-op for safety */ },
                     editReply: async (payload) => {
                         // Append success message to the original interaction
                         const currentContent = (await interaction.fetchReply()).content;
                         await interaction.editReply({ content: currentContent + '\n' + payload.content });
+                    },
+                    followUp: async (payload) => {
+                        // If ephemeral, use original interaction followUp
+                        if (payload.ephemeral) {
+                            return await interaction.followUp(payload);
+                        } else {
+                            // If public, send to the new channel
+                            return await newChannel.send(payload);
+                        }
                     }
                 };
 
@@ -267,6 +278,9 @@ async function handleCommands(interaction, client) {
 
         } catch (error) {
             console.error('イベント作成エラー:', error);
+            const { logError } = require('../utils');
+            await logError(error, 'Event Creation (/event_create)');
+
             if (interaction.deferred || interaction.replied) {
                 return interaction.editReply('イベント作成中にエラーが発生しました。');
             }
