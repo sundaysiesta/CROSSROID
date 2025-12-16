@@ -58,11 +58,24 @@ async function backfill(client) {
     const startOfMonthTimestamp = new Date(`${y}-${m.padStart(2, '0')}-01T00:00:00+09:00`).getTime();
 
 
-    
+    // --- SMART SKIP LOGIC ---
+    if (activityCache._meta) {
+        const { lastDeepScan, oldestScanDepth } = activityCache._meta;
+        const scanAge = Date.now() - (lastDeepScan || 0);
+
+        // If scanned within last 2 hours AND reached Start of Month (with 1 hour buffer for safety)
+        if (scanAge < 2 * 60 * 60 * 1000 && oldestScanDepth <= startOfMonthTimestamp + (60 * 60 * 1000)) {
+            console.log(`[ActivityTracker] ✅ Skipping Deep Scan (Data is fresh, scanned ${Math.floor(scanAge / 60000)} mins ago).`);
+            require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Scanned: ${new Date(lastDeepScan).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo' })}).\nStarting normal tracking.`, 'ActivityTracker');
+            isBackfilling = false;
+            return;
+        }
+    }
     // ------------------------
 
     let lastId = undefined;
     let loops = 0;
+    let botCount = 0; // Track bots/system messages skipped
     const LIMIT_MSGS = 100000;
     const MAX_LOOPS = LIMIT_MSGS / 100;
 
@@ -71,7 +84,7 @@ async function backfill(client) {
 
     try {
         const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: Until ${dateStr} (Start of Month)\n(Timestamp: ${startOfMonthTimestamp})`, 'ActivityTracker');
+        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nChannel: **#${channel.name}**\nTarget: Until ${dateStr} (Start of Month)\n(Timestamp: ${startOfMonthTimestamp})`, 'ActivityTracker');
 
         while (loops < MAX_LOOPS) {
             const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
@@ -90,6 +103,7 @@ async function backfill(client) {
                 oldestReached = msg.createdTimestamp;
 
                 if (!msg.author || msg.author.bot) {
+                    botCount++;
                     lastId = msg.id;
                     continue;
                 }
@@ -114,7 +128,7 @@ async function backfill(client) {
                 const progress = Math.round((loops / MAX_LOOPS) * 100);
                 console.log(`[ActivityTracker] Backfill progress: ${loops * 100} msgs`);
                 if (loops % 100 === 0) {
-                    require('../utils').logSystem(`📊 **Backfill Progress**\nScanned: ${loops * 100} / ${LIMIT_MSGS} messages`, 'ActivityTracker');
+                    require('../utils').logSystem(`📊 **Backfill Progress**\nScanned: ${loops * 100} / ${LIMIT_MSGS} messages\n(Bots skipped: ${botCount})`, 'ActivityTracker');
                 }
             }
         }
@@ -128,7 +142,7 @@ async function backfill(client) {
         saveData();
         console.log('[ActivityTracker] Backfill complete.');
         const reachedDateStr = new Date(oldestReached).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.\nDepth: ${reachedDateStr}\n(Target was: ${dateStr})`, 'ActivityTracker');
+        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ~${loops * 100} messages.\n**Found:** ${loops * 100 - botCount} Humans / ${botCount} Bots\nDepth: ${reachedDateStr}\n(Target was: ${dateStr})`, 'ActivityTracker');
     } catch (e) {
         console.error('[ActivityTracker] Backfill error:', e);
         require('../utils').logError(e, 'ActivityTracker Backfill');
