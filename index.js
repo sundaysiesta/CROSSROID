@@ -336,6 +336,7 @@ client.once('ready', async () => {
         {
           name: 'poll',
           description: '投票を作成・管理します',
+          type: 2, // SUB_COMMAND_GROUP
           options: [
             {
               name: 'create',
