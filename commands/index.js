@@ -173,7 +173,7 @@ async function handleCommands(interaction, client) {
                     {
                         id: guild.id, // @everyone
                         allow: [PermissionFlagsBits.ViewChannel],
-                        deny: [PermissionFlagsBits.SendMessages]
+                        deny: [PermissionFlagsBits.SendMessages,PermissionFlagsBits.EmbedLinks,PermissionFlagsBits.AttachFiles,PermissionFlagsBits.CreatePrivateThreads,PermissionFlagsBits.CreatePublicThreads]
                     },
                     {
                         id: interaction.user.id, // Host
@@ -185,7 +185,7 @@ async function handleCommands(interaction, client) {
                     },
                     {
                         id: client.user.id, // Bot itself
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles]
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.Administrator]
                     }
                 ]
             });
