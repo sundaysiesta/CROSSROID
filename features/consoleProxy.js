@@ -20,6 +20,11 @@ function formatArgs(args) {
 
 function queueMessage(level, args) {
     const text = formatArgs(args);
+
+    // Filter out specific noise
+    if (text.includes('ExperimentalWarning: buffer.File')) return;
+    if (text.includes('DeprecationWarning: Supplying "ephemeral"')) return; // Also filter the ephemeral warning if persisted
+
     // Add timestamp
     const time = new Date().toLocaleTimeString('ja-JP');
     logQueue.push(`[${time}] [${level}] ${text}`);

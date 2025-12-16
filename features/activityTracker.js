@@ -39,7 +39,7 @@ function getTodayKey() {
 async function backfill(client) {
     if (isBackfilling) return;
     isBackfilling = true;
-    console.log('[ActivityTracker] Starting backfill process...');
+    console.log('[ActivityTracker] Checking backfill necessity...');
 
     const channel = client.channels.cache.get(MAIN_CHANNEL_ID);
     if (!channel) {
@@ -48,26 +48,55 @@ async function backfill(client) {
         return;
     }
 
-    // Always Backfill on Startup to ensure "Month" data is fresh
+    const now = new Date();
+    // Calculate Start of Current Month in JST
+    const jstFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric' });
+    const parts = jstFormatter.formatToParts(now);
+    const y = parts.find(p => p.type === 'year').value;
+    const m = parts.find(p => p.type === 'month').value;
+    // Format: YYYY-MM-01T00:00:00+09:00
+    const startOfMonthTimestamp = new Date(`${y}-${m.padStart(2, '0')}-01T00:00:00+09:00`).getTime();
+
+
+    // --- SMART SKIP LOGIC ---
+    if (activityCache._meta) {
+        const { lastDeepScan, oldestScanDepth } = activityCache._meta;
+        const scanAge = Date.now() - (lastDeepScan || 0);
+
+        // If scanned within last 2 hours AND reached Start of Month (with 1 hour margin)
+        if (scanAge < 2 * 60 * 60 * 1000 && oldestScanDepth <= startOfMonthTimestamp + (60 * 60 * 1000)) {
+            console.log(`[ActivityTracker] ✅ Skipping Deep Scan (Data is fresh, scanned ${Math.floor(scanAge / 60000)} mins ago).`);
+            require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Scanned: ${new Date(lastDeepScan).toLocaleTimeString('ja-JP')}).\nStarting normal tracking.`, 'ActivityTracker');
+            isBackfilling = false;
+            return;
+        }
+    }
+    // ------------------------
+
     let lastId = undefined;
     let loops = 0;
     const LIMIT_MSGS = 100000;
     const MAX_LOOPS = LIMIT_MSGS / 100;
-    const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    // Store oldest timestamp reached
+    let oldestReached = Date.now();
 
     try {
-        // USE LOGSYSTEM AS REQUESTED
-        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: ${LIMIT_MSGS} msgs (or 30 days depth)`, 'ActivityTracker');
+        const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP');
+        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nTarget: Until ${dateStr} (Start of Month)`, 'ActivityTracker');
 
         while (loops < MAX_LOOPS) {
             const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
             if (msgs.size === 0) break;
 
             for (const msg of msgs.values()) {
-                if (msg.createdTimestamp < oneMonthAgo) {
-                    lastId = null;
+                if (msg.createdTimestamp < startOfMonthTimestamp) {
+                    lastId = null; // Signal stop
                     break;
                 }
+
+                oldestReached = msg.createdTimestamp;
+
                 if (!msg.author || msg.author.bot) {
                     lastId = msg.id;
                     continue;
@@ -86,22 +115,27 @@ async function backfill(client) {
 
                 lastId = msg.id;
             }
-            if (!lastId) break;
+            if (!lastId) break; // Inner loop signaled stop or fetch ended
             loops++;
 
             if (loops % 50 === 0) {
                 const progress = Math.round((loops / MAX_LOOPS) * 100);
                 console.log(`[ActivityTracker] Backfill progress: ${loops * 100} msgs`);
                 if (loops % 100 === 0) {
-                    // USE LOGSYSTEM AS REQUESTED
                     require('../utils').logSystem(`📊 **Backfill Progress**\nScanned: ${loops * 100} / ${LIMIT_MSGS} messages`, 'ActivityTracker');
                 }
             }
         }
+
+        // SAVE METADATA
+        activityCache._meta = {
+            lastDeepScan: Date.now(),
+            oldestScanDepth: oldestReached
+        };
+
         saveData();
         console.log('[ActivityTracker] Backfill complete.');
-        // USE LOGSYSTEM AS REQUESTED
-        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.`, 'ActivityTracker');
+        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ${loops * 100} messages.\nDepth: ${new Date(oldestReached).toLocaleDateString('ja-JP')}`, 'ActivityTracker');
     } catch (e) {
         console.error('[ActivityTracker] Backfill error:', e);
         require('../utils').logError(e, 'ActivityTracker Backfill');
@@ -145,6 +179,8 @@ function getUserRanking(mode = 30) {
     const ranking = [];
 
     Object.entries(activityCache).forEach(([userId, dateCounts]) => {
+        if (userId === '_meta') return; // Skip metadata
+
         let count = 0;
         Object.entries(dateCounts).forEach(([dateStr, c]) => {
             const date = new Date(dateStr);
