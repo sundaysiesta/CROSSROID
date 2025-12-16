@@ -449,11 +449,21 @@ client.once('ready', async () => {
   roleAward.setup(client);
   legacyMigration.setup(client);
 
+  // --- CLOUD PERSISTENCE RESTORE ---
+  const persistence = require('./features/persistence');
+  await persistence.restore(client);
+  persistence.startSync(client);
+
+  // --- Feature Setup (Load data after restore) ---
   const activityTracker = require('./features/activityTracker');
   activityTracker.setup(client);
 
   const PollManager = require('./features/poll');
   PollManager.startTicker(client);
+
+  // Note: dataBackup is deprecated/removed in favor of persistence
+  // const dataBackup = require('./features/dataBackup'); 
+  // dataBackup.setup(client);
 });
 
 // コマンド処理
@@ -464,6 +474,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('poll_')) {
       const PollManager = require('./features/poll');
       await PollManager.handleInteraction(client, interaction);
+      // Trigger Cloud Save (Debounced)
+      require('./features/persistence').save(client);
       return;
     }
   }
