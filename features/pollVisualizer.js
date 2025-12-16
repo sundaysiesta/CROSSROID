@@ -126,6 +126,89 @@ class PollVisualizer {
         }
     }
 
+    async generateGroupAssignmentImage(groups, title) {
+        try {
+            const width = 1200;
+            const height = 900;
+            const canvas = createCanvas(width, height);
+            const ctx = canvas.getContext('2d');
+
+            // Background
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, width, height);
+
+            // Title
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 40px "NotoSansJP", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(title || '選手権 予選グループ表', width / 2, 60);
+
+            const houses = {
+                'Griffindor': { color: '#740001', name: 'グリフィンドール', x: 0, y: 100 },
+                'Hufflepuff': { color: '#ecb939', name: 'ハッフルパフ', x: 600, y: 100 },
+                'Ravenclaw': { color: '#0e1a40', name: 'レイブンクロー', x: 0, y: 500 },
+                'Slytherin': { color: '#1a472a', name: 'スリザリン', x: 600, y: 500 }
+            };
+
+            const quadrantW = 600;
+            const quadrantH = 400;
+
+            for (const [houseKey, candidates] of Object.entries(groups)) {
+                const style = houses[houseKey];
+                const qx = style.x;
+                const qy = style.y;
+
+                // Quadrant Background (faint)
+                ctx.fillStyle = style.color;
+                ctx.globalAlpha = 0.2;
+                ctx.fillRect(qx, qy, quadrantW, quadrantH);
+                ctx.globalAlpha = 1.0;
+
+                // Border
+                ctx.strokeStyle = style.color;
+                ctx.lineWidth = 4;
+                ctx.strokeRect(qx + 10, qy + 10, quadrantW - 20, quadrantH - 20);
+
+                // Header
+                ctx.fillStyle = style.color;
+                ctx.fillRect(qx + 10, qy + 10, quadrantW - 20, 50);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 28px "NotoSansJP", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(style.name, qx + quadrantW / 2, qy + 45);
+
+                // List Names
+                ctx.font = '18px "NotoSansJP", sans-serif';
+                ctx.textAlign = 'left';
+                let ny = qy + 90;
+                let nx = qx + 40;
+
+                // 2 Columns if needed
+                candidates.forEach((c, i) => {
+                    if (i === 10) { // Move to 2nd column after 10 names
+                        nx = qx + quadrantW / 2 + 20;
+                        ny = qy + 90;
+                    }
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(`${i + 1}. ${c.name}`, nx, ny);
+                    ny += 28;
+                });
+            }
+
+            // Footer
+            ctx.fillStyle = '#666666';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(new Date().toLocaleString('ja-JP'), width - 20, height - 10);
+
+            return canvas.toBuffer();
+        } catch (e) {
+            console.error('Group Image Gen Failed:', e);
+            throw e;
+        }
+    }
+
     drawCard(ctx, x, y, w, h, candidate, rank, votes, percentage, avatarImage) {
         // Card Background
         ctx.save();
@@ -212,7 +295,7 @@ class PollVisualizer {
         if (candidate.generation) {
             ctx.save();
             ctx.font = 'bold 24px serif'; // Serif for Roman numerals
-            ctx.fillStyle = '#00ff88'; // Greenish
+            ctx.fillStyle = candidate.generationColor || '#00ff88'; // Use role color or default green
             ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
             ctx.shadowBlur = 4;
             ctx.textAlign = 'right';

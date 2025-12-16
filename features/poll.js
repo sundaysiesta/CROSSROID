@@ -82,6 +82,7 @@ class PollParser {
 
                 if (key === '投票モード') {
                     if (val.includes('単一')) config.mode = 'single';
+                    if (val.includes('選手権') || val.includes('Championship')) config.mode = 'championship';
                 }
                 if (key === '一人あたりの票数' || key === 'MaxVotes') {
                     const limit = parseInt(val);
@@ -148,9 +149,26 @@ class PollManager {
 
     async createPoll(interaction, textConfig) {
         const config = PollParser.parse(textConfig);
+
+        // Check for Championship Mode
+        if (config.mode === 'championship') {
+            const TournamentManager = require('./tournament');
+            return await TournamentManager.start(interaction, config);
+        }
+
         if (config.candidates.length < 2) return interaction.editReply('エラー: 候補者は最低2人必要です。');
 
-        const pollId = Date.now().toString(36);
+        const pollState = await this.createPollInternal(interaction.channel, config, interaction.user.id);
+
+        let replyMsg = '✅ 投票を作成しました。';
+        if (pollState.startsAt > Date.now()) {
+            replyMsg += `\n開始日時: <t:${Math.floor(pollState.startsAt / 1000)}:f>`;
+        }
+        await interaction.editReply({ content: replyMsg });
+    }
+
+    async createPollInternal(channel, config, authorId) {
+        const pollId = Date.now().toString(36) + Math.random().toString(36).substring(2, 5); // Unique ID
         const defaultEmojis = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭', '🇮', '🇯', '🇰', '🇱', '🇲', '🇳', '🇴', '🇵', '🇶', '🇷', '🇸', '🇹', '🇺', '🇻', '🇼', '🇽', '🇾', '🇿'];
         config.candidates.forEach((c, i) => {
             if (!c.emoji) c.emoji = defaultEmojis[i % defaultEmojis.length];
@@ -167,8 +185,8 @@ class PollManager {
             votes: {},
             createdAt: now,
             startsAt: effectiveStart,
-            authorId: interaction.user.id,
-            channelId: interaction.channel.id,
+            authorId: authorId,
+            channelId: channel.id,
             messageId: null,
             ended: false
         };
@@ -176,17 +194,13 @@ class PollManager {
         const embed = this.generateEmbed(pollState);
         const components = this.generateComponents(pollState);
 
-        const msg = await interaction.channel.send({ embeds: [embed], components: components });
+        const msg = await channel.send({ embeds: [embed], components: components });
         pollState.messageId = msg.id;
 
         this.polls.set(pollId, pollState);
         this.save();
 
-        let replyMsg = '✅ 投票を作成しました。';
-        if (pollState.startsAt > now) {
-            replyMsg += `\n開始日時: <t:${Math.floor(pollState.startsAt / 1000)}:f>`;
-        }
-        await interaction.editReply({ content: replyMsg });
+        return pollState;
     }
 
     generateEmbed(poll, forceReveal = false) {
@@ -444,16 +458,29 @@ class PollManager {
                         const member = await channel.guild.members.fetch(c.userId).catch(() => null);
                         if (member) {
                             enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
-                            // Determine Generation
-                            // Logic: generic "Generation X" check or map specific IDs. 
-                            // Since we don't have the logic, we will rely on role matching or skip.
-                            // User request: "Add generation role to corner".
-                            // I will use a simple mapping if CURRENT_GENERATION_ROLE_ID matches
-                            const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
-                            if (member.roles.cache.has(CURRENT_GENERATION_ROLE_ID)) {
-                                enriched.generation = 'XXII'; // Assuming 22nd based on title "第22回"
+                            enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
+
+                            // Determine Generation & Color
+                            // Logic: Look for a role that IS a Roman Numeral (Generation Role)
+                            const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                            let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
+
+                            // Fallback: Check Current Generation Role ID
+                            if (!genRole) {
+                                genRole = member.roles.cache.get(require('../constants').CURRENT_GENERATION_ROLE_ID);
                             }
-                            // Also check for Elite roles if needed
+
+                            if (genRole) {
+                                enriched.generation = genRole.name.toUpperCase();
+                                enriched.generationColor = genRole.hexColor;
+
+                                // Verification: If specific Current Gen role is used but name isn't simple Roman (e.g. "22nd Gen"),
+                                // we might want to convert number? But user says "Role IS Roman Numeral".
+                                // So we assume name is correct. 
+                                // Clean up if it contains other text? 
+                                // If matched regex, it's fine. If fallback, maybe clean?
+                                // Let's keep it simple: use name.
+                            }
                         }
                     } catch (e) {
                         console.error(`Failed to fetch member ${c.userId}:`, e);
@@ -474,6 +501,13 @@ class PollManager {
         if (!poll.ended) {
             poll.ended = true;
             this.save();
+
+            // Check for Tournament Progression
+            if (poll.config.seriesId) {
+                const TournamentManager = require('./tournament');
+                TournamentManager.checkSeriesCompletion(poll.config.seriesId, channel.client).catch(console.error);
+            }
+
             const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
             if (msg) await msg.edit({ components: [] });
         }
@@ -571,3 +605,16 @@ class PollManager {
 }
 
 module.exports = new PollManager();
+
+function toRoman(num) {
+    if (typeof num !== 'number') return num;
+    const lookup = { M: 1000, CM: 900, D: 500, CD: 400, C: 100, XC: 90, L: 50, XL: 40, X: 10, IX: 9, V: 5, IV: 4, I: 1 };
+    let roman = '';
+    for (let i in lookup) {
+        while (num >= lookup[i]) {
+            roman += i;
+            num -= lookup[i];
+        }
+    }
+    return roman;
+}
