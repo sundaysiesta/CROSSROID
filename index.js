@@ -178,6 +178,18 @@ client.once('ready', async () => {
           description: '開催場所（任意）',
           type: 3, // STRING
           required: false
+        },
+        {
+          name: 'poll_mode',
+          description: '投票イベントとして作成する（自動投票開始）',
+          type: 5, // BOOLEAN
+          required: false
+        },
+        {
+          name: 'poll_manifesto',
+          description: '投票設定（省略時はイベント内容を使用）',
+          type: 3, // STRING
+          required: false
         }
       ]
     },
@@ -424,6 +436,9 @@ client.once('ready', async () => {
   imageLog.setup(client);
   roleAward.setup(client);
   legacyMigration.setup(client);
+
+  const PollManager = require('./features/poll');
+  PollManager.startTicker(client);
 });
 
 // コマンド処理

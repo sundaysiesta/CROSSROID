@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        {
+                {
+                styles
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title-group">
+                <div class="main-title">{{title}}</div>
+            </div>
+            <div class="sub-info">
+                {{mode}} Mode<br>
+                Total Votes: {{totalVotes}}<br>
+                Result
+            </div>
+        </div>
+
+        <div class="header-strip" style="height: 5px; background: #ff0055;"></div>
+
+        <div class="grid">
+            {{#each candidates}}
+            <div class="card rank-{{rankNum}}">
+                <div class="rank-badge">
+                    <span class="rank-text">{{rankNum}}</span>
+                </div>
+                <div class="vote-count">{{votes}}票</div>
+
+                <div class="visual-area">
+                    {{emoji}}
+                </div>
+
+                <div class="name-banner">
+                    <div class="name-text">{{name}}</div>
+                </div>
+            </div>
+            {{/each}}
+        </div>
+
+        <div class="footer-strip"></div>
+    </div>
+</body>
+
+</html>

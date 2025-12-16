@@ -226,6 +226,27 @@ async function handleCommands(interaction, client) {
                 content: `✅ イベントチャンネルを作成しました: ${newChannel}\n告知メッセージを送信しました。`
             });
 
+            // 4. 自動投票イベントの開始
+            const isPoll = interaction.options.getBoolean('poll_mode');
+            if (isPoll) {
+                const PollManager = require('../features/poll');
+                const pollManifesto = interaction.options.getString('poll_manifesto') || eventContent;
+
+                // Proxy Interaction object to redirect Poll to new channel
+                const proxyInteraction = {
+                    user: interaction.user,
+                    channel: newChannel,
+                    reply: async (payload) => { /* No-op for safety */ },
+                    editReply: async (payload) => {
+                        // Append success message to the original interaction
+                        const currentContent = (await interaction.fetchReply()).content;
+                        await interaction.editReply({ content: currentContent + '\n' + payload.content });
+                    }
+                };
+
+                await PollManager.createPoll(proxyInteraction, pollManifesto);
+            }
+
         } catch (error) {
             console.error('イベント作成エラー:', error);
             if (interaction.deferred || interaction.replied) {

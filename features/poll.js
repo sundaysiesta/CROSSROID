@@ -152,7 +152,7 @@ class PollManager {
         const defaultEmojis = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭', '🇮', '🇯', '🇰', '🇱', '🇲', '🇳', '🇴', '🇵', '🇶', '🇷', '🇸', '🇹', '🇺', '🇻', '🇼', '🇽', '🇾', '🇿'];
         config.candidates.forEach((c, i) => {
             if (!c.emoji) c.emoji = defaultEmojis[i % defaultEmojis.length];
-            c.id = `cand_${i}`;
+            c.id = `c${i}`; // Short ID without underscores to prevent split issues
         });
 
         // Set effective start date (now if null)
@@ -416,18 +416,65 @@ class PollManager {
         const poll = this.polls.get(pollId);
         if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
 
+        await interaction.deferReply({ ephemeral: true });
+
+        // Logic shared with auto-publish
+        await this._executePublish(poll, interaction.channel);
+
+        await interaction.editReply({ content: '✅ 結果を公開しました。' });
+    }
+
+    async _executePublish(poll, channel) {
         const embed = this.generateEmbed(poll, true);
         embed.setTitle(`🏆 結果発表: ${poll.config.title}`);
+        embed.setImage('attachment://ranking.png');
 
-        await interaction.channel.send({ content: '## ⚡ 投票結果発表！', embeds: [embed] });
-        await interaction.reply({ content: '✅ 結果を公開しました。', ephemeral: true });
+        const PollVisualizer = require('./pollVisualizer');
+        let files = [];
+        try {
+            const imageBuffer = await PollVisualizer.generateRankingImage(poll);
+            files = [{ attachment: imageBuffer, name: 'ranking.png' }];
+        } catch (e) {
+            console.error('Failed to generate ranking image:', e);
+            embed.setFooter({ text: '画像生成に失敗しました' });
+        }
+
+        await channel.send({ content: '## ⚡ 投票結果発表！', embeds: [embed], files: files });
 
         if (!poll.ended) {
             poll.ended = true;
             this.save();
-            const msg = await interaction.channel.messages.fetch(poll.messageId).catch(() => null);
+            const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
             if (msg) await msg.edit({ components: [] });
         }
+    }
+
+    startTicker(client) {
+        if (this.ticker) clearInterval(this.ticker);
+        console.log('Poll Scheduler Started.');
+        this.ticker = setInterval(async () => {
+            const now = Date.now();
+            for (const poll of this.polls.values()) {
+                if (!poll.ended) {
+                    const endsAt = poll.startsAt + poll.config.duration;
+                    if (now >= endsAt) {
+                        try {
+                            const channel = await client.channels.fetch(poll.channelId).catch(() => null);
+                            if (channel) {
+                                console.log(`Auto-ending poll ${poll.id}`);
+                                await this._executePublish(poll, channel);
+                            } else {
+                                console.warn(`Channel not found for poll ${poll.id}`);
+                                poll.ended = true; // Force end if channel gone
+                                this.save();
+                            }
+                        } catch (e) {
+                            console.error(`Error auto-ending poll ${poll.id}:`, e);
+                        }
+                    }
+                }
+            }
+        }, 60 * 1000); // Check every minute
     }
 }
 
