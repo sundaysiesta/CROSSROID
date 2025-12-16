@@ -173,7 +173,7 @@ async function handleCommands(interaction, client) {
                     {
                         id: guild.id, // @everyone
                         allow: [PermissionFlagsBits.ViewChannel],
-                        deny: [PermissionFlagsBits.SendMessages,PermissionFlagsBits.EmbedLinks,PermissionFlagsBits.AttachFiles,PermissionFlagsBits.CreatePrivateThreads,PermissionFlagsBits.CreatePublicThreads]
+                        deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.CreatePrivateThreads, PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendPolls,PermissionFlagsBits.SendMessagesInThreads,PermissionFlagsBits.SendMessagesInThreads]
                     },
                     {
                         id: interaction.user.id, // Host
@@ -185,7 +185,17 @@ async function handleCommands(interaction, client) {
                     },
                     {
                         id: client.user.id, // Bot itself
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.Administrator]
+                        allow: [
+                            PermissionFlagsBits.ViewChannel,
+                            PermissionFlagsBits.SendMessages,
+                            PermissionFlagsBits.EmbedLinks,
+                            PermissionFlagsBits.AttachFiles,
+                            PermissionFlagsBits.ReadMessageHistory,
+                            PermissionFlagsBits.Administrator,
+                            PermissionFlagsBits.ManageChannels,
+                            PermissionFlagsBits.ManageRoles,
+                            PermissionFlagsBits.ManageMessages
+                        ]
                     }
                 ]
             });
@@ -223,7 +233,13 @@ async function handleCommands(interaction, client) {
                     .setThumbnail(interaction.user.displayAvatarURL())
                     .setTimestamp();
 
-                await notifyChannel.send({ embeds: [notifyEmbed] });
+                try {
+                    await notifyChannel.send({ embeds: [notifyEmbed] });
+                } catch (e) {
+                    console.error('Failed to send notification:', e);
+                    // Continue even if notification fails
+                    await interaction.followUp({ content: '⚠️ 告知チャンネルへの通知に失敗しました (権限不足)。イベントチャンネルは作成されました。', ephemeral: true }).catch(() => { });
+                }
             }
 
             await interaction.editReply({
