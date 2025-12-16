@@ -68,7 +68,10 @@ async function backfill(client) {
                     lastId = null;
                     break;
                 }
-                if (msg.author.bot) continue;
+                if (msg.author.bot) {
+                    lastId = msg.id;
+                    continue;
+                }
 
                 const msgDate = new Date(msg.createdTimestamp);
                 const msgJst = new Date(msgDate.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
