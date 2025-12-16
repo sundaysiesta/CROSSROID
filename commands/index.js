@@ -182,6 +182,10 @@ async function handleCommands(interaction, client) {
                     {
                         id: ADMIN_ROLE_ID, // Admin Role
                         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                    },
+                    {
+                        id: client.user.id, // Bot itself
+                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles]
                     }
                 ]
             });
