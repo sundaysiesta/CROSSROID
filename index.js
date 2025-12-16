@@ -68,7 +68,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-  res.send({'status': 'alive', 'uptime': `${client.uptime}ms`, 'ping': `${client.ws.ping}ms`});
+  res.send({ 'status': 'alive', 'uptime': `${client.uptime}ms`, 'ping': `${client.ws.ping}ms` });
 });
 
 // ボットが準備完了したときに一度だけ実行されるイベント
@@ -194,6 +194,135 @@ client.once('ready', async () => {
           description: '送信するメッセージ内容',
           type: 3, // STRING
           required: true
+        }
+      ]
+    },
+    {
+      name: 'admin_create',
+      description: 'チャンネルを作成します（管理者専用）',
+      options: [
+        {
+          name: '名前',
+          description: '作成するチャンネルの名前',
+          type: 3, // STRING
+          required: true
+        },
+        {
+          name: 'カテゴリ',
+          description: '作成先のカテゴリ',
+          type: 7, // CHANNEL
+          required: false
+        },
+        {
+          name: 'タイプ',
+          description: 'チャンネルタイプ（デフォルト: Text）',
+          type: 3, // STRING
+          required: false,
+          choices: [
+            { name: 'Text', value: 'text' },
+            { name: 'Voice', value: 'voice' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'admin_delete',
+      description: 'チャンネルを削除します（管理者専用）',
+      options: [
+        {
+          name: '対象',
+          description: '削除するチャンネル',
+          type: 7, // CHANNEL
+          required: true
+        },
+        {
+          name: '理由',
+          description: '削除の理由',
+          type: 3, // STRING
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'admin_purge',
+      description: 'メッセージを一括削除します（管理者専用）',
+      options: [
+        {
+          name: '件数',
+          description: '削除する件数 (1-100)',
+          type: 4, // INTEGER
+          required: true,
+          minValue: 1,
+          maxValue: 100
+        },
+        {
+          name: '対象ユーザー',
+          description: '特定のユーザーのメッセージのみ削除する場合指定',
+          type: 6, // USER
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'admin_role',
+      description: 'ロールを付与/剥奪します（管理者専用）',
+      options: [
+        {
+          name: 'ユーザー',
+          description: '対象ユーザー',
+          type: 6, // USER
+          required: true
+        },
+        {
+          name: 'ロール',
+          description: '対象ロール',
+          type: 8, // ROLE
+          required: true
+        },
+        {
+          name: '操作',
+          description: '付与するか剥奪するか',
+          type: 3, // STRING
+          required: true,
+          choices: [
+            { name: '付与 (Give)', value: 'give' },
+            { name: '剥奪 (Take)', value: 'take' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'admin_user',
+      description: 'ユーザーを管理（Kick/Ban/Timeout）します（管理者専用）',
+      options: [
+        {
+          name: 'ユーザー',
+          description: '対象ユーザー',
+          type: 6, // USER
+          required: true
+        },
+        {
+          name: '操作',
+          description: '実行する操作',
+          type: 3, // STRING
+          required: true,
+          choices: [
+            { name: 'Timeout (一時制限)', value: 'timeout' },
+            { name: 'Kick (追放)', value: 'kick' },
+            { name: 'Ban (禁止)', value: 'ban' }
+          ]
+        },
+        {
+          name: '理由',
+          description: '処分の理由',
+          type: 3, // STRING
+          required: false
+        },
+        {
+          name: '期間',
+          description: 'Timeoutの期間（分）（Timeout時のみ有効）',
+          type: 4, // INTEGER
+          required: false
         }
       ]
     }

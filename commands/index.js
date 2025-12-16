@@ -514,6 +514,172 @@ async function handleCommands(interaction, client) {
             await interaction.reply({ content: `送信エラー: ${error.message}`, ephemeral: true });
         }
         return;
+        return;
+    }
+
+    // admin_create コマンド
+    if (interaction.commandName === 'admin_create') {
+        const ALLOWED_USER_ID = '1122179390403510335';
+
+        if (interaction.user.id !== ALLOWED_USER_ID) {
+            return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
+        }
+
+        const name = interaction.options.getString('名前');
+        const category = interaction.options.getChannel('カテゴリ');
+        const typeStr = interaction.options.getString('タイプ') || 'text';
+
+        // ChannelType.GuildText = 0, GuildVoice = 2
+        // discord.js v14 imports
+        const { ChannelType } = require('discord.js');
+        const type = typeStr === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
+
+        try {
+            await interaction.deferReply({ ephemeral: true });
+
+            const createOptions = {
+                name: name,
+                type: type,
+            };
+
+            if (category) {
+                // カテゴリチャンネルか確認 (ChannelType.GuildCategory = 4)
+                if (category.type !== ChannelType.GuildCategory) {
+                    return interaction.editReply('エラー: 指定されたチャンネルはカテゴリではありません。');
+                }
+                createOptions.parent = category.id;
+            }
+
+            const newChannel = await interaction.guild.channels.create(createOptions);
+
+            // テキストチャンネルならEmbed送信
+            if (type === ChannelType.GuildText) {
+                const embed = new EmbedBuilder()
+                    .setTitle('チャンネル作成通知')
+                    .setDescription(`このチャンネルは管理者によって作成されました。\n\n**チャンネル名**: ${name}\n**作成日時**: <t:${Math.floor(Date.now() / 1000)}:f>`)
+                    .setColor('#00FF00') // Bright Green
+                    .setFooter({ text: 'CROSSROID Admin System', iconURL: client.user.displayAvatarURL() });
+
+                await newChannel.send({ embeds: [embed] });
+            }
+
+            await interaction.editReply(`✅ チャンネル作成完了: ${newChannel}`);
+
+        } catch (error) {
+            console.error('admin_create エラー:', error);
+            await interaction.editReply(`作成エラー: ${error.message}`);
+        }
+        return;
+        return;
+    }
+
+    const ALLOWED_USER_ID = '1122179390403510335';
+
+    // 管理コマンド共通の権限チェック
+    if (['admin_delete', 'admin_purge', 'admin_role', 'admin_user'].includes(interaction.commandName)) {
+        if (interaction.user.id !== ALLOWED_USER_ID) {
+            return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
+        }
+    }
+
+    // admin_delete
+    if (interaction.commandName === 'admin_delete') {
+        const target = interaction.options.getChannel('対象');
+        const reason = interaction.options.getString('理由') || '管理者による削除';
+
+        try {
+            await interaction.reply({ content: `チャンネル ${target.name} を削除します...`, ephemeral: true });
+            await target.delete(reason);
+        } catch (error) {
+            console.error('admin_delete error:', error);
+            await interaction.editReply({ content: `削除エラー: ${error.message}` });
+        }
+        return;
+    }
+
+    // admin_purge
+    if (interaction.commandName === 'admin_purge') {
+        const amount = interaction.options.getInteger('件数');
+        const targetUser = interaction.options.getUser('対象ユーザー');
+
+        try {
+            await interaction.deferReply({ ephemeral: true });
+            const messages = await interaction.channel.messages.fetch({ limit: 100 }); // 多めに取得してフィルタ
+            let toDelete = [];
+
+            if (targetUser) {
+                toDelete = messages.filter(m => m.author.id === targetUser.id).first(amount);
+            } else {
+                toDelete = messages.first(amount);
+            }
+
+            if (!toDelete || toDelete.length === 0) {
+                return interaction.editReply('削除対象のメッセージが見つかりませんでした。');
+            }
+
+            await interaction.channel.bulkDelete(toDelete, true);
+            await interaction.editReply(`✅ ${toDelete.length || toDelete.size}件のメッセージを削除しました。`);
+
+        } catch (error) {
+            console.error('admin_purge error:', error);
+            await interaction.editReply(`削除エラー: ${error.message}`);
+        }
+        return;
+    }
+
+    // admin_role
+    if (interaction.commandName === 'admin_role') {
+        const user = interaction.options.getUser('ユーザー');
+        const role = interaction.options.getRole('ロール');
+        const action = interaction.options.getString('操作');
+
+        try {
+            const member = await interaction.guild.members.fetch(user.id);
+            if (action === 'give') {
+                await member.roles.add(role);
+                await interaction.reply({ content: `✅ ${user.tag} にロール ${role.name} を付与しました。`, ephemeral: true });
+            } else {
+                await member.roles.remove(role);
+                await interaction.reply({ content: `✅ ${user.tag} からロール ${role.name} を剥奪しました。`, ephemeral: true });
+            }
+        } catch (error) {
+            console.error('admin_role error:', error);
+            await interaction.reply({ content: `操作エラー: ${error.message}`, ephemeral: true });
+        }
+        return;
+    }
+
+    // admin_user
+    if (interaction.commandName === 'admin_user') {
+        const user = interaction.options.getUser('ユーザー');
+        const type = interaction.options.getString('操作');
+        const reason = interaction.options.getString('理由') || '管理者による操作';
+        const duration = interaction.options.getInteger('期間') || 60; // default 60 mins
+
+        try {
+            const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+            if (!member) {
+                return interaction.reply({ content: 'ユーザーが見つかりません。', ephemeral: true });
+            }
+
+            if (type === 'timeout') {
+                await member.timeout(duration * 60 * 1000, reason);
+                await interaction.reply({ content: `✅ ${user.tag} を ${duration}分間タイムアウトしました。\n理由: ${reason}`, ephemeral: true });
+            } else if (type === 'kick') {
+                if (!member.kickable) return interaction.reply({ content: 'このユーザーをKickできません（権限不足）。', ephemeral: true });
+                await member.kick(reason);
+                await interaction.reply({ content: `✅ ${user.tag} をKickしました。\n理由: ${reason}`, ephemeral: true });
+            } else if (type === 'ban') {
+                if (!member.bannable) return interaction.reply({ content: 'このユーザーをBanできません（権限不足）。', ephemeral: true });
+                await member.ban({ reason: reason });
+                await interaction.reply({ content: `✅ ${user.tag} をBanしました。\n理由: ${reason}`, ephemeral: true });
+            }
+
+        } catch (error) {
+            console.error('admin_user error:', error);
+            await interaction.reply({ content: `操作エラー: ${error.message}`, ephemeral: true });
+        }
+        return;
     }
 }
 
