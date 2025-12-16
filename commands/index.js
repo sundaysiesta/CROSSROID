@@ -129,7 +129,9 @@ async function handleCommands(interaction, client) {
             usageData.count++;
             anonymousUsageCounts.set(interaction.user.id, usageData);
 
-            await interaction.reply({ content: `匿名メッセージを送信しました。(本日${usageData.count}回目)`, ephemeral: true });
+            await interaction.reply({ content: `匿名メッセージを送信しました。(本日${usageData.count}回目)`, ephemeral: true }).catch(err => {
+                if (err.code !== 10062) console.error('匿名コマンド応答エラー:', err);
+            });
 
         } catch (error) {
             console.error('エラーが発生しました:', error);
@@ -514,7 +516,6 @@ async function handleCommands(interaction, client) {
             await interaction.reply({ content: `送信エラー: ${error.message}`, ephemeral: true });
         }
         return;
-        return;
     }
 
     // admin_create コマンド
@@ -526,7 +527,7 @@ async function handleCommands(interaction, client) {
         }
 
         const name = interaction.options.getString('名前');
-        const categoryId = interaction.options.getString('カテゴリid');
+        const categoryId = interaction.options.getString('カテゴリid'); // ID指定
         const typeStr = interaction.options.getString('タイプ') || 'text';
 
         // ChannelType.GuildText = 0, GuildVoice = 2
@@ -547,6 +548,7 @@ async function handleCommands(interaction, client) {
                 if (!category) {
                     return interaction.editReply(`エラー: 指定されたID (${categoryId}) のチャンネルが見つかりません。`);
                 }
+                // カテゴリチャンネルか確認 (ChannelType.GuildCategory = 4)
                 if (category.type !== ChannelType.GuildCategory) {
                     return interaction.editReply(`エラー: 指定されたID (${categoryId}) はカテゴリではありません。`);
                 }
@@ -572,7 +574,6 @@ async function handleCommands(interaction, client) {
             console.error('admin_create エラー:', error);
             await interaction.editReply(`作成エラー: ${error.message}`);
         }
-        return;
         return;
     }
 
@@ -604,24 +605,39 @@ async function handleCommands(interaction, client) {
     if (interaction.commandName === 'admin_purge') {
         const amount = interaction.options.getInteger('件数');
         const targetUser = interaction.options.getUser('対象ユーザー');
+        const keyword = interaction.options.getString('キーワード');
+        const targetChannel = interaction.options.getChannel('チャンネル') || interaction.channel;
 
         try {
             await interaction.deferReply({ ephemeral: true });
-            const messages = await interaction.channel.messages.fetch({ limit: 100 }); // 多めに取得してフィルタ
-            let toDelete = [];
 
-            if (targetUser) {
-                toDelete = messages.filter(m => m.author.id === targetUser.id).first(amount);
-            } else {
-                toDelete = messages.first(amount);
+            if (!targetChannel.isTextBased()) {
+                return interaction.editReply('エラー: 指定されたチャンネルはテキストチャンネルではありません。');
             }
 
-            if (!toDelete || toDelete.length === 0) {
-                return interaction.editReply('削除対象のメッセージが見つかりませんでした。');
+            const messages = await targetChannel.messages.fetch({ limit: 100 });
+            let toDelete = messages;
+
+            if (targetUser) toDelete = toDelete.filter(m => m.author.id === targetUser.id);
+            if (keyword) toDelete = toDelete.filter(m => m.content && m.content.includes(keyword));
+
+            // Collection.first(n) returns Array<Message>
+            // Note: Collection.first(amount) always returns simple Array.
+            // If messages collection is empty or filtered to empty, .first(n) returns [].
+
+            const finalDeleteList = toDelete.first(amount);
+
+            if (!finalDeleteList || finalDeleteList.length === 0) {
+                return interaction.editReply('条件に一致する削除対象のメッセージが見つかりませんでした。');
             }
 
-            await interaction.channel.bulkDelete(toDelete, true);
-            await interaction.editReply(`✅ ${toDelete.length || toDelete.size}件のメッセージを削除しました。`);
+            await targetChannel.bulkDelete(finalDeleteList, true);
+
+            let replyMsg = `✅ ${targetChannel} で ${finalDeleteList.length}件のメッセージを削除しました。`;
+            if (targetUser) replyMsg += `\n対象ユーザー: ${targetUser.tag}`;
+            if (keyword) replyMsg += `\nキーワード: "${keyword}"`;
+
+            await interaction.editReply(replyMsg);
 
         } catch (error) {
             console.error('admin_purge error:', error);

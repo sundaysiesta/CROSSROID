@@ -260,6 +260,18 @@ client.once('ready', async () => {
           description: '特定のユーザーのメッセージのみ削除する場合指定',
           type: 6, // USER
           required: false
+        },
+        {
+          name: 'キーワード',
+          description: 'この言葉を含むメッセージのみ削除',
+          type: 3, // STRING
+          required: false
+        },
+        {
+          name: 'チャンネル',
+          description: '削除を行うチャンネル（指定なければ現在のチャンネル）',
+          type: 7, // CHANNEL
+          required: false
         }
       ]
     },
@@ -388,11 +400,13 @@ client.on('interactionCreate', async interaction => {
 
 // エラーハンドリング（未捕捉の例外）
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  console.error('【CRASH PREVENTION】Uncaught Exception:', error);
+  // プロセスを終了させない
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('【CRASH PREVENTION】Unhandled Rejection:', reason);
+  // プロセスを終了させない
 });
 
 // ログイン

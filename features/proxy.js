@@ -122,7 +122,10 @@ function setup(client) {
             try {
                 await message.delete();
             } catch (deleteError) {
-                console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
+                // Unknown Message (10008) は無視
+                if (deleteError.code !== 10008) {
+                    console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
+                }
             }
 
         } catch (error) {
