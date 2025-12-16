@@ -211,27 +211,33 @@ async function handleCommands(interaction, client) {
                     ]
                 });
             } catch (err) {
-                if (err.code === 50013) {
+                console.error('Channel creation error:', err);
+                if (err.code == 50013) {
                     // Fallback: Create without category
                     console.warn('Category permission missing, creating in root.');
-                    newChannel = await guild.channels.create({
-                        name: eventName,
-                        type: 0,
-                        // No parent
-                        topic: `イベント: ${eventName} | 作成者: ${interaction.user.username} (カテゴリ権限エラーによりルートに作成)`,
-                        permissionOverwrites: [
-                            {
-                                id: guild.id,
-                                allow: [PermissionFlagsBits.ViewChannel],
-                                deny: [PermissionFlagsBits.SendMessages]
-                            },
-                            {
-                                id: client.user.id,
-                                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.Administrator]
-                            }
-                        ]
-                    });
-                    await interaction.followUp({ content: '⚠️ イベントカテゴリへのアクセス権限がありませんでした。チャンネルをカテゴリ外に作成しました。', ephemeral: true });
+                    try {
+                        newChannel = await guild.channels.create({
+                            name: eventName,
+                            type: 0,
+                            // No parent
+                            topic: `イベント: ${eventName} | 作成者: ${interaction.user.username} (カテゴリ権限エラーによりルートに作成)`,
+                            permissionOverwrites: [
+                                {
+                                    id: guild.id,
+                                    allow: [PermissionFlagsBits.ViewChannel],
+                                    deny: [PermissionFlagsBits.SendMessages]
+                                },
+                                {
+                                    id: client.user.id,
+                                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.Administrator]
+                                }
+                            ]
+                        });
+                        await interaction.followUp({ content: '⚠️ イベントカテゴリへのアクセス権限がありませんでした。チャンネルをカテゴリ外に作成しました。', ephemeral: true }).catch(e => console.error('FollowUp failed:', e));
+                    } catch (fallbackErr) {
+                        console.error('Fallback creation failed:', fallbackErr);
+                        throw fallbackErr;
+                    }
                 } else {
                     throw err;
                 }
