@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const {
     EmbedBuilder,
     ActionRowBuilder,
@@ -6,8 +8,6 @@ const {
     ButtonStyle,
     ComponentType
 } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
 
 const POLL_DATA_FILE = path.join(__dirname, '../poll_data.json');
 
@@ -27,10 +27,8 @@ function parseDuration(str) {
 // --- Helper: Date Parser ---
 function parseDate(str) {
     if (!str) return null;
-    // Try standard constructor
     let date = new Date(str);
     if (!isNaN(date.getTime())) return date.getTime();
-    // Try simple formats (optional, standard string works well for ISO)
     return null;
 }
 
@@ -40,17 +38,17 @@ class PollParser {
         const config = {
             title: 'No Title',
             duration: 24 * 60 * 60 * 1000,
-            startDate: null, // Timestamp if future
-            mode: 'multi', // single, multi
-            maxVotes: 0, // 0 = Unlimited (if multi), 1 if single
-            public: true, // true=public, false=blind
-            accountAgeLimit: 0, // days
+            startDate: null,
+            mode: 'multi',
+            maxVotes: 0,
+            public: true,
+            accountAgeLimit: 0,
             allowSelfVote: false,
             candidates: [],
             roles: []
         };
 
-        let section = 'meta'; // meta, settings, candidates
+        let section = 'meta';
 
         for (let line of lines) {
             line = line.trim();
@@ -74,6 +72,10 @@ class PollParser {
                 if (key === 'タイトル' || key === 'Title') config.title = val;
                 if (key === '終了' || key === 'End') config.duration = parseDuration(val);
                 if (key === '開始' || key === 'Start') config.startDate = parseDate(val);
+
+                // --- Advanced Tournament Config ---
+                if (key === '予選期間' || key === 'QualifierDuration') config.qualifierDuration = parseDuration(val);
+                if (key === '決勝期間' || key === 'FinalDuration') config.finalDuration = parseDuration(val);
             } else if (section === 'settings') {
                 const parts = line.split(':');
                 if (parts.length < 2) continue;
@@ -87,6 +89,14 @@ class PollParser {
                 if (key === '一人あたりの票数' || key === 'MaxVotes') {
                     const limit = parseInt(val);
                     if (!isNaN(limit)) config.maxVotes = limit;
+                }
+                if (key === '予選票数' || key === 'QualifierMaxVotes') {
+                    const limit = parseInt(val);
+                    if (!isNaN(limit)) config.qualifierMaxVotes = limit;
+                }
+                if (key === '決勝票数' || key === 'FinalMaxVotes') {
+                    const limit = parseInt(val);
+                    if (!isNaN(limit)) config.finalMaxVotes = limit;
                 }
                 if (key === '公開設定') {
                     if (val.includes('ブラインド') || val.includes('非公開') || val.includes('完全非公開')) config.public = false;
@@ -172,10 +182,10 @@ class PollManager {
         const defaultEmojis = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭', '🇮', '🇯', '🇰', '🇱', '🇲', '🇳', '🇴', '🇵', '🇶', '🇷', '🇸', '🇹', '🇺', '🇻', '🇼', '🇽', '🇾', '🇿'];
         config.candidates.forEach((c, i) => {
             if (!c.emoji) c.emoji = defaultEmojis[i % defaultEmojis.length];
-            c.id = `c${i}`; // Short ID without underscores to prevent split issues
+            c.id = `c${i}`;
         });
 
-        // Set effective start date (now if null)
+        // Set effective start date
         const now = Date.now();
         const effectiveStart = config.startDate && config.startDate > now ? config.startDate : now;
 
@@ -188,7 +198,8 @@ class PollManager {
             authorId: authorId,
             channelId: channel.id,
             messageId: null,
-            ended: false
+            ended: false,
+            processing: false // Lock flag
         };
 
         const embed = this.generateEmbed(pollState);
@@ -217,7 +228,7 @@ class PollManager {
             });
         });
 
-        const statusColor = ended ? 0x999999 : (isStarted ? 0x00BFFF : 0xFFA500); // Grey(End), Blue(Active), Orange(Waiting)
+        const statusColor = ended ? 0x999999 : (isStarted ? 0x00BFFF : 0xFFA500);
         const embed = new EmbedBuilder()
             .setTitle(`📊 ${config.title}`)
             .setColor(statusColor)
@@ -267,9 +278,6 @@ class PollManager {
         if (!isStarted) {
             embed.addFields({ name: 'Starts', value: `<t:${Math.floor(startsAt / 1000)}:F>`, inline: true });
         } else if (!ended) {
-            // Duration is relative to Start Time? Or Creation? Usually Creation + Duration.
-            // If Start Date is used, End Date should probably be explicit or Start + Duration.
-            // Logic: EndTime = startsAt + duration
             const endsAt = startsAt + config.duration;
             embed.addFields({ name: 'Ends', value: `<t:${Math.floor(endsAt / 1000)}:R>`, inline: true });
         }
@@ -297,7 +305,7 @@ class PollManager {
                     .setLabel(c.name.substring(0, 80))
                     .setEmoji(c.emoji)
                     .setStyle(ButtonStyle.Primary)
-                    .setDisabled(disabled); // Disable if not started
+                    .setDisabled(disabled);
                 row.addComponents(btn);
             });
             components.push(row);
@@ -310,7 +318,7 @@ class PollManager {
                     .setPlaceholder(disabled ? '開始待機中...' : `候補者を選択 ${i + 1}〜${i + chunk.length}`)
                     .setMinValues(1)
                     .setMaxValues(config.mode === 'single' ? 1 : chunk.length)
-                    .setDisabled(disabled) // Disable if not started
+                    .setDisabled(disabled)
                     .addOptions(chunk.map(c => ({
                         label: c.name.substring(0, 100),
                         value: c.id,
@@ -328,8 +336,6 @@ class PollManager {
         const poll = this.polls.get(pollId);
 
         if (!poll) return interaction.reply({ content: 'この投票は終了しているか、存在しません。', ephemeral: true });
-
-        // Check Start Time
         if (Date.now() < poll.startsAt) {
             return interaction.reply({ content: `⏳ 投票はまだ開始されていません。\n開始時刻: <t:${Math.floor(poll.startsAt / 1000)}:R>`, ephemeral: true });
         }
@@ -370,30 +376,21 @@ class PollManager {
             votedCands = interaction.values;
         }
 
-        // Logic switch for Single/Multi
-        // Also check MaxVotes
         let currentVotes = poll.votes[interaction.user.id] || [];
-
         if (poll.config.mode === 'single') {
-            // Replace always
             poll.votes[interaction.user.id] = votedCands;
         } else {
-            // Multi Mode
             if (interaction.isButton()) {
-                // Toggle logic
                 const cid = votedCands[0];
                 if (currentVotes.includes(cid)) {
-                    // Remove
                     poll.votes[interaction.user.id] = currentVotes.filter(id => id !== cid);
                 } else {
-                    // Add - CHECK LIMIT
                     if (poll.config.maxVotes > 0 && currentVotes.length >= poll.config.maxVotes) {
                         return interaction.reply({ content: `⛔ 一人あたり最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
                     }
                     poll.votes[interaction.user.id] = [...currentVotes, cid];
                 }
             } else {
-                // Select Menu - CHECK LIMIT
                 if (poll.config.maxVotes > 0 && votedCands.length > poll.config.maxVotes) {
                     return interaction.reply({ content: `⛔ 選択数が多すぎます。最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
                 }
@@ -401,9 +398,7 @@ class PollManager {
             }
         }
 
-        // Re-read votes for feedback
         votedCands = poll.votes[interaction.user.id] || [];
-
         this.save();
 
         const votedNames = votedCands.map(cid => {
@@ -432,75 +427,71 @@ class PollManager {
         const poll = this.polls.get(pollId);
         if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
 
+        if (poll.processing) return interaction.reply({ content: '⚠️ 現在集計処理中です。しばらくお待ちください。', ephemeral: true });
+
         await interaction.deferReply({ ephemeral: true });
-
-        // Logic shared with auto-publish
         await this._executePublish(poll, interaction.channel);
-
         await interaction.editReply({ content: '✅ 結果を公開しました。' });
     }
 
     async _executePublish(poll, channel) {
-        const embed = this.generateEmbed(poll, true);
-        embed.setTitle(`🏆 結果発表: ${poll.config.title}`);
-        embed.setImage('attachment://ranking.png');
+        if (poll.processing || poll.ended) return; // Dual check
+        poll.processing = true;
 
-        const PollVisualizer = require('./pollVisualizer');
-        let files = [];
+        // Save immediately to prevent race conditions during long image gen
+        this.save();
+
+        console.log(`[PollManager] Publishing results for ${poll.id}...`);
+
         try {
-            // Enrich candidates with Avatar and Generation info
-            const enrichedPoll = { ...poll };
-            enrichedPoll.config = { ...poll.config };
-            enrichedPoll.config.candidates = await Promise.all(poll.config.candidates.map(async c => {
-                const enriched = { ...c };
-                if (c.userId) {
-                    try {
-                        const member = await channel.guild.members.fetch(c.userId).catch(() => null);
-                        if (member) {
-                            enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
-                            enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
+            const embed = this.generateEmbed(poll, true);
+            embed.setTitle(`🏆 結果発表: ${poll.config.title}`);
+            embed.setImage('attachment://ranking.png');
 
-                            // Determine Generation & Color
-                            // Logic: Look for a role that IS a Roman Numeral (Generation Role)
-                            const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-                            let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
-
-                            // Fallback: Check Current Generation Role ID
-                            if (!genRole) {
-                                genRole = member.roles.cache.get(require('../constants').CURRENT_GENERATION_ROLE_ID);
+            const PollVisualizer = require('./pollVisualizer');
+            let files = [];
+            try {
+                const enrichedPoll = { ...poll };
+                enrichedPoll.config = { ...poll.config };
+                enrichedPoll.config.candidates = await Promise.all(poll.config.candidates.map(async c => {
+                    const enriched = { ...c };
+                    if (c.userId) {
+                        try {
+                            const member = await channel.guild.members.fetch(c.userId).catch(() => null);
+                            if (member) {
+                                enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
+                                // Gen Role Logic...
+                                const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                                let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
+                                if (!genRole) genRole = member.roles.cache.get(require('../constants').CURRENT_GENERATION_ROLE_ID);
+                                if (genRole) {
+                                    enriched.generation = genRole.name.toUpperCase();
+                                    enriched.generationColor = genRole.hexColor;
+                                }
                             }
-
-                            if (genRole) {
-                                enriched.generation = genRole.name.toUpperCase();
-                                enriched.generationColor = genRole.hexColor;
-
-                                // Verification: If specific Current Gen role is used but name isn't simple Roman (e.g. "22nd Gen"),
-                                // we might want to convert number? But user says "Role IS Roman Numeral".
-                                // So we assume name is correct. 
-                                // Clean up if it contains other text? 
-                                // If matched regex, it's fine. If fallback, maybe clean?
-                                // Let's keep it simple: use name.
-                            }
+                        } catch (e) {
+                            // ignore
                         }
-                    } catch (e) {
-                        console.error(`Failed to fetch member ${c.userId}:`, e);
                     }
-                }
-                return enriched;
-            }));
+                    return enriched;
+                }));
 
-            const imageBuffer = await PollVisualizer.generateRankingImage(enrichedPoll);
-            files = [{ attachment: imageBuffer, name: 'ranking.png' }];
-        } catch (e) {
-            console.error('Failed to generate ranking image:', e);
-            embed.setFooter({ text: '画像生成に失敗しました' });
-        }
+                const imageBuffer = await PollVisualizer.generateRankingImage(enrichedPoll);
+                files = [{ attachment: imageBuffer, name: 'ranking.png' }];
+            } catch (e) {
+                console.error('Failed to generate ranking image:', e);
+                embed.setFooter({ text: '画像生成に失敗しました' });
+            }
 
-        await channel.send({ content: '## ⚡ 投票結果発表！', embeds: [embed], files: files });
+            await channel.send({ content: '## ⚡ 投票結果発表！', embeds: [embed], files: files });
 
-        if (!poll.ended) {
+            // Finalize
             poll.ended = true;
+            poll.processing = false; // Release lock (though ended=true prevents recurrence)
             this.save();
+
+            const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
+            if (msg) await msg.edit({ components: [] });
 
             // Check for Tournament Progression
             if (poll.config.seriesId) {
@@ -508,8 +499,10 @@ class PollManager {
                 TournamentManager.checkSeriesCompletion(poll.config.seriesId, channel.client).catch(console.error);
             }
 
-            const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
-            if (msg) await msg.edit({ components: [] });
+        } catch (e) {
+            console.error('Publish Execution Failed:', e);
+            poll.processing = false; // Release lock on error to retry?
+            this.save();
         }
     }
 
@@ -519,7 +512,7 @@ class PollManager {
         this.ticker = setInterval(async () => {
             const now = Date.now();
             for (const poll of this.polls.values()) {
-                if (!poll.ended) {
+                if (!poll.ended && !poll.processing) {
                     const endsAt = poll.startsAt + poll.config.duration;
                     if (now >= endsAt) {
                         try {
@@ -529,7 +522,7 @@ class PollManager {
                                 await this._executePublish(poll, channel);
                             } else {
                                 console.warn(`Channel not found for poll ${poll.id}`);
-                                poll.ended = true; // Force end if channel gone
+                                poll.ended = true;
                                 this.save();
                             }
                         } catch (e) {
@@ -538,13 +531,12 @@ class PollManager {
                     }
                 }
             }
-        }, 60 * 1000); // Check every minute
+        }, 60 * 1000);
     }
 
     async previewPoll(interaction, count = 5) {
         await interaction.deferReply({ ephemeral: true });
 
-        // Mock Data
         const emojis = ['🍎', '🍊', '🍇', '🍓', '🍌', '🍉', '🥝', '🍒', '🍑', '🍍', '🍈', '🍋', '🍐', '🥭'];
         const names = ['Sample Candidate A', 'Dr. Mario', 'Super Long Name User Who Has Too Many Titles', 'The Underrated', 'Newcomer', 'Legendary Hero', 'Villain'];
 
@@ -554,9 +546,7 @@ class PollManager {
                 id: `mock${i}`,
                 name: names[i % names.length] + (i > 6 ? ` ${i}` : ''),
                 emoji: emojis[i % emojis.length],
-                // Randomly assign generation and avatar (placeholder)
-                // Use a generic placeholder if we can't fetch real ones easily in mock
-                avatarURL: null, // Visualizer will use emoji fallback or placeholder
+                avatarURL: null,
                 generation: Math.random() > 0.5 ? (Math.random() > 0.5 ? 'XVI' : 'VII') : null
             });
         }
@@ -567,13 +557,10 @@ class PollManager {
             candidates: candidates
         };
 
-        // Mock Votes
         const votes = {};
         const totalVotes = 100 + Math.floor(Math.random() * 500);
 
-        // Random distribution (Weighted to make rank 1 clear)
         for (let v = 0; v < totalVotes; v++) {
-            // Weighted random
             let targetIndex = 0;
             const r = Math.random();
             if (r < 0.3) targetIndex = 0;
@@ -598,23 +585,9 @@ class PollManager {
                 files: [{ attachment: imageBuffer, name: 'preview.png' }]
             });
         } catch (e) {
-            console.error('Preview Generation Failed:', e);
-            await interaction.editReply({ content: `❌ 生成失敗: ${e.message}` });
+            await interaction.editReply({ content: 'Preview Gen Failed: ' + e.message });
         }
     }
 }
 
 module.exports = new PollManager();
-
-function toRoman(num) {
-    if (typeof num !== 'number') return num;
-    const lookup = { M: 1000, CM: 900, D: 500, CD: 400, C: 100, XC: 90, L: 50, XL: 40, X: 10, IX: 9, V: 5, IV: 4, I: 1 };
-    let roman = '';
-    for (let i in lookup) {
-        while (num >= lookup[i]) {
-            roman += i;
-            num -= lookup[i];
-        }
-    }
-    return roman;
-}

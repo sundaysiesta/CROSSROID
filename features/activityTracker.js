@@ -59,19 +59,25 @@ async function backfill(client) {
 
 
     // --- SMART SKIP LOGIC ---
+    // --- SMART SKIP LOGIC ---
     if (activityCache._meta) {
         const { lastDeepScan, oldestScanDepth } = activityCache._meta;
 
-        // If we have already done a Deep Scan THIS MONTH, scanning is unnecessary.
-        // Condition: Last Scan was AFTER month started AND it reached (or surpassed) the Month Start.
+        console.log(`[Backfill Debug] LastScan: ${new Date(lastDeepScan).toLocaleString()} | TargetMonth: ${new Date(startOfMonthTimestamp).toLocaleString()} | DepthReached: ${new Date(oldestScanDepth).toLocaleString()}`);
+
         if (lastDeepScan > startOfMonthTimestamp && oldestScanDepth <= startOfMonthTimestamp + (60 * 60 * 1000)) {
             const lastScanDate = new Date(lastDeepScan).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo' });
             console.log(`[ActivityTracker] ✅ Skipping Deep Scan (Already scanned this month at ${lastScanDate}).`);
             require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Last Scan: ${lastScanDate}).\nTracking mode: Real-time only (Monthly baseline secured).`, 'ActivityTracker');
             isBackfilling = false;
             return;
+        } else {
+            console.log('[Backfill Debug] Conditions not met. (New month? or previous scan incomplete?)');
         }
+    } else {
+        console.log('[Backfill Debug] No metadata found. First run?');
     }
+    // ------------------------
     // ------------------------
 
     let lastId = undefined;

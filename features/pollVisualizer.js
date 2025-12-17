@@ -1,7 +1,7 @@
 const { createCanvas, registerFont, loadImage } = require('canvas');
 const path = require('path');
 
-// フォントの登録
+// フォントの登録 (NotoSansJPを使用)
 try {
     registerFont(path.join(__dirname, '../resources/fonts/NotoSansJP-Bold.otf'), { family: 'NotoSansJP' });
 } catch (e) {
@@ -9,12 +9,26 @@ try {
 }
 
 class PollVisualizer {
+    constructor() {
+        this.colors = {
+            bgTop: '#0f172a',
+            bgBot: '#1e293b',
+            cardBg: 'rgba(30, 41, 59, 0.7)',
+            textMain: '#f8fafc',
+            textSub: '#94a3b8',
+            gold: '#fbbf24',
+            silver: '#e2e8f0',
+            bronze: '#b45309',
+            accent: '#3b82f6',
+            border: 'rgba(255,255,255,0.1)'
+        };
+    }
+
     async generateRankingImage(poll) {
         try {
             const { config, votes } = poll;
             const totalVotes = Object.keys(votes).length;
 
-            // Tally
             const tally = {};
             config.candidates.forEach(c => tally[c.id] = 0);
             Object.values(votes).forEach(voteList => {
@@ -23,307 +37,291 @@ class PollVisualizer {
                 });
             });
 
-            // Sort
             const sortedCands = [...config.candidates];
             sortedCands.sort((a, b) => tally[b.id] - tally[a.id]);
 
-            // Setup Layout
-            const headerHeight = 140;
-            const padding = 40;
-            const width = 1200;
-
-            // Grid Config
-            const rightGridStartX = 420;
-            const rightColWidth = 240;
-            const cardHeight = 280;
+            // Layout
+            const padding = 60;
+            const headerHeight = 150;
+            const cardHeight = 100;
             const gap = 20;
-            const rightCols = 3;
 
-            // Calculate Rows needed
-            const gridItems = sortedCands.length - 1;
-            const gridRows = Math.ceil(Math.max(0, gridItems) / rightCols);
-            const totalRows = Math.max(2, gridRows);
-
-            const contentHeight = totalRows * (cardHeight + gap);
-            const height = headerHeight + padding + contentHeight + padding;
+            // Calc Height
+            const contentHeight = sortedCands.length * (cardHeight + gap);
+            const width = 1200;
+            const height = Math.max(800, headerHeight + padding + contentHeight + padding);
 
             const canvas = createCanvas(width, height);
             const ctx = canvas.getContext('2d');
 
-            // --- CYBER BACKGROUND ---
-            const bgGradient = ctx.createLinearGradient(0, 0, width, height);
-            bgGradient.addColorStop(0, '#0f0c29');
-            bgGradient.addColorStop(0.5, '#302b63');
-            bgGradient.addColorStop(1, '#24243e');
-            ctx.fillStyle = bgGradient;
+            // --- Background (Modern Dark) ---
+            const grad = ctx.createLinearGradient(0, 0, 0, height);
+            grad.addColorStop(0, this.colors.bgTop);
+            grad.addColorStop(1, this.colors.bgBot);
+            ctx.fillStyle = grad;
             ctx.fillRect(0, 0, width, height);
 
-            // Grid Overlay
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            // subtle mesh pattern
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
             ctx.lineWidth = 1;
-            for (let i = 0; i < width; i += 40) {
-                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
-            }
-            for (let i = 0; i < height; i += 40) {
-                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
-            }
+            for (let i = 0; i < width; i += 50) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke(); }
+            for (let i = 0; i < height; i += 50) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke(); }
 
             // --- Header ---
-            ctx.shadowColor = 'rgba(0, 191, 255, 0.8)';
-            ctx.shadowBlur = 20;
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.font = 'bold 42px "NotoSansJP", sans-serif';
-            ctx.fillText(config.title || 'RESULT ANNOUNCEMENT', width / 2, 70);
+            ctx.fillStyle = this.colors.textMain;
+            ctx.textAlign = 'left';
+            ctx.font = 'bold 48px "NotoSansJP"';
+            ctx.fillText(config.title, padding, 80);
 
-            ctx.shadowBlur = 0;
-            ctx.font = '24px "NotoSansJP", sans-serif';
-            ctx.fillStyle = '#bbbbbb';
-            ctx.fillText(`Total Votes: ${totalVotes} | Mode: ${config.mode}`, width / 2, 115);
+            ctx.font = '24px "NotoSansJP"';
+            ctx.fillStyle = this.colors.textSub;
+            ctx.fillText(`${config.mode.toUpperCase()} MODE / TOTAL VOTES: ${totalVotes}`, padding, 120);
 
-            // --- Draw Candidates ---
-            const startY = headerHeight + padding;
+            // --- List ---
+            let y = headerHeight + padding;
 
             // Pre-load avatars
             const avatars = {};
             await Promise.all(sortedCands.map(async c => {
                 if (c.avatarURL) {
-                    try {
-                        avatars[c.id] = await loadImage(c.avatarURL);
-                    } catch (e) { /* ignore */ }
+                    try { avatars[c.id] = await loadImage(c.avatarURL); } catch (e) { }
                 }
             }));
 
             for (let i = 0; i < sortedCands.length; i++) {
                 const c = sortedCands[i];
                 const count = tally[c.id];
-                const percentage = totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) : '0.0';
+                const percentage = totalVotes > 0 ? (count / totalVotes) : 0;
                 const rank = i + 1;
 
-                let x, y, w, h;
-                if (i === 0) {
-                    x = 40; y = startY; w = 360; h = (cardHeight * 2) + gap;
-                } else {
-                    const gridIndex = i - 1;
-                    const col = gridIndex % rightCols;
-                    const row = Math.floor(gridIndex / rightCols);
-                    x = rightGridStartX + col * (rightColWidth + gap);
-                    y = startY + row * (cardHeight + gap);
-                    w = rightColWidth;
-                    h = cardHeight;
+                // Card BG
+                ctx.fillStyle = this.colors.cardBg;
+                this.roundRect(ctx, padding, y, width - padding * 2, cardHeight, 16);
+                ctx.fill();
+
+                // Border
+                ctx.strokeStyle = this.colors.border;
+                if (rank === 1) ctx.strokeStyle = this.colors.gold;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // 1. Rank
+                ctx.fillStyle = rank === 1 ? this.colors.gold : (rank === 2 ? this.colors.silver : (rank === 3 ? this.colors.bronze : this.colors.textSub));
+                ctx.font = 'bold 36px "NotoSansJP"';
+                ctx.textAlign = 'center';
+                ctx.fillText(`#${rank}`, padding + 50, y + 65);
+
+                // 2. Avatar
+                const avSize = 70;
+                const avX = padding + 110;
+                const avY = y + 15;
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(avX + avSize / 2, avY + avSize / 2, avSize / 2, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.clip();
+                if (avatars[c.id]) ctx.drawImage(avatars[c.id], avX, avY, avSize, avSize);
+                else {
+                    ctx.fillStyle = '#334155'; ctx.fillRect(avX, avY, avSize, avSize);
+                    ctx.fillStyle = '#fff'; ctx.font = '30px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillText(c.emoji || '👤', avX + avSize / 2, avY + avSize / 2);
+                }
+                ctx.restore();
+
+                // 3. Name
+                ctx.fillStyle = this.colors.textMain;
+                ctx.textAlign = 'left';
+                ctx.font = 'bold 28px "NotoSansJP"';
+                ctx.fillText(c.name, avX + avSize + 30, y + 45);
+
+                // 4. Progress Bar
+                const barX = avX + avSize + 30;
+                const barY = y + 60;
+                const barW = width - (padding * 2) - (barX - padding) - 150; // space for count
+                const barH = 12;
+
+                // Track
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                this.roundRect(ctx, barX, barY, barW, barH, 6);
+                ctx.fill();
+
+                // Fill
+                const fillW = Math.max(0, percentage * barW);
+                if (fillW > 0) {
+                    const gradBar = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
+                    gradBar.addColorStop(0, this.colors.accent);
+                    gradBar.addColorStop(1, '#60a5fa');
+                    if (rank === 1) { gradBar.addColorStop(0, '#f59e0b'); gradBar.addColorStop(1, '#fbbf24'); }
+                    ctx.fillStyle = gradBar;
+                    this.roundRect(ctx, barX, barY, fillW, barH, 6);
+                    ctx.fill();
                 }
 
-                this.drawCyberCard(ctx, x, y, w, h, c, rank, count, percentage, avatars[c.id]);
+                // 5. Count
+                ctx.fillStyle = this.colors.textMain;
+                ctx.textAlign = 'right';
+                ctx.font = 'bold 32px "NotoSansJP"';
+                ctx.fillText(count, width - padding - 20, y + 65);
+
+                y += cardHeight + gap;
             }
 
-            // Footer
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.font = '14px sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(`Generated by CROSSROID | ${new Date().toLocaleString('ja-JP')}`, width - 20, height - 10);
-
             return canvas.toBuffer();
-
         } catch (error) {
-            console.error('Error generating poll image:', error);
+            console.error(error);
             throw error;
         }
     }
 
-    drawCyberCard(ctx, x, y, w, h, candidate, rank, votes, percentage, avatarImage) {
-        ctx.save();
-
-        // Glassmorphism Card
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-        if (rank === 1) ctx.fillStyle = 'rgba(255, 215, 0, 0.1)';
-
-        // Shadow/Glow
-        if (rank <= 3) {
-            ctx.shadowColor = rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : '#CD7F32';
-            ctx.shadowBlur = 15;
-        }
-
-        // Rounded Rect
-        this.roundRect(ctx, x, y, w, h, 20);
-        ctx.fill();
-
-        // Border
-        ctx.shadowBlur = 0; // Reset for border
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        if (rank === 1) ctx.strokeStyle = '#FFD700';
-        else if (rank === 2) ctx.strokeStyle = '#C0C0C0';
-        else if (rank === 3) ctx.strokeStyle = '#CD7F32';
-
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Avatar
-        const sizeMin = Math.min(w, h);
-        const r = rank === 1 ? sizeMin * 0.25 : sizeMin * 0.2;
-        const cx = x + w / 2;
-        const cy = y + h * 0.35;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.closePath();
-
-        // Avatar Glow
-        if (rank <= 3) {
-            ctx.shadowColor = rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : '#CD7F32';
-            ctx.shadowBlur = 20;
-        }
-        ctx.fillStyle = '#000';
-        ctx.fill();
-        ctx.shadowBlur = 0; // Reset
-
-        ctx.clip();
-        if (avatarImage) {
-            ctx.drawImage(avatarImage, cx - r, cy - r, r * 2, r * 2);
-        } else {
-            ctx.fillStyle = '#333';
-            ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-            ctx.fillStyle = '#FFF';
-            ctx.font = `${r}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(candidate.emoji || '👤', cx, cy);
-        }
-        ctx.restore();
-
-        // Rank Badge
-        const badgeColor = rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : rank === 3 ? '#CD7F32' : '#555';
-        ctx.fillStyle = badgeColor;
-        ctx.beginPath();
-        ctx.arc(x + 30, y + 30, 20, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#FFF';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(rank, x + 30, y + 30);
-
-        // Name
-        ctx.fillStyle = '#FFF';
-        ctx.font = rank === 1 ? 'bold 28px "NotoSansJP"' : 'bold 20px "NotoSansJP"';
-        ctx.textAlign = 'center';
-        this.wrapText(ctx, candidate.name, cx, cy + r + 30, w - 20, 30);
-
-        // Votes Bar
-        const barW = w * 0.8;
-        const barH = 8;
-        const barX = x + (w - barW) / 2;
-        const barY = y + h - 40;
-
-        // Background Bar
-        ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        this.roundRect(ctx, barX, barY, barW, barH, 4);
-        ctx.fill();
-
-        // Fill Bar
-        const fillW = Math.max(0, (parseFloat(percentage) / 100) * barW);
-        if (fillW > 0) {
-            ctx.fillStyle = rank === 1 ? '#FFD700' : '#4facfe';
-            this.roundRect(ctx, barX, barY, fillW, barH, 4);
-            ctx.fill();
-        }
-
-        // Vote Text
-        ctx.fillStyle = '#ccc';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.fillText(`${votes} votes (${percentage}%)`, cx, barY + 25);
-
-        ctx.restore();
-    }
-
-    // --- NEW: QUALIFIER RESULT IMAGE ---
-    async generateQualifierPasserImage(candidates, house, title) {
+    async generateGroupAssignmentImage(groups, title) {
         const width = 1200;
-        const height = 630; // OGP size-ish
+        const height = 900;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // House Theme
-        const houses = {
-            'Griffindor': { c1: '#740001', c2: '#ae0001' },
-            'Hufflepuff': { c1: '#ecb939', c2: '#f0c75e' },
-            'Ravenclaw': { c1: '#0e1a40', c2: '#222f5b' },
-            'Slytherin': { c1: '#1a472a', c2: '#2a623d' }
-        };
-        const theme = houses[house] || { c1: '#333', c2: '#555' };
+        // BG
+        ctx.fillStyle = this.colors.bgTop;
+        ctx.fillRect(0, 0, width, height);
 
-        // Background
+        // Title
+        ctx.fillStyle = this.colors.textMain;
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 42px "NotoSansJP"';
+        ctx.fillText(title || 'TOURNAMENT GROUPS', width / 2, 60);
+
+        const houses = {
+            'Griffindor': { color: '#ef4444', x: 0, y: 100 },
+            'Hufflepuff': { color: '#eab308', x: 600, y: 100 },
+            'Ravenclaw': { color: '#3b82f6', x: 0, y: 500 },
+            'Slytherin': { color: '#22c55e', x: 600, y: 500 }
+        };
+
+        const qW = 600;
+        const qH = 400;
+
+        for (const [houseKey, candidates] of Object.entries(groups)) {
+            const hInfo = houses[houseKey];
+            const qx = hInfo.x; const qy = hInfo.y;
+
+            // Header Background
+            ctx.fillStyle = hInfo.color;
+            ctx.globalAlpha = 0.1;
+            ctx.fillRect(qx, qy, qW, qH);
+            ctx.globalAlpha = 1.0;
+
+            // Header Strip
+            ctx.fillStyle = hInfo.color;
+            ctx.fillRect(qx, qy, qW, 60);
+
+            // House Name
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 32px "NotoSansJP"';
+            ctx.textAlign = 'center';
+            ctx.fillText(houseKey.toUpperCase(), qx + qW / 2, qy + 40);
+
+            // List
+            ctx.textAlign = 'left';
+            ctx.font = '18px "NotoSansJP"';
+
+            let nx = qx + 40;
+            let ny = qy + 100;
+            candidates.forEach((c, i) => {
+                if (i === 10) { nx = qx + qW / 2 + 20; ny = qy + 100; }
+                ctx.fillStyle = this.colors.textMain;
+                ctx.fillText(`${i + 1}. ${c.name}`, nx, ny);
+                ny += 28;
+            });
+
+            // Border
+            ctx.strokeStyle = hInfo.color;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(qx, qy, qW, qH);
+        }
+
+        return canvas.toBuffer();
+    }
+
+    async generateQualifierPasserImage(candidates, house, title) {
+        const width = 1200;
+        const height = 600;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // House Colors (Muted)
+        const houses = {
+            'Griffindor': ['#7f1d1d', '#991b1b'],
+            'Hufflepuff': ['#713f12', '#a16207'],
+            'Ravenclaw': ['#1e3a8a', '#1d4ed8'],
+            'Slytherin': ['#14532d', '#15803d']
+        };
+        const colors = houses[house] || ['#333', '#444'];
+
         const grad = ctx.createLinearGradient(0, 0, width, height);
-        grad.addColorStop(0, theme.c1);
-        grad.addColorStop(1, theme.c2);
+        grad.addColorStop(0, colors[0]);
+        grad.addColorStop(1, colors[1]);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, width, height);
 
-        // Pattern
-        ctx.fillStyle = 'rgba(255,255,255,0.05)';
-        for (let i = 0; i < width; i += 60) {
-            ctx.beginPath(); ctx.arc(i, height / 2, 20, 0, Math.PI * 2); ctx.fill();
-        }
+        // Header
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.fillRect(0, 0, width, height); // dim overlay
 
-        // Title
+        ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10;
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10;
-        ctx.font = 'bold 50px "NotoSansJP"';
-        ctx.fillText(`${title} - 予選通過`, width / 2, 80);
-
-        ctx.font = '30px "NotoSansJP"';
-        ctx.fillText(`${house} 代表選出者`, width / 2, 130);
+        ctx.font = 'bold 42px "NotoSansJP"';
+        ctx.fillText(`QUALIFIER PASSED - ${house.toUpperCase()}`, width / 2, 80);
         ctx.shadowBlur = 0;
 
-        // Draw 3 Winners
-        const cardW = 300;
-        const cardH = 380;
-        const startX = (width - (cardW * 3 + 40)) / 2;
-        const startY = 180;
+        // 3 Cards
+        const cw = 320; const ch = 380;
+        const gap = 40;
+        const startX = (width - (cw * 3 + gap * 2)) / 2;
+        const startY = 150;
 
         for (let i = 0; i < candidates.length; i++) {
             const c = candidates[i];
-            const x = startX + i * (cardW + 20);
+            const x = startX + i * (cw + gap);
 
-            // Avatar Load
-            let avatar = null;
-            if (c.avatarURL) {
-                try { avatar = await loadImage(c.avatarURL); } catch (e) { }
-            }
-
-            // Card Bg
+            // Card
             ctx.save();
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            this.roundRect(ctx, x, startY, cardW, cardH, 15);
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            this.roundRect(ctx, x, startY, cw, ch, 16);
             ctx.fill();
+
+            // Rank Badge
+            ctx.fillStyle = this.colors.gold; // All passed is gold-ish
+            if (i === 1) ctx.fillStyle = this.colors.silver;
+            if (i === 2) ctx.fillStyle = this.colors.bronze;
+
+            ctx.beginPath();
+            ctx.moveTo(x + 20, startY); ctx.lineTo(x + 60, startY); ctx.lineTo(x + 60, startY + 50); ctx.lineTo(x + 40, startY + 40); ctx.lineTo(x + 20, startY + 50);
+            ctx.fill();
+            ctx.fillStyle = '#000'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(i + 1, x + 40, startY + 30);
 
             // Avatar
             const r = 80;
-            const cx = x + cardW / 2;
+            const cx = x + cw / 2;
             const cy = startY + 110;
             ctx.save();
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.closePath();
-            ctx.clip();
-            if (avatar) ctx.drawImage(avatar, cx - r, cy - r, r * 2, r * 2);
-            else { ctx.fillStyle = '#555'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2); }
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+            try {
+                if (c.avatarURL) {
+                    const img = await loadImage(c.avatarURL);
+                    ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+                } else {
+                    ctx.fillStyle = '#555'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+                }
+            } catch (e) { }
             ctx.restore();
-
-            // Ring
-            ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 5;
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-
-            // Rank Badge
-            ctx.fillStyle = '#ffd700';
-            ctx.beginPath(); ctx.arc(x + 40, startY + 40, 25, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#000'; ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(i + 1, x + 40, startY + 40);
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.stroke();
 
             // Name
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 24px "NotoSansJP"';
             ctx.textAlign = 'center';
-            this.wrapText(ctx, c.name, cx, cy + r + 40, cardW - 20, 30);
+            ctx.font = 'bold 24px "NotoSansJP"';
+            this.wrapText(ctx, c.name, cx, cy + r + 40, cw - 20, 30);
 
             ctx.restore();
         }
@@ -336,127 +334,79 @@ class PollVisualizer {
         const canvas = createCanvas(size, size);
         const ctx = canvas.getContext('2d');
 
-        const themes = {
-            1: { bg: ['#ffd700', '#DAA520'], text: '#FFFFFF', accent: '#FFFacd', title: 'CHAMPION' },
-            2: { bg: ['#C0C0C0', '#A9A9A9'], text: '#FFFFFF', accent: '#E0E0E0', title: '2nd PLACE' },
-            3: { bg: ['#CD7F32', '#8B4513'], text: '#FFFFFF', accent: '#D2B48C', title: '3rd PLACE' }
-        };
-        const theme = themes[rank] || themes[3];
+        // Theme
+        const theme = {
+            1: { bg: '#ca8a04', title: 'CHAMPION' },
+            2: { bg: '#94a3b8', title: '2ND PLACE' },
+            3: { bg: '#b45309', title: '3RD PLACE' }
+        }[rank] || { bg: '#475569', title: 'WINNER' };
 
-        const grad = ctx.createLinearGradient(0, 0, size, size);
-        grad.addColorStop(0, theme.bg[0]);
-        grad.addColorStop(1, theme.bg[1]);
+        // Bg
+        const grad = ctx.createRadialGradient(size / 2, size / 2, 100, size / 2, size / 2, 800);
+        grad.addColorStop(0, '#1e293b');
+        grad.addColorStop(1, '#0f172a');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, size, size);
 
-        // Radial Glow
-        const glow = ctx.createRadialGradient(size / 2, size / 2, 100, size / 2, size / 2, 500);
-        glow.addColorStop(0, theme.accent);
-        glow.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = glow;
+        // Burst
+        ctx.save();
+        ctx.translate(size / 2, size / 2);
+        ctx.strokeStyle = theme.bg;
+        ctx.lineWidth = 2;
         ctx.globalAlpha = 0.3;
-        ctx.fillRect(0, 0, size, size);
-        ctx.globalAlpha = 1.0;
+        for (let i = 0; i < 36; i++) {
+            ctx.rotate(Math.PI / 18);
+            ctx.beginPath(); ctx.moveTo(150, 0); ctx.lineTo(500, 0); ctx.stroke();
+        }
+        ctx.restore();
+
+        // Circle
+        const cx = size / 2;
+        const cy = size / 2 - 80;
+        const r = 240;
+
+        // Glow
+        ctx.shadowColor = theme.bg;
+        ctx.shadowBlur = 80;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = '#000'; ctx.fill();
+        ctx.shadowBlur = 0;
 
         // Avatar
-        if (candidate.avatarURL) {
-            try {
-                const avatar = await loadImage(candidate.avatarURL);
-                const cx = size / 2;
-                const cy = size / 2 - 50;
-                const r = 250;
-                ctx.save();
-                ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.closePath(); ctx.clip();
-                ctx.drawImage(avatar, cx - r, cy - r, r * 2, r * 2);
-                ctx.restore();
-                ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 20; ctx.strokeStyle = '#fff'; ctx.stroke();
-            } catch (e) {
-                console.error('Failed to load avatar:', e);
+        ctx.save();
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+        try {
+            if (candidate.avatarURL) {
+                const img = await loadImage(candidate.avatarURL);
+                ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+            } else {
+                ctx.fillStyle = '#333'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
             }
-        }
+        } catch (e) { }
+        ctx.restore();
 
-        // Text
+        // Ring
+        ctx.strokeStyle = theme.bg; ctx.lineWidth = 15;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+
+        // Title
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20;
+        ctx.font = 'bold 110px "NotoSansJP"';
+        ctx.shadowColor = theme.bg; ctx.shadowBlur = 20;
+        ctx.fillText(theme.title, size / 2, 130);
+        ctx.shadowBlur = 0;
 
-        ctx.font = 'bold 100px "NotoSansJP", sans-serif';
-        ctx.fillText(theme.title, size / 2, 120);
+        // Name
+        ctx.font = 'bold 80px "NotoSansJP"';
+        this.wrapText(ctx, candidate.name, size / 2, size - 180, size - 100, 90);
 
-        let fontSize = 90;
-        ctx.font = `bold ${fontSize}px "NotoSansJP", sans-serif`;
-        while (ctx.measureText(candidate.name).width > size - 100 && fontSize > 40) {
-            fontSize -= 5;
-            ctx.font = `bold ${fontSize}px "NotoSansJP", sans-serif`;
-        }
-        ctx.fillText(candidate.name, size / 2, size - 180);
-
-        ctx.font = '40px "NotoSansJP", sans-serif';
-        ctx.fillText(`CROSSROID CHAMPIONSHIP`, size / 2, size - 80);
+        ctx.font = '30px "NotoSansJP"';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('CROSSROID CHAMPIONSHIP', size / 2, size - 60);
 
         return canvas.toBuffer();
     }
 
-    async generateGroupAssignmentImage(groups, title) {
-        // Reuse previous logic but with updated calls if needed
-        // For simplicity, implementing a cleaner version here directly.
-        const width = 1200;
-        const height = 900;
-        const canvas = createCanvas(width, height);
-        const ctx = canvas.getContext('2d');
-
-        ctx.fillStyle = '#16213e';
-        ctx.fillRect(0, 0, width, height);
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 40px "NotoSansJP", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(title || '予選グループ表', width / 2, 60);
-
-        const houses = {
-            'Griffindor': { color: '#740001', name: 'グリフィンドール', x: 0, y: 100 },
-            'Hufflepuff': { color: '#ecb939', name: 'ハッフルパフ', x: 600, y: 100 },
-            'Ravenclaw': { color: '#0e1a40', name: 'レイブンクロー', x: 0, y: 500 },
-            'Slytherin': { color: '#1a472a', name: 'スリザリン', x: 600, y: 500 }
-        };
-
-        const quadrantW = 600;
-        const quadrantH = 400;
-
-        for (const [houseKey, candidates] of Object.entries(groups)) {
-            const style = houses[houseKey];
-            const qx = style.x; const qy = style.y;
-
-            ctx.fillStyle = style.color;
-            ctx.globalAlpha = 0.2;
-            ctx.fillRect(qx, qy, quadrantW, quadrantH);
-            ctx.globalAlpha = 1.0;
-            ctx.strokeStyle = style.color;
-            ctx.lineWidth = 4;
-            ctx.strokeRect(qx + 10, qy + 10, quadrantW - 20, quadrantH - 20);
-
-            ctx.fillStyle = style.color;
-            ctx.fillRect(qx + 10, qy + 10, quadrantW - 20, 50);
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 28px "NotoSansJP"';
-            ctx.textAlign = 'center';
-            ctx.fillText(style.name, qx + quadrantW / 2, qy + 45);
-
-            ctx.font = '18px "NotoSansJP"';
-            ctx.textAlign = 'left';
-            let ny = qy + 90;
-            let nx = qx + 40;
-            candidates.forEach((c, i) => {
-                if (i === 10) { nx = qx + quadrantW / 2 + 20; ny = qy + 90; }
-                ctx.fillStyle = '#fff';
-                ctx.fillText(`${i + 1}. ${c.name}`, nx, ny);
-                ny += 28;
-            });
-        }
-        return canvas.toBuffer();
-    }
-
-    // Helper: Round Rect
     roundRect(ctx, x, y, w, h, r) {
         if (w < 2 * r) r = w / 2;
         if (h < 2 * r) r = h / 2;
@@ -469,7 +419,6 @@ class PollVisualizer {
         ctx.closePath();
     }
 
-    // Helper: Wrap Text
     wrapText(ctx, text, x, y, maxWidth, lineHeight) {
         const words = text.split('');
         let line = '';

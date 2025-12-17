@@ -5,7 +5,15 @@ const ActivityTracker = require('./activityTracker');
 const NotionManager = require('./notion');
 
 class TournamentManager {
+    constructor() {
+        this.seriesLocks = new Set();
+    }
+
     async start(interaction, config) {
+        // Prevent double click on same interaction?
+        // Interaction reply usually handles this, but logic here takes time.
+        // Assuming interaction is unique enough or user behaves.
+
         await interaction.editReply({ content: '🏆 選手権モードの準備中... 参加者を収集中です。' });
 
         const guild = interaction.guild;
@@ -111,7 +119,8 @@ class TournamentManager {
                 seriesId: seriesId,
                 stage: 'qualifier',
                 house: house,
-                maxVotes: config.maxVotes || 2
+                maxVotes: config.qualifierMaxVotes || config.maxVotes || 2,
+                duration: config.qualifierDuration || config.duration || (60 * 60 * 1000) // Default 1h
             };
 
             await PollManager.createPollInternal(interaction.channel, pollConfig, interaction.user.id);
@@ -121,137 +130,147 @@ class TournamentManager {
     }
 
     async checkSeriesCompletion(seriesId, client) {
+        if (this.seriesLocks.has(seriesId)) return;
+        this.seriesLocks.add(seriesId);
+
         const PollManager = require('./poll');
 
-        // 1. Check Qualifiers -> Finals
-        const seriesPolls = Array.from(PollManager.polls.values()).filter(p => p.config.seriesId === seriesId && p.config.stage === 'qualifier');
+        try {
+            // 1. Check Qualifiers -> Finals
+            const seriesPolls = Array.from(PollManager.polls.values()).filter(p => p.config.seriesId === seriesId && p.config.stage === 'qualifier');
 
-        if (seriesPolls.length > 0) {
-            const allEnded = seriesPolls.every(p => p.ended);
-            if (allEnded) {
-                // Check if finals already created
-                const existingFinal = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
-                if (!existingFinal) {
-                    // Aggregate Winners
-                    const winners = [];
-                    const PollVisualizer = require('./pollVisualizer');
-                    const passerImages = [];
+            if (seriesPolls.length > 0) {
+                const allEnded = seriesPolls.every(p => p.ended);
+                if (allEnded) {
+                    // Check if finals already created
+                    const existingFinal = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
+                    if (!existingFinal) {
+                        // Aggregate Winners
+                        const winners = [];
+                        const PollVisualizer = require('./pollVisualizer');
+                        const passerImages = [];
 
-                    for (const poll of seriesPolls) {
-                        // Calculate winner
-                        const tally = {};
-                        poll.config.candidates.forEach(c => tally[c.id] = 0);
-                        Object.values(poll.votes).forEach(voteList => {
-                            voteList.forEach(candId => tally[candId]++);
-                        });
-
-                        // Sort
-                        const sorted = [...poll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
-                        if (sorted.length > 0) {
-                            // Select Top 3
-                            const topCandidates = sorted.slice(0, 3);
-
-                            // Generate Passer Image for this House
-                            try {
-                                const house = poll.config.house;
-                                // Need to fetch avatars if missing
-                                await Promise.all(topCandidates.map(async c => {
-                                    if (c.userId && !c.avatarURL) {
-                                        const ch = await client.channels.fetch(poll.channelId).catch(() => null);
-                                        if (ch) {
-                                            const m = await ch.guild.members.fetch(c.userId).catch(() => null);
-                                            if (m) c.avatarURL = m.displayAvatarURL({ extension: 'png' });
-                                        }
-                                    }
-                                }));
-
-                                const buffer = await PollVisualizer.generateQualifierPasserImage(topCandidates, house, poll.config.title);
-                                passerImages.push({ attachment: buffer, name: `passers_${house}.png` });
-
-                            } catch (e) {
-                                console.error(`Failed to gen passer image for ${poll.config.house}:`, e);
-                            }
-
-                            topCandidates.forEach((winner, index) => {
-                                winner.name = `Rank${index + 1} ${winner.name} (${poll.config.house})`;
-                                winners.push(winner);
+                        for (const poll of seriesPolls) {
+                            // Calculate winner
+                            const tally = {};
+                            poll.config.candidates.forEach(c => tally[c.id] = 0);
+                            Object.values(poll.votes).forEach(voteList => {
+                                voteList.forEach(candId => tally[candId]++);
                             });
+
+                            // Sort
+                            const sorted = [...poll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
+                            if (sorted.length > 0) {
+                                // Select Top 3
+                                const topCandidates = sorted.slice(0, 3);
+
+                                // Generate Passer Image for this House
+                                try {
+                                    const house = poll.config.house;
+                                    // Need to fetch avatars if missing
+                                    await Promise.all(topCandidates.map(async c => {
+                                        if (c.userId && !c.avatarURL) {
+                                            const ch = await client.channels.fetch(poll.channelId).catch(() => null);
+                                            if (ch) {
+                                                const m = await ch.guild.members.fetch(c.userId).catch(() => null);
+                                                if (m) c.avatarURL = m.displayAvatarURL({ extension: 'png' });
+                                            }
+                                        }
+                                    }));
+
+                                    const buffer = await PollVisualizer.generateQualifierPasserImage(topCandidates, house, poll.config.title);
+                                    passerImages.push({ attachment: buffer, name: `passers_${house}.png` });
+
+                                } catch (e) {
+                                    console.error(`Failed to gen passer image for ${poll.config.house}:`, e);
+                                }
+
+                                topCandidates.forEach((winner, index) => {
+                                    winner.name = `Rank${index + 1} ${winner.name} (${poll.config.house})`;
+                                    winners.push(winner);
+                                });
+                            }
                         }
-                    }
 
-                    // Post Passer Images
-                    const channel = await client.channels.fetch(seriesPolls[0].channelId).catch(() => null);
-                    if (channel && passerImages.length > 0) {
-                        await channel.send({ content: '## ⚡ 決勝進出者決定！', files: passerImages });
-                    }
-
-                    if (winners.length > 0) {
-                        // Create Finals
-                        const finalConfig = {
-                            title: `${seriesPolls[0].config.title.split('-')[0].trim()} - 決勝戦`,
-                            candidates: winners,
-                            mode: 'single', // Finals usually single
-                            duration: 24 * 60 * 60 * 1000, // 24h for final
-                            seriesId: seriesId,
-                            stage: 'final'
-                        };
-
-                        // Post to same channel as first qualifier
+                        // Post Passer Images
                         const channel = await client.channels.fetch(seriesPolls[0].channelId).catch(() => null);
-                        if (channel) {
-                            await channel.send('# 🏆 予選終了！ 決勝戦開始！');
-                            await PollManager.createPollInternal(channel, finalConfig, seriesPolls[0].authorId);
+                        if (channel && passerImages.length > 0) {
+                            await channel.send({ content: '## ⚡ 決勝進出者決定！', files: passerImages });
+                        }
+
+                        if (winners.length > 0) {
+                            // Create Finals
+                            // Use Series Config inheritance if available, else defaults
+                            const parentConfig = seriesPolls[0].config;
+
+                            const finalConfig = {
+                                title: `${parentConfig.title.split('-')[0].trim()} - 決勝戦`,
+                                candidates: winners,
+                                mode: parentConfig.finalMaxVotes > 1 ? 'multi' : 'single',
+                                maxVotes: parentConfig.finalMaxVotes || 1,
+                                duration: parentConfig.finalDuration || (24 * 60 * 60 * 1000), // Default 24h
+                                seriesId: seriesId,
+                                stage: 'final'
+                            };
+
+                            // Post to same channel as first qualifier
+                            if (channel) {
+                                await channel.send('# 🏆 予選終了！ 決勝戦開始！');
+                                await PollManager.createPollInternal(channel, finalConfig, seriesPolls[0].authorId);
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 2. Check Finals -> Victory Ceremony
-        const finalPoll = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
-        if (finalPoll && finalPoll.ended && !finalPoll.ceremonyDone) {
-            finalPoll.ceremonyDone = true;
-            PollManager.save(); // Persist ceremony state
+            // 2. Check Finals -> Victory Ceremony
+            const finalPoll = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
+            if (finalPoll && finalPoll.ended && !finalPoll.ceremonyDone) {
+                finalPoll.ceremonyDone = true;
+                PollManager.save(); // Persist ceremony state
 
-            // Determine Winners (Rank 1-3)
-            const tally = {};
-            finalPoll.config.candidates.forEach(c => tally[c.id] = 0);
-            Object.values(finalPoll.votes).forEach(voteList => {
-                voteList.forEach(candId => tally[candId]++);
-            });
-            const sorted = [...finalPoll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
-            const top3 = sorted.slice(0, 3);
+                // Determine Winners (Rank 1-3)
+                const tally = {};
+                finalPoll.config.candidates.forEach(c => tally[c.id] = 0);
+                Object.values(finalPoll.votes).forEach(voteList => {
+                    voteList.forEach(candId => tally[candId]++);
+                });
+                const sorted = [...finalPoll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
+                const top3 = sorted.slice(0, 3);
 
-            const channel = await client.channels.fetch(finalPoll.channelId).catch(() => null);
-            if (channel) {
-                await channel.send('# 👑 優勝者決定！ おめでとうございます！');
+                const channel = await client.channels.fetch(finalPoll.channelId).catch(() => null);
+                if (channel) {
+                    await channel.send('# 👑 優勝者決定！ おめでとうございます！');
 
-                // Generate Images
-                const PollVisualizer = require('./pollVisualizer');
-                const files = [];
+                    // Generate Images
+                    const PollVisualizer = require('./pollVisualizer');
+                    const files = [];
 
-                // Render Rank 1, 2, 3
-                for (let i = 0; i < top3.length; i++) {
-                    const candidate = top3[i];
-                    // Fetch Avatar if missing (should be enriched effectively, but candidates in final config might just have IDs)
-                    if (candidate.userId && !candidate.avatarURL) {
-                        const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
-                        if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
+                    // Render Rank 1, 2, 3
+                    for (let i = 0; i < top3.length; i++) {
+                        const candidate = top3[i];
+                        // Fetch Avatar if missing (should be enriched effectively, but candidates in final config might just have IDs)
+                        if (candidate.userId && !candidate.avatarURL) {
+                            const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
+                            if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
+                        }
+
+                        try {
+                            const buffer = await PollVisualizer.generateVictoryImage(candidate, i + 1);
+                            files.push({ attachment: buffer, name: `victory_rank${i + 1}.png` });
+                        } catch (e) {
+                            console.error('Victory Image Gen Failed:', e);
+                        }
                     }
 
-                    try {
-                        const buffer = await PollVisualizer.generateVictoryImage(candidate, i + 1);
-                        files.push({ attachment: buffer, name: `victory_rank${i + 1}.png` });
-                    } catch (e) {
-                        console.error('Victory Image Gen Failed:', e);
+                    // Send all images
+                    if (files.length > 0) {
+                        await channel.send({ content: `## 🏆 表彰台`, files: files });
                     }
-                }
-
-                // Send all images
-                if (files.length > 0) {
-                    await channel.send({ content: `## 🏆 表彰台`, files: files });
                 }
             }
+        } finally {
+            this.seriesLocks.delete(seriesId);
         }
     }
 }
