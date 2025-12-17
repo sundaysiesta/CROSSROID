@@ -141,7 +141,16 @@ async function handleCommands(interaction, client) {
 
     if (interaction.commandName === 'event_create') {
         try {
-            await interaction.deferReply({ ephemeral: true });
+            // Robust Defer: Catch 10062 (Unknown Interaction) immediately
+            try {
+                await interaction.deferReply({ ephemeral: true });
+            } catch (deferErr) {
+                if (deferErr.code === 10062 || deferErr.code === 40060) {
+                    console.warn('[EventCreate] Interaction expired before defer (10062/40060). Aborting.');
+                    return;
+                }
+                throw deferErr; // Re-throw other errors
+            }
 
             // 権限チェック (管理者 または 特定ロール)
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
@@ -345,10 +354,19 @@ async function handleCommands(interaction, client) {
             const { logError } = require('../utils');
             await logError(error, 'Event Creation (/event_create)');
 
-            if (interaction.deferred || interaction.replied) {
-                return interaction.editReply('イベント作成中にエラーが発生しました。');
+            // Safe Reply/Edit attempt
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply('イベント作成中にエラーが発生しました。');
+                } else {
+                    await interaction.reply({ content: 'イベント作成中にエラーが発生しました。', ephemeral: true });
+                }
+            } catch (replyErr) {
+                // If interaction is dead (10062), ignore.
+                if (replyErr.code !== 10062 && replyErr.code !== 40060) {
+                    console.error('Failed to report error to user:', replyErr);
+                }
             }
-            return interaction.reply({ content: 'イベント作成中にエラーが発生しました。', ephemeral: true });
         }
         return;
     }
