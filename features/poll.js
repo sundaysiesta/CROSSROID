@@ -505,28 +505,37 @@ class PollManager {
             try {
                 const enrichedPoll = { ...poll };
                 enrichedPoll.config = { ...poll.config };
-                enrichedPoll.config.candidates = await Promise.all(poll.config.candidates.map(async c => {
+
+                // Bulk Fetch Optimization
+                const userIds = poll.config.candidates.map(c => c.userId).filter(id => id);
+                let members = new Map();
+                if (userIds.length > 0) {
+                    try {
+                        members = await channel.guild.members.fetch({ user: userIds });
+                    } catch (e) {
+                        console.error('Bulk Fetch Failed in _executePublish:', e);
+                    }
+                }
+
+                const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
+
+                enrichedPoll.config.candidates = poll.config.candidates.map(c => {
                     const enriched = { ...c };
-                    if (c.userId) {
-                        try {
-                            const member = await channel.guild.members.fetch(c.userId).catch(() => null);
-                            if (member) {
-                                enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
-                                // Gen Role Logic...
-                                const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-                                let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
-                                if (!genRole) genRole = member.roles.cache.get(require('../constants').CURRENT_GENERATION_ROLE_ID);
-                                if (genRole) {
-                                    enriched.generation = genRole.name.toUpperCase();
-                                    enriched.generationColor = genRole.hexColor;
-                                }
-                            }
-                        } catch (e) {
-                            // ignore
+                    if (c.userId && members.has(c.userId)) {
+                        const member = members.get(c.userId);
+                        enriched.avatarURL = member.displayAvatarURL({ extension: 'png', size: 256 });
+
+                        // Gen Role Logic
+                        let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
+                        if (!genRole && currentGenRoleId) genRole = member.roles.cache.get(currentGenRoleId);
+                        if (genRole) {
+                            enriched.generation = genRole.name.toUpperCase();
+                            enriched.generationColor = genRole.hexColor;
                         }
                     }
                     return enriched;
-                }));
+                });
 
                 const imageBuffer = await PollVisualizer.generateRankingImage(enrichedPoll);
                 files = [{ attachment: imageBuffer, name: 'ranking.png' }];
