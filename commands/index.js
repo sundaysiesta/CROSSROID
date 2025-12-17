@@ -157,13 +157,13 @@ async function handleCommands(interaction, client) {
         const userId = interaction.user.id;
         const now = Date.now();
         const lastUsed = cooldowns[`roulette_${userId}`] || 0;
-        const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+        const COOLDOWN_DURATION = 3 * 24 * 60 * 60 * 1000;
 
-        if (now - lastUsed < SEVEN_DAYS) {
-            const remaining = SEVEN_DAYS - (now - lastUsed);
+        if (now - lastUsed < COOLDOWN_DURATION) {
+            const remaining = COOLDOWN_DURATION - (now - lastUsed);
             const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
             const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-            return interaction.reply({ content: `⛔ このコマンドは7日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間`, ephemeral: true });
+            return interaction.reply({ content: `⛔ このコマンドは3日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間`, ephemeral: true });
         }
 
         const member = interaction.member;
@@ -187,7 +187,7 @@ async function handleCommands(interaction, client) {
         if (targets.size === 0) return interaction.editReply('❌ No targets found.');
 
         // Logic: 1/6 chance
-        const isHit = Math.random() < (2 / 6);
+        const isHit = Math.random() < (4 / 6);
 
         // Visuals
         await interaction.editReply(`🔫 **Russian Roulette**\n${interaction.user} がシリンダーを回しました...\nターゲット候補: ${targets.size}人`);
