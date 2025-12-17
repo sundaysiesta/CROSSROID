@@ -459,7 +459,7 @@ client.once('ready', async () => {
 
   // --- Feature Setup (Load data after restore) ---
   const activityTracker = require('./features/activityTracker');
-  activityTracker.setup(client);
+  activityTracker.start(client);
 
   const PollManager = require('./features/poll');
   PollManager.startTicker(client);
