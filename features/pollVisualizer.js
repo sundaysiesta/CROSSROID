@@ -407,6 +407,170 @@ class PollVisualizer {
         return canvas.toBuffer();
     }
 
+    async generateFinalRankingImage(candidates, title) {
+        // candidates is assumed sorted: [{ name, avatarURL, votes, rank? }, ...]
+        registerFont(path.join(__dirname, '../assets/fonts/NotoSansJP-Bold.otf'), { family: 'NotoSansJP', weight: 'bold' });
+
+        const width = 1200;
+        const height = 675;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // Theme
+        const theme = {
+            bg: '#0f172a',
+            accent: '#38bdf8',
+            gold: '#fbbf24',
+            silver: '#94a3b8',
+            bronze: '#b45309',
+            text: '#f8fafc'
+        };
+
+        // Background
+        const grad = ctx.createLinearGradient(0, 0, width, height);
+        grad.addColorStop(0, '#020617');
+        grad.addColorStop(1, '#1e293b');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+
+        // Tech Pattern
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < width; i += 40) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+        }
+        for (let i = 0; i < height; i += 40) {
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+        }
+
+        // Title Header
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+        ctx.fillRect(0, 0, width, 80);
+        ctx.fillStyle = theme.accent;
+        ctx.font = 'bold 40px "NotoSansJP"';
+        ctx.textAlign = 'left';
+        ctx.fillText(title || 'FINAL RANKING', 30, 55);
+
+        // --- Left Side: TOP 3 ---
+        const top3 = candidates.slice(0, 3);
+        const others = candidates.slice(3);
+
+        const positions = [
+            { x: 300, y: 380, r: 80, color: theme.gold, rank: 1, scale: 1.2 },   // Center (Rank 1)
+            { x: 140, y: 420, r: 60, color: theme.silver, rank: 2, scale: 1.0 }, // Left (Rank 2)
+            { x: 460, y: 440, r: 60, color: theme.bronze, rank: 3, scale: 1.0 }  // Right (Rank 3)
+        ];
+
+        for (let i = 0; i < top3.length; i++) {
+            const c = top3[i];
+            const pos = positions[i];
+            if (!pos) continue;
+
+            const cx = pos.x;
+            const cy = pos.y;
+            const r = pos.r * pos.scale;
+
+            // Glow
+            ctx.save();
+            ctx.shadowColor = pos.color;
+            ctx.shadowBlur = 30;
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = '#000'; ctx.fill();
+            ctx.restore();
+
+            // Avatar
+            ctx.save();
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+            try {
+                if (c.avatarURL) {
+                    const img = await loadImage(c.avatarURL);
+                    ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+                } else {
+                    ctx.fillStyle = '#333'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+                }
+            } catch (e) { }
+            ctx.restore();
+
+            // Ring
+            ctx.strokeStyle = pos.color;
+            ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+
+            // Rank Badge
+            ctx.beginPath(); ctx.arc(cx, cy - r, 20, 0, Math.PI * 2); ctx.fillStyle = pos.color; ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 24px "NotoSansJP"';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(pos.rank), cx, cy - r + 8);
+
+            // Name
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 24px "NotoSansJP"';
+            this.wrapText(ctx, c.name, cx, cy + r + 30, 200, 30);
+
+            // Votes
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '20px "NotoSansJP"';
+            ctx.fillText(`${c.votes || 0} votes`, cx, cy + r + 60);
+        }
+
+        // --- Right Side: LIST ---
+        const listX = 650;
+        const listY = 120;
+        const rowH = 45;
+
+        ctx.textAlign = 'left';
+
+        // List Container
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        this.roundRect(ctx, listX - 20, listY - 20, 520, 540, 10);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.stroke();
+
+        ctx.font = 'bold 24px "NotoSansJP"';
+        ctx.fillStyle = theme.accent;
+        ctx.fillText('LEADERBOARD', listX, listY + 10);
+
+        ctx.font = '20px "NotoSansJP"';
+
+        let currentY = listY + 60;
+
+        // Also list Top 3 briefly if needed, but let's list 4th onwards primarily
+        // Or strictly list 4th onwards. User said "output ALL ranks".
+        // Listing 4-12 is fits easily.
+
+        others.forEach((c, index) => {
+            const rank = index + 4;
+            if (currentY > height - 50) return; // Overflow protection
+
+            ctx.fillStyle = '#fff';
+            ctx.fillText(`#${rank}`, listX, currentY);
+
+            ctx.fillStyle = '#cbd5e1';
+            const nameClipped = c.name.length > 18 ? c.name.substring(0, 17) + '...' : c.name;
+            ctx.fillText(nameClipped, listX + 60, currentY);
+
+            ctx.fillStyle = theme.accent;
+            ctx.textAlign = 'right';
+            ctx.fillText(`${c.votes} pts`, listX + 480, currentY);
+            ctx.textAlign = 'left';
+
+            // Divider
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.beginPath(); ctx.moveTo(listX, currentY + 15); ctx.lineTo(listX + 480, currentY + 15); ctx.stroke();
+
+            currentY += rowH;
+        });
+
+        // Watermark
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.font = '20px "NotoSansJP"';
+        ctx.textAlign = 'right';
+        ctx.fillText('Black Knights Championship', width - 20, height - 20);
+
+        return canvas.toBuffer();
+    }
+
     roundRect(ctx, x, y, w, h, r) {
         if (w < 2 * r) r = w / 2;
         if (h < 2 * r) r = h / 2;

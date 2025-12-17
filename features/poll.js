@@ -339,86 +339,95 @@ class PollManager {
     }
 
     async handleInteraction(client, interaction) {
-        const parts = interaction.customId.split('_');
-        const pollId = parts[2];
-        const poll = this.polls.get(pollId);
+        try {
+            const parts = interaction.customId.split('_');
+            const pollId = parts[2];
+            const poll = this.polls.get(pollId);
 
-        if (!poll) return interaction.reply({ content: 'この投票は終了しているか、存在しません。', ephemeral: true });
-        if (Date.now() < poll.startsAt) {
-            return interaction.reply({ content: `⏳ 投票はまだ開始されていません。\n開始時刻: <t:${Math.floor(poll.startsAt / 1000)}:R>`, ephemeral: true });
-        }
-
-        const member = interaction.member;
-
-        if (poll.config.accountAgeLimit > 0) {
-            const ageDays = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
-            if (ageDays < poll.config.accountAgeLimit) {
-                return interaction.reply({ content: `⛔ アカウント作成から${poll.config.accountAgeLimit}日経過していないため投票できません。`, ephemeral: true });
+            if (!poll) return interaction.reply({ content: 'この投票は終了しているか、存在しません。', ephemeral: true });
+            if (Date.now() < poll.startsAt) {
+                return interaction.reply({ content: `⏳ 投票はまだ開始されていません。\n開始時刻: <t:${Math.floor(poll.startsAt / 1000)}:R>`, ephemeral: true });
             }
-        }
 
-        if (poll.config.roles.length > 0) {
-            const hasRole = member.roles.cache.some(r => poll.config.roles.includes(r.id));
-            if (!hasRole) return interaction.reply({ content: '⛔ 投票権限がありません。', ephemeral: true });
-        }
+            const member = interaction.member;
 
-        if (!poll.config.allowSelfVote) {
-            const targetIds = [];
-            if (interaction.isButton()) targetIds.push(parts[3]);
-            if (interaction.isStringSelectMenu()) targetIds.push(...interaction.values);
-
-            const targetNames = targetIds.map(tid => poll.config.candidates.find(c => c.id === tid)?.name);
-            const myName = member.displayName;
-            const myUser = member.user.username;
-
-            if (targetNames.some(n => n === myName || n === myUser)) {
-                return interaction.reply({ content: '⛔ 自己投票は禁止されています。', ephemeral: true });
+            if (poll.config.accountAgeLimit > 0) {
+                const ageDays = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
+                if (ageDays < poll.config.accountAgeLimit) {
+                    return interaction.reply({ content: `⛔ アカウント作成から${poll.config.accountAgeLimit}日経過していないため投票できません。`, ephemeral: true });
+                }
             }
-        }
 
-        let votedCands = [];
-        if (interaction.isButton()) {
-            const candId = parts[3];
-            votedCands = [candId];
-        } else if (interaction.isStringSelectMenu()) {
-            votedCands = interaction.values;
-        }
+            if ((poll.config.roles || []).length > 0) {
+                const hasRole = member.roles.cache.some(r => poll.config.roles.includes(r.id));
+                if (!hasRole) return interaction.reply({ content: '⛔ 投票権限がありません。', ephemeral: true });
+            }
 
-        let currentVotes = poll.votes[interaction.user.id] || [];
-        if (poll.config.mode === 'single') {
-            poll.votes[interaction.user.id] = votedCands;
-        } else {
+            if (!poll.config.allowSelfVote) {
+                const targetIds = [];
+                if (interaction.isButton()) targetIds.push(parts[3]);
+                if (interaction.isStringSelectMenu()) targetIds.push(...interaction.values);
+
+                const targetNames = targetIds.map(tid => poll.config.candidates.find(c => c.id === tid)?.name);
+                const myName = member.displayName;
+                const myUser = member.user.username;
+
+                if (targetNames.some(n => n === myName || n === myUser)) {
+                    return interaction.reply({ content: '⛔ 自己投票は禁止されています。', ephemeral: true });
+                }
+            }
+
+            let votedCands = [];
             if (interaction.isButton()) {
-                const cid = votedCands[0];
-                if (currentVotes.includes(cid)) {
-                    poll.votes[interaction.user.id] = currentVotes.filter(id => id !== cid);
-                } else {
-                    if (poll.config.maxVotes > 0 && currentVotes.length >= poll.config.maxVotes) {
-                        return interaction.reply({ content: `⛔ 一人あたり最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
-                    }
-                    poll.votes[interaction.user.id] = [...currentVotes, cid];
-                }
-            } else {
-                if (poll.config.maxVotes > 0 && votedCands.length > poll.config.maxVotes) {
-                    return interaction.reply({ content: `⛔ 選択数が多すぎます。最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
-                }
-                poll.votes[interaction.user.id] = votedCands;
+                const candId = parts[3];
+                votedCands = [candId];
+            } else if (interaction.isStringSelectMenu()) {
+                votedCands = interaction.values;
             }
-        }
 
-        votedCands = poll.votes[interaction.user.id] || [];
-        this.save();
+            let currentVotes = poll.votes[interaction.user.id] || [];
+            if (poll.config.mode === 'single') {
+                poll.votes[interaction.user.id] = votedCands;
+            } else {
+                if (interaction.isButton()) {
+                    const cid = votedCands[0];
+                    if (currentVotes.includes(cid)) {
+                        poll.votes[interaction.user.id] = currentVotes.filter(id => id !== cid);
+                    } else {
+                        if (poll.config.maxVotes > 0 && currentVotes.length >= poll.config.maxVotes) {
+                            return interaction.reply({ content: `⛔ 一人あたり最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
+                        }
+                        poll.votes[interaction.user.id] = [...currentVotes, cid];
+                    }
+                } else {
+                    if (poll.config.maxVotes > 0 && votedCands.length > poll.config.maxVotes) {
+                        return interaction.reply({ content: `⛔ 選択数が多すぎます。最大 ${poll.config.maxVotes}票 までです。`, ephemeral: true });
+                    }
+                    poll.votes[interaction.user.id] = votedCands;
+                }
+            }
 
-        const votedNames = votedCands.map(cid => {
-            const c = poll.config.candidates.find(cand => cand.id === cid);
-            return c ? `${c.emoji} ${c.name}` : 'Unknown';
-        }).join(', ');
+            votedCands = poll.votes[interaction.user.id] || [];
+            this.save();
 
-        await interaction.reply({ content: `🗳️ 投票を確認しました:\n**${votedNames || '選択解除'}**`, ephemeral: true });
+            const votedNames = votedCands.map(cid => {
+                const c = poll.config.candidates.find(cand => cand.id === cid);
+                return c ? `${c.emoji || ''} ${c.name}` : 'Unknown';
+            }).join(', ');
 
-        const msg = await interaction.channel.messages.fetch(poll.messageId).catch(() => null);
-        if (msg) {
-            await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
+            await interaction.reply({ content: `🗳️ 投票を確認しました:\n**${votedNames || '選択解除'}**`, ephemeral: true });
+
+            const msg = await interaction.channel.messages.fetch(poll.messageId).catch(() => null);
+            if (msg) {
+                await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
+            }
+        } catch (error) {
+            console.error('Vote Interaction Error:', error);
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ content: `❌ エラーが発生しました: ${error.message}`, ephemeral: true }).catch(() => { });
+            } else {
+                await interaction.followUp({ content: `❌ エラーが発生しました: ${error.message}`, ephemeral: true }).catch(() => { });
+            }
         }
     }
 

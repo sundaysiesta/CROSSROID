@@ -212,7 +212,10 @@ class TournamentManager {
                                 duration: parentConfig.finalDuration || (24 * 60 * 60 * 1000), // Default 24h
                                 startDate: parentConfig.finalStart, // Schedule if set
                                 seriesId: seriesId,
-                                stage: 'final'
+                                stage: 'final',
+                                roles: parentConfig.roles || [],
+                                accountAgeLimit: parentConfig.accountAgeLimit || 0,
+                                allowSelfVote: parentConfig.allowSelfVote !== undefined ? parentConfig.allowSelfVote : true
                             };
 
                             // Post to same channel as first qualifier
@@ -248,10 +251,10 @@ class TournamentManager {
                     const PollVisualizer = require('./pollVisualizer');
                     const files = [];
 
-                    // Render Rank 1, 2, 3
+                    // Render Rank 1, 2, 3 (Victory Images)
                     for (let i = 0; i < top3.length; i++) {
                         const candidate = top3[i];
-                        // Fetch Avatar if missing (should be enriched effectively, but candidates in final config might just have IDs)
+                        // Fetch Avatar
                         if (candidate.userId && !candidate.avatarURL) {
                             const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
                             if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
@@ -265,9 +268,35 @@ class TournamentManager {
                         }
                     }
 
+                    // --- GENERATE ALL RANKING BOARD ---
+                    try {
+                        // Prepare data with votes for all candidates
+                        const rankingData = sorted.map((c, idx) => ({
+                            ...c,
+                            votes: tally[c.id] || 0,
+                            rank: idx + 1
+                        }));
+
+                        // Ensure avatars for ALL (or at least top 12)
+                        await Promise.all(rankingData.map(async c => {
+                            if (c.userId && !c.avatarURL) {
+                                const m = await channel.guild.members.fetch(c.userId).catch(() => null);
+                                if (m) c.avatarURL = m.displayAvatarURL({ extension: 'png' });
+                            }
+                        }));
+
+                        const rankBuffer = await PollVisualizer.generateFinalRankingImage(rankingData, finalPoll.config.title);
+                        files.push({ attachment: rankBuffer, name: 'ranking_overview.png' });
+                    } catch (e) {
+                        console.error('Final Ranking Image Gen Failed:', e);
+                    }
+
                     // Send all images
                     if (files.length > 0) {
-                        await channel.send({ content: `## 🏆 表彰台`, files: files });
+                        await channel.send({ content: `## 🏆 表彰台 & 最終結果`, files: files });
+
+                        // User Request: Prompt for improvements
+                        await channel.send('### 📈 選手権お疲れ様ダラァ！');
                     }
                 }
             }
