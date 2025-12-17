@@ -120,13 +120,14 @@ class TournamentManager {
                 startDate: config.qualifierStart || config.startDate,
                 seriesId: seriesId,
                 stage: 'qualifier',
-                house: house,
-                maxVotes: config.qualifierMaxVotes || config.maxVotes || 2,
-                duration: config.qualifierDuration || config.duration || (60 * 60 * 1000), // Default 1h
-                startDate: config.qualifierStart || config.startDate
+                house: house
             };
 
-            await PollManager.createPollInternal(interaction.channel, pollConfig, interaction.user.id);
+            try {
+                await PollManager.createPollInternal(interaction.channel, pollConfig, interaction.user.id);
+            } catch (e) {
+                console.error(`Failed to create poll for ${house}:`, e);
+            }
         }
 
         await interaction.followUp({ content: '✅ 予選ブロックを作成しました！' });

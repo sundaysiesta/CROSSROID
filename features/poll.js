@@ -14,10 +14,11 @@ const POLL_DATA_FILE = path.join(__dirname, '../poll_data.json');
 // --- Helper: Time Parser (24h -> ms) ---
 function parseDuration(str) {
     if (!str) return 24 * 60 * 60 * 1000; // default 24h
-    const match = str.match(/(\d+)(h|m|d)/);
+    const match = str.match(/(\d+)(h|m|d|s)/);
     if (!match) return 24 * 60 * 60 * 1000;
     const val = parseInt(match[1]);
     const unit = match[2];
+    if (unit === 's') return val * 1000;
     if (unit === 'm') return val * 60 * 1000;
     if (unit === 'h') return val * 60 * 60 * 1000;
     if (unit === 'd') return val * 24 * 60 * 60 * 1000;

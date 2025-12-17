@@ -143,7 +143,7 @@ async function handleCommands(interaction, client) {
         try {
             // Robust Defer: Catch 10062 (Unknown Interaction) immediately
             try {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: 64 }); // 64 = MessageFlags.Ephemeral
             } catch (deferErr) {
                 if (deferErr.code === 10062 || deferErr.code === 40060) {
                     console.warn('[EventCreate] Interaction expired before defer (10062/40060). Aborting.');
