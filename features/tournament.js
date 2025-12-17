@@ -127,6 +127,8 @@ class TournamentManager {
 
             try {
                 await PollManager.createPollInternal(interaction.channel, pollConfig, interaction.user.id);
+                // Prevent Rate Limit / Spam
+                await new Promise(r => setTimeout(r, 1500));
             } catch (e) {
                 console.error(`Failed to create poll for ${house}:`, e);
             }

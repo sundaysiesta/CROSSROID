@@ -253,7 +253,7 @@ class PollVisualizer {
     }
 
     async generateQualifierPasserImage(candidates, house, title) {
-        const width = 1200;
+        const width = 1920; // Widen to HD
         const height = 600;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
@@ -280,14 +280,16 @@ class PollVisualizer {
         ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10;
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
-        ctx.font = 'bold 42px "NotoSansJP"';
+        ctx.font = `bold 42px ${FONTS.TITLE}`; // Use Configured Font
         ctx.fillText(`QUALIFIER PASSED - ${house.toUpperCase()}`, width / 2, 80);
         ctx.shadowBlur = 0;
 
-        // 3 Cards
-        const cw = 320; const ch = 380;
-        const gap = 40;
-        const startX = (width - (cw * 3 + gap * 2)) / 2;
+        // Dynamic Layout
+        const cw = 300; // Slightly smaller to fit 5
+        const ch = 380;
+        const gap = 30;
+        const totalW = candidates.length * cw + (candidates.length - 1) * gap;
+        const startX = (width - totalW) / 2;
         const startY = 150;
 
         for (let i = 0; i < candidates.length; i++) {
@@ -301,7 +303,8 @@ class PollVisualizer {
             ctx.fill();
 
             // Rank Badge
-            ctx.fillStyle = this.colors.gold; // All passed is gold-ish
+            ctx.fillStyle = '#64748b'; // Default (4th+) Slate
+            if (i === 0) ctx.fillStyle = this.colors.gold;
             if (i === 1) ctx.fillStyle = this.colors.silver;
             if (i === 2) ctx.fillStyle = this.colors.bronze;
 
