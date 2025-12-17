@@ -187,7 +187,7 @@ async function handleCommands(interaction, client) {
         if (targets.size === 0) return interaction.editReply('❌ No targets found.');
 
         // Logic: 1/6 chance
-        const isHit = Math.random() < (5 / 6);
+        const isHit = Math.random() < (1 / 6);
 
         // Visuals
         await interaction.editReply(`🔫 **Russian Roulette**\n${interaction.user} がシリンダーを回しました...\nターゲット候補: ${targets.size}人`);
@@ -204,16 +204,20 @@ async function handleCommands(interaction, client) {
             const victim = targets.random();
             const victimName = victim.displayName;
 
-            await interaction.editReply(`💥 **BANG!!!**\n${interaction.user} の放った弾丸が **${victim}** に命中しました！\n🚑 (10分間のタイムアウト)`);
+            // Generate Wacchoi for Exposure
+            const wacchoi = generateWacchoi(victim.id);
+            const wacchoiText = `\`${wacchoi.full}\``;
+
+            await interaction.editReply(`💥 **BANG!!!**\n${interaction.user} の放った弾丸が **${victim}** に命中しました！\n🚑 (10分間のタイムアウト)\n🔍 **Identity Exposed:** 本日のWacchoiは ${wacchoiText} です。`);
 
             try {
                 if (victim.moderatable) {
-                    await victim.timeout(10 * 60 * 1000, `Russian Roulette: Shot by ${interaction.user.tag}`);
-                    await interaction.channel.send(`💀 ${victimName} は10分間の暗闇に葬られました...`);
+                    await victim.timeout(10 * 60 * 1000, `Russian Roulette: Shot by ${interaction.user.tag}`).catch(e => console.error('Timeout API Failed:', e));
+                    await interaction.channel.send(`💀 ${victimName} は10分間の暗闇に葬られました... (Wacchoi: ${wacchoiText})`);
                     // DM
-                    await victim.send(`🔫 あなたは **${interaction.user.tag}** のロシアンルーレットの流れ弾に当たりました。\n10分間サーバーにアクセスできません。`).catch(() => { });
+                    await victim.send(`🔫 あなたは **${interaction.user.tag}** のロシアンルーレットの流れ弾に当たりました。\n10分間サーバーにアクセスできません。\nなお、本日のあなたの匿名ID(Wacchoi)は ${wacchoiText} として公開されました。`).catch(() => { });
                 } else {
-                    await interaction.followUp(`⚠️ **${victimName}** に命中しましたが、防弾ベスト(権限)により無効化されました。`);
+                    await interaction.followUp(`⚠️ **${victimName}** に命中しましたが、防弾ベスト(権限)により無効化されました。\nしかし、匿名IDは公開されます: ${wacchoiText}`);
                 }
             } catch (e) {
                 console.error('Timeout execution failed:', e);
