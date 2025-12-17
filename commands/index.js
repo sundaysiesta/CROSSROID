@@ -139,6 +139,99 @@ async function handleCommands(interaction, client) {
         return;
     }
 
+    if (interaction.commandName === 'roulette') {
+        const fs = require('fs');
+        const path = require('path');
+        const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
+
+        // Load Cooldowns
+        let cooldowns = {};
+        if (fs.existsSync(COOLDOWN_FILE)) {
+            try {
+                cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
+            } catch (e) {
+                console.error('Cooldown load error:', e);
+            }
+        }
+
+        const userId = interaction.user.id;
+        const now = Date.now();
+        const lastUsed = cooldowns[`roulette_${userId}`] || 0;
+        const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+
+        if (now - lastUsed < SEVEN_DAYS) {
+            const remaining = SEVEN_DAYS - (now - lastUsed);
+            const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+            const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+            return interaction.reply({ content: `⛔ このコマンドは7日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間`, ephemeral: true });
+        }
+
+        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) return interaction.reply({ content: 'エラー: メンバー情報の取得に失敗しました。', ephemeral: true });
+
+        // Generation Check
+        const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+        const hasGenRole = member.roles.cache.some(r => romanRegex.test(r.name));
+        const hasCurrentGen = member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
+
+        if (!hasGenRole && !hasCurrentGen) {
+            return interaction.reply({ content: '⛔ このコマンドは世代ロール（I, II, III... または最新世代）を持つメンバー限定です。', ephemeral: true });
+        }
+
+        await interaction.deferReply();
+
+        // Fetch targets
+        await interaction.guild.members.fetch();
+        const targets = interaction.guild.members.cache.filter(m => !m.user.bot && (m.roles.cache.some(r => romanRegex.test(r.name)) || m.roles.cache.has(currentGenRoleId)));
+
+        if (targets.size === 0) return interaction.editReply('❌ No targets found.');
+
+        // Logic: 1/6 chance
+        const isHit = Math.random() < (5 / 6);
+
+        // Visuals
+        await interaction.editReply(`🔫 **Russian Roulette**\n${interaction.user} がシリンダーを回しました...\nターゲット候補: ${targets.size}人`);
+        await new Promise(r => setTimeout(r, 3000)); // Suspense
+
+        if (isHit) {
+            cooldowns[`roulette_${userId}`] = now;
+            try {
+                fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
+                require('../features/persistence').save(client);
+            } catch (e) { console.error('Cooldown save error:', e); }
+
+            // Select Victim
+            const victim = targets.random();
+            const victimName = victim.displayName;
+
+            await interaction.editReply(`💥 **BANG!!!**\n${interaction.user} の放った弾丸が **${victim}** に命中しました！\n🚑 (10分間のタイムアウト)`);
+
+            try {
+                if (victim.moderatable) {
+                    await victim.timeout(10 * 60 * 1000, `Russian Roulette: Shot by ${interaction.user.tag}`);
+                    await interaction.channel.send(`💀 ${victimName} は10分間の暗闇に葬られました...`);
+                    // DM
+                    await victim.send(`🔫 あなたは **${interaction.user.tag}** のロシアンルーレットの流れ弾に当たりました。\n10分間サーバーにアクセスできません。`).catch(() => { });
+                } else {
+                    await interaction.followUp(`⚠️ **${victimName}** に命中しましたが、防弾ベスト(権限)により無効化されました。`);
+                }
+            } catch (e) {
+                console.error('Timeout execution failed:', e);
+                await interaction.followUp('⚠️ タイムアウトの適用中にエラーが発生しました。命拾いしましたね。');
+            }
+
+        } else {
+            cooldowns[`roulette_${userId}`] = now;
+            try {
+                fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
+                require('../features/persistence').save(client);
+            } catch (e) { console.error('Cooldown save error:', e); }
+
+            await interaction.editReply(`💨 **Click...**\n不発でした。今日の死者はいないようです...`);
+        }
+        return;
+    }
+
     if (interaction.commandName === 'event_create') {
         try {
             // Robust Defer: Catch 10062 (Unknown Interaction) immediately

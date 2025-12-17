@@ -153,6 +153,10 @@ client.once('ready', async () => {
       description: 'サーバーメンバーをランダムでメンションします'
     },
     {
+      name: 'roulette',
+      description: '【運試し】10分間のタイムアウトを賭けたロシアンルーレット（世代ロール限定）'
+    },
+    {
       name: 'event_create',
       description: 'イベント用チャンネルを作成し、告知を行います',
       options: [
