@@ -6,7 +6,9 @@ WORKDIR /app
 
 # Download Japanese Font
 RUN mkdir -p resources/fonts \
-    && wget -q -O resources/fonts/NotoSansJP-Bold.otf https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf
+    && wget -q -O resources/fonts/NotoSansJP-Bold.otf https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf \
+    && wget -q -O resources/fonts/DelaGothicOne-Regular.ttf https://github.com/google/fonts/raw/main/ofl/delagothicone/DelaGothicOne-Regular.ttf \
+    && wget -q -O resources/fonts/ZenAntique-Regular.ttf https://github.com/google/fonts/raw/main/ofl/zenantique/ZenAntique-Regular.ttf
 
 # 依存関係のインストール（キャッシュ最適化）
 COPY package*.json ./

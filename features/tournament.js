@@ -168,162 +168,164 @@ class TournamentManager {
                             // Sort
                             const sorted = [...poll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
                             if (sorted.length > 0) {
-                                // Select Top 3
-                                const topCandidates = sorted.slice(0, 3);
+                                if (sorted.length > 0) {
+                                    // Select Top 5 (User Request: 5x Dorms)
+                                    const topCandidates = sorted.slice(0, 5);
 
-                                // Generate Passer Image for this House
-                                try {
-                                    const house = poll.config.house;
-                                    // Need to fetch avatars if missing
-                                    await Promise.all(topCandidates.map(async c => {
-                                        if (c.userId && !c.avatarURL) {
-                                            const ch = await client.channels.fetch(poll.channelId).catch(() => null);
-                                            if (ch) {
-                                                const m = await ch.guild.members.fetch(c.userId).catch(() => null);
-                                                if (m) c.avatarURL = m.displayAvatarURL({ extension: 'png' });
+                                    // Generate Passer Image for this House
+                                    try {
+                                        const house = poll.config.house;
+                                        // Need to fetch avatars if missing
+                                        await Promise.all(topCandidates.map(async c => {
+                                            if (c.userId && !c.avatarURL) {
+                                                const ch = await client.channels.fetch(poll.channelId).catch(() => null);
+                                                if (ch) {
+                                                    const m = await ch.guild.members.fetch(c.userId).catch(() => null);
+                                                    if (m) c.avatarURL = m.displayAvatarURL({ extension: 'png' });
+                                                }
                                             }
-                                        }
-                                    }));
+                                        }));
 
-                                    const buffer = await PollVisualizer.generateQualifierPasserImage(topCandidates, house, poll.config.title);
-                                    passerImages.push({ attachment: buffer, name: `passers_${house}.png` });
+                                        const buffer = await PollVisualizer.generateQualifierPasserImage(topCandidates, house, poll.config.title);
+                                        passerImages.push({ attachment: buffer, name: `passers_${house}.png` });
 
-                                } catch (e) {
-                                    console.error(`Failed to gen passer image for ${poll.config.house}:`, e);
+                                    } catch (e) {
+                                        console.error(`Failed to gen passer image for ${poll.config.house}:`, e);
+                                    }
+
+                                    topCandidates.forEach((winner, index) => {
+                                        // Removed: winner.name modification (Rank/House)
+                                        winners.push(winner);
+                                    });
                                 }
-
-                                topCandidates.forEach((winner, index) => {
-                                    winner.name = `Rank${index + 1} ${winner.name} (${poll.config.house})`;
-                                    winners.push(winner);
-                                });
                             }
-                        }
 
-                        // Post Passer Images
-                        const channel = await client.channels.fetch(seriesPolls[0].channelId).catch(() => null);
-                        if (channel && passerImages.length > 0) {
-                            await channel.send({ content: '## ⚡ 決勝進出者決定！', files: passerImages });
-                        }
+                            // Post Passer Images
+                            const channel = await client.channels.fetch(seriesPolls[0].channelId).catch(() => null);
+                            if (channel && passerImages.length > 0) {
+                                await channel.send({ content: '## ⚡ 決勝進出者決定！', files: passerImages });
+                            }
 
-                        if (winners.length > 0) {
-                            // Create Finals
-                            // Use Series Config inheritance if available, else defaults
-                            const parentConfig = seriesPolls[0].config;
+                            if (winners.length > 0) {
+                                // Create Finals
+                                // Use Series Config inheritance if available, else defaults
+                                const parentConfig = seriesPolls[0].config;
 
-                            const finalConfig = {
-                                title: `${parentConfig.title.split('-')[0].trim()} - 決勝戦`,
-                                candidates: winners,
-                                mode: parentConfig.finalMaxVotes > 1 ? 'multi' : 'single',
-                                maxVotes: parentConfig.finalMaxVotes || 1,
-                                duration: parentConfig.finalDuration || (24 * 60 * 60 * 1000), // Default 24h
-                                startDate: parentConfig.finalStart, // Schedule if set
-                                seriesId: seriesId,
-                                stage: 'final',
-                                roles: parentConfig.roles || [],
-                                accountAgeLimit: parentConfig.accountAgeLimit || 0,
-                                allowSelfVote: parentConfig.allowSelfVote !== undefined ? parentConfig.allowSelfVote : true
-                            };
+                                const finalConfig = {
+                                    title: `${parentConfig.title.split('-')[0].trim()} - 決勝戦`,
+                                    candidates: winners,
+                                    mode: parentConfig.finalMaxVotes > 1 ? 'multi' : 'single',
+                                    maxVotes: parentConfig.finalMaxVotes || 1,
+                                    duration: parentConfig.finalDuration || (24 * 60 * 60 * 1000), // Default 24h
+                                    startDate: parentConfig.finalStart, // Schedule if set
+                                    seriesId: seriesId,
+                                    stage: 'final',
+                                    roles: parentConfig.roles || [],
+                                    accountAgeLimit: parentConfig.accountAgeLimit || 0,
+                                    allowSelfVote: parentConfig.allowSelfVote !== undefined ? parentConfig.allowSelfVote : true
+                                };
 
-                            // Post to same channel as first qualifier
-                            if (channel) {
-                                await channel.send('# 🏆 予選終了！ 決勝戦開始！');
-                                await PollManager.createPollInternal(channel, finalConfig, seriesPolls[0].authorId);
+                                // Post to same channel as first qualifier
+                                if (channel) {
+                                    await channel.send('# 🏆 予選終了！ 決勝戦開始！');
+                                    await PollManager.createPollInternal(channel, finalConfig, seriesPolls[0].authorId);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // 2. Check Finals -> Victory Ceremony
-            const finalPoll = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
-            if (finalPoll && finalPoll.ended && !finalPoll.ceremonyDone) {
-                finalPoll.ceremonyDone = true;
-                PollManager.save(); // Persist ceremony state
+                // 2. Check Finals -> Victory Ceremony
+                const finalPoll = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
+                if (finalPoll && finalPoll.ended && !finalPoll.ceremonyDone) {
+                    finalPoll.ceremonyDone = true;
+                    PollManager.save(); // Persist ceremony state
 
-                // Determine Winners (Rank 1-3)
-                const tally = {};
-                finalPoll.config.candidates.forEach(c => tally[c.id] = 0);
-                Object.values(finalPoll.votes).forEach(voteList => {
-                    voteList.forEach(candId => tally[candId]++);
-                });
-                const sorted = [...finalPoll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
-                const top3 = sorted.slice(0, 3);
+                    // Determine Winners (Rank 1-3)
+                    const tally = {};
+                    finalPoll.config.candidates.forEach(c => tally[c.id] = 0);
+                    Object.values(finalPoll.votes).forEach(voteList => {
+                        voteList.forEach(candId => tally[candId]++);
+                    });
+                    const sorted = [...finalPoll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
+                    const top3 = sorted.slice(0, 3);
 
-                const channel = await client.channels.fetch(finalPoll.channelId).catch(() => null);
-                if (channel) {
-                    await channel.send('# 👑 優勝者決定！ おめでとうございます！');
+                    const channel = await client.channels.fetch(finalPoll.channelId).catch(() => null);
+                    if (channel) {
+                        await channel.send('# 👑 優勝者決定！ おめでとうございます！');
 
-                    // Generate Images
-                    const PollVisualizer = require('./pollVisualizer');
-                    const files = [];
+                        // Generate Images
+                        const PollVisualizer = require('./pollVisualizer');
+                        const files = [];
 
-                    // Render Rank 1, 2, 3 (Victory Images)
-                    for (let i = 0; i < top3.length; i++) {
-                        const candidate = top3[i];
-                        // Fetch Avatar
-                        if (candidate.userId && !candidate.avatarURL) {
-                            const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
-                            if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
-                        }
+                        // Render Rank 1, 2, 3 (Victory Images)
+                        for (let i = 0; i < top3.length; i++) {
+                            const candidate = top3[i];
+                            // Fetch Avatar
+                            if (candidate.userId && !candidate.avatarURL) {
+                                const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
+                                if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
+                            }
 
-                        try {
-                            const buffer = await PollVisualizer.generateVictoryImage(candidate, i + 1);
-                            files.push({ attachment: buffer, name: `victory_rank${i + 1}.png` });
-                        } catch (e) {
-                            console.error('Victory Image Gen Failed:', e);
-                        }
-                    }
-
-                    // --- GENERATE ALL RANKING BOARD ---
-                    try {
-                        // Prepare data with votes for all candidates
-                        const rankingData = sorted.map((c, idx) => ({
-                            ...c,
-                            votes: tally[c.id] || 0,
-                            rank: idx + 1
-                        }));
-
-                        // Ensure avatars for ALL (or at least top 12)
-                        // Optimize: Bulk Fetch Avatars
-                        const userIds = rankingData.map(c => c.userId).filter(id => id);
-                        if (userIds.length > 0) {
                             try {
-                                const members = await channel.guild.members.fetch({ user: userIds });
-                                const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-                                const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
-
-                                rankingData.forEach(c => {
-                                    if (c.userId && members.has(c.userId)) {
-                                        const member = members.get(c.userId);
-                                        c.avatarURL = member.displayAvatarURL({ extension: 'png' });
-
-                                        // Generation extraction
-                                        let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
-                                        if (!genRole && currentGenRoleId) genRole = member.roles.cache.get(currentGenRoleId);
-
-                                        if (genRole) {
-                                            c.generation = genRole.name.toUpperCase();
-                                            c.generationColor = genRole.hexColor;
-                                        }
-                                    }
-                                });
+                                const buffer = await PollVisualizer.generateVictoryImage(candidate, i + 1);
+                                files.push({ attachment: buffer, name: `victory_rank${i + 1}.png` });
                             } catch (e) {
-                                console.error('Bulk Avatar/Gen Fetch Failed:', e);
+                                console.error('Victory Image Gen Failed:', e);
                             }
                         }
 
-                        const rankBuffer = await PollVisualizer.generateFinalRankingImage(rankingData, finalPoll.config.title);
-                        files.push({ attachment: rankBuffer, name: 'ranking_overview.png' });
-                    } catch (e) {
-                        console.error('Final Ranking Image Gen Failed:', e);
-                    }
+                        // --- GENERATE ALL RANKING BOARD ---
+                        try {
+                            // Prepare data with votes for all candidates
+                            const rankingData = sorted.map((c, idx) => ({
+                                ...c,
+                                votes: tally[c.id] || 0,
+                                rank: idx + 1
+                            }));
 
-                    // Send all images
-                    if (files.length > 0) {
-                        await channel.send({ content: `## 🏆 表彰台 & 最終結果`, files: files });
+                            // Ensure avatars for ALL (or at least top 12)
+                            // Optimize: Bulk Fetch Avatars
+                            const userIds = rankingData.map(c => c.userId).filter(id => id);
+                            if (userIds.length > 0) {
+                                try {
+                                    const members = await channel.guild.members.fetch({ user: userIds });
+                                    const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                                    const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
 
-                        // User Request: Prompt for improvements
-                        await channel.send('### 📈 選手権お疲れ様ダラァ！');
+                                    rankingData.forEach(c => {
+                                        if (c.userId && members.has(c.userId)) {
+                                            const member = members.get(c.userId);
+                                            c.avatarURL = member.displayAvatarURL({ extension: 'png' });
+
+                                            // Generation extraction
+                                            let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
+                                            if (!genRole && currentGenRoleId) genRole = member.roles.cache.get(currentGenRoleId);
+
+                                            if (genRole) {
+                                                c.generation = genRole.name.toUpperCase();
+                                                c.generationColor = genRole.hexColor;
+                                            }
+                                        }
+                                    });
+                                } catch (e) {
+                                    console.error('Bulk Avatar/Gen Fetch Failed:', e);
+                                }
+                            }
+
+                            const rankBuffer = await PollVisualizer.generateFinalRankingImage(rankingData, finalPoll.config.title);
+                            files.push({ attachment: rankBuffer, name: 'ranking_overview.png' });
+                        } catch (e) {
+                            console.error('Final Ranking Image Gen Failed:', e);
+                        }
+
+                        // Send all images
+                        if (files.length > 0) {
+                            await channel.send({ content: `## 🏆 表彰台 & 最終結果`, files: files });
+
+                            // User Request: Prompt for improvements
+                            await channel.send('### 📈 選手権お疲れ様ダラァ！');
+                        }
                     }
                 }
             }

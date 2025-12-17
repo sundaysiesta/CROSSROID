@@ -1,9 +1,20 @@
 const { createCanvas, registerFont, loadImage } = require('canvas');
 const path = require('path');
 
-// フォントの登録 (NotoSansJPを使用)
+// Font Configuration (Variations)
+const FONTS = {
+    TITLE: '"Dela Gothic One"',
+    RANK: '"Dela Gothic One"',
+    GEN: '"Zen Antique"',
+    NAME: '"NotoSansJP"',
+    META: '"Arial"'
+};
+
+// フォントの登録
 try {
     registerFont(path.join(__dirname, '../resources/fonts/NotoSansJP-Bold.otf'), { family: 'NotoSansJP' });
+    registerFont(path.join(__dirname, '../resources/fonts/DelaGothicOne-Regular.ttf'), { family: 'Dela Gothic One' });
+    registerFont(path.join(__dirname, '../resources/fonts/ZenAntique-Regular.ttf'), { family: 'Zen Antique' });
 } catch (e) {
     console.warn('Font registration failed, falling back to system fonts:', e.message);
 }
@@ -408,7 +419,7 @@ class PollVisualizer {
     }
 
     async generateFinalRankingImage(candidates, title) {
-        registerFont(path.join(__dirname, '../resources/fonts/NotoSansJP-Bold.otf'), { family: 'NotoSansJP', weight: 'bold' });
+
 
         const width = 1920;
         const height = 1080;
@@ -449,7 +460,7 @@ class PollVisualizer {
             ctx.fill();
 
             ctx.fillStyle = '#000';
-            ctx.font = rank === 1 ? 'bold 60px "NotoSansJP"' : 'bold 40px "NotoSansJP"';
+            ctx.font = rank === 1 ? `bold 60px ${FONTS.RANK}` : `bold 40px ${FONTS.RANK}`;
             ctx.textAlign = 'left';
             ctx.fillText(rank, x + 10, y + 45); // Adjust pos
 
@@ -463,7 +474,7 @@ class PollVisualizer {
 
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'right';
-            ctx.font = 'bold 30px "NotoSansJP"';
+            ctx.font = `bold 30px ${FONTS.RANK}`;
             ctx.fillText(`${c.votes}票`, x + w - 5, y + 35);
 
             // Generation Overlay (Bottom Right of Avatar area, Role Color with heavy stroke)
@@ -472,7 +483,7 @@ class PollVisualizer {
                 const genX = x + w - 10;
 
                 ctx.save();
-                ctx.font = '900 48px "NotoSansJP"'; // Extra Heavy
+                ctx.font = `900 48px ${FONTS.GEN}`; // Extra Heavy
                 ctx.textAlign = 'right';
                 // Heavy Stroke
                 ctx.strokeStyle = '#000000';
@@ -493,7 +504,7 @@ class PollVisualizer {
             // Name Text
             ctx.fillStyle = '#000';
             ctx.textAlign = 'center';
-            ctx.font = 'bold 40px "NotoSansJP"';
+            ctx.font = `bold 40px ${FONTS.NAME}`;
 
             // Name Shadow for "Detail"
             ctx.save();
@@ -534,12 +545,12 @@ class PollVisualizer {
         ctx.fillRect(0, 0, width, 120);
 
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 60px "NotoSansJP"';
+        ctx.font = `bold 60px ${FONTS.TITLE}`;
         ctx.textAlign = 'left';
         ctx.fillText(title || 'CHAMPIONSHIP RESULT', 40, 80);
 
         ctx.textAlign = 'right';
-        ctx.font = 'bold 30px "Arial"';
+        ctx.font = `bold 30px ${FONTS.META}`;
         ctx.fillStyle = '#f472b6'; // Pink
         const dateStr = new Date().toLocaleDateString();
         ctx.fillText(dateStr, width - 40, 80);
@@ -575,7 +586,7 @@ class PollVisualizer {
 
         // Footer / Watermark
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 20px "Arial"';
+        ctx.font = `bold 20px ${FONTS.META}`;
         ctx.textAlign = 'right';
         ctx.fillText('&CROSSROID: OBLIVION', width - 20, height - 10);
 
