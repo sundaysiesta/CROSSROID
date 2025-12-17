@@ -168,25 +168,30 @@ async function backfill(client) {
     }
 }
 
-function setup(client) {
+function start(client) {
     loadData();
 
+    // --- EVENT LISTENER ---
     client.on('messageCreate', (message) => {
-        if (message.author.bot) return;
-        if (message.channelId !== MAIN_CHANNEL_ID) return;
+        if (message.author.bot) {
+            // Track bot messages too for total count debug
+            activityCache._meta = activityCache._meta || {};
+            activityCache._meta.totalBotMessages = (activityCache._meta.totalBotMessages || 0) + 1;
+            return;
+        }
+        if (message.channel.id !== MAIN_CHANNEL_ID) return;
 
-        const dateKey = getTodayKey();
-        if (!activityCache[message.author.id]) activityCache[message.author.id] = {};
-        if (!activityCache[message.author.id][dateKey]) activityCache[message.author.id][dateKey] = 0;
-
-        activityCache[message.author.id][dateKey]++;
+        trackMessage(message);
     });
 
-    setTimeout(() => backfill(client), 5000);
-
+    // Auto-save periodically
     setInterval(() => {
         saveData();
     }, 5 * 60 * 1000);
+
+    // REMOVED: Automatic backfill call.
+    // User requested manual control via command.
+    // this.backfill(client); 
 }
 
 function getUserRanking(mode = 30) {

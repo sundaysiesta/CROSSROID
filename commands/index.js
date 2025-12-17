@@ -555,70 +555,62 @@ async function handleCommands(interaction, client) {
                 }
             }
 
-            // --- Admin Logistics ---
-            else if (interaction.commandName === 'admin_logistics') {
-                if (subcommand === 'move_all') {
-                    const fromCh = interaction.options.getChannel('from');
-                    const toCh = interaction.options.getChannel('to');
-                    if (fromCh.type !== ChannelType.GuildVoice || toCh.type !== ChannelType.GuildVoice) {
-                        return interaction.editReply('❌ 音声チャンネルを指定してください。');
-                    }
-                    const members = fromCh.members;
-                    let count = 0;
-                    for (const [id, m] of members) {
-                        await m.voice.setChannel(toCh);
-                        count++;
-                    }
-                    await interaction.editReply(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`);
-                } else if (subcommand === 'say') {
-                    const channel = interaction.options.getChannel('channel');
-                    if (!channel.isTextBased()) return interaction.editReply('❌ テキストチャンネルを指定してください。');
-                    await channel.send(interaction.options.getString('content'));
-                    await interaction.editReply(`✅ ${channel} に発言しました。`);
-                } else if (subcommand === 'create') {
-                    const name = interaction.options.getString('name');
-                    const cType = interaction.options.getString('type') === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
-                    const catId = interaction.options.getString('category');
-                    const opts = { name, type: cType };
-                    if (catId) opts.parent = catId;
-                    const newCh = await interaction.guild.channels.create(opts);
-                    await interaction.editReply(`✅ チャンネル ${newCh} を作成しました。`);
-                } else if (subcommand === 'delete') {
-                    const ch = interaction.options.getChannel('channel');
-                    await ch.delete();
-                    await interaction.editReply(`✅ チャンネル ${ch.name} を削除しました。`);
-                } else if (subcommand === 'purge') {
-                    const channel = interaction.options.getChannel('channel') || interaction.channel;
-                    const amount = interaction.options.getInteger('amount');
-                    const user = interaction.options.getUser('user');
-                    const keyword = interaction.options.getString('keyword');
-
-                    const msgs = await channel.messages.fetch({ limit: 100 });
-                    let filtered = msgs;
-                    if (user) filtered = filtered.filter(m => m.author.id === user.id);
-                    if (keyword) filtered = filtered.filter(m => m.content.includes(keyword));
-
-                    const toDelete = filtered.first(amount);
-                    if (!toDelete || toDelete.length === 0) return interaction.editReply('対象なし');
-
-                    await channel.bulkDelete(toDelete, true);
-                    await interaction.editReply(`✅ ${toDelete.length}件削除しました。`);
-                } else if (subcommand === 'role') {
-                    const target = interaction.options.getUser('target');
-                    const role = interaction.options.getRole('role');
-                    const action = interaction.options.getString('action');
-                    const member = await interaction.guild.members.fetch(target.id);
-                    if (action === 'give') await member.roles.add(role);
-                    else await member.roles.remove(role);
-                    await interaction.editReply(`✅ ${target.tag} に ${role.name} を ${action} しました。`);
-                }
+            const members = fromCh.members;
+            let count = 0;
+            for (const [id, m] of members) {
+                await m.voice.setChannel(toCh);
+                count++;
             }
+            await interaction.editReply(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`);
+        } else if (subcommand === 'say') {
+            const channel = interaction.options.getChannel('channel');
+            if (!channel.isTextBased()) return interaction.editReply('❌ テキストチャンネルを指定してください。');
+            await channel.send(interaction.options.getString('content'));
+            await interaction.editReply(`✅ ${channel} に発言しました。`);
+        } else if (subcommand === 'create') {
+            const name = interaction.options.getString('name');
+            const cType = interaction.options.getString('type') === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
+            const catId = interaction.options.getString('category');
+            const opts = { name, type: cType };
+            if (catId) opts.parent = catId;
+            const newCh = await interaction.guild.channels.create(opts);
+            await interaction.editReply(`✅ チャンネル ${newCh} を作成しました。`);
+        } else if (subcommand === 'delete') {
+            const ch = interaction.options.getChannel('channel');
+            await ch.delete();
+            await interaction.editReply(`✅ チャンネル ${ch.name} を削除しました。`);
+        } else if (subcommand === 'purge') {
+            const channel = interaction.options.getChannel('channel') || interaction.channel;
+            const amount = interaction.options.getInteger('amount');
+            const user = interaction.options.getUser('user');
+            const keyword = interaction.options.getString('keyword');
 
-        } catch (error) {
-            console.error('Admin Command Error:', error);
-            await interaction.editReply(`⚠ エラーが発生しました: ${error.message}`);
+            const msgs = await channel.messages.fetch({ limit: 100 });
+            let filtered = msgs;
+            if (user) filtered = filtered.filter(m => m.author.id === user.id);
+            if (keyword) filtered = filtered.filter(m => m.content.includes(keyword));
+
+            const toDelete = filtered.first(amount);
+            if (!toDelete || toDelete.length === 0) return interaction.editReply('対象なし');
+
+            await channel.bulkDelete(toDelete, true);
+            await interaction.editReply(`✅ ${toDelete.length}件削除しました。`);
+        } else if (subcommand === 'role') {
+            const target = interaction.options.getUser('target');
+            const role = interaction.options.getRole('role');
+            const action = interaction.options.getString('action');
+            const member = await interaction.guild.members.fetch(target.id);
+            if (action === 'give') await member.roles.add(role);
+            else await member.roles.remove(role);
+            await interaction.editReply(`✅ ${target.tag} に ${role.name} を ${action} しました。`);
         }
     }
+
+} catch (error) {
+    console.error('Admin Command Error:', error);
+    await interaction.editReply(`⚠ エラーが発生しました: ${error.message}`);
+}
+}
 }
 
 // 30分ごとのクリーンアップ

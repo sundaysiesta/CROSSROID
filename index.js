@@ -200,6 +200,10 @@ client.once('ready', async () => {
         }
       ]
     },
+    {
+      name: 'activity_backfill',
+      description: 'アクティビティログを手動で再取得します（運営専用）'
+    },
 
     // === Admin Suite ===
     {
