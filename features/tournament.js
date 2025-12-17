@@ -147,9 +147,11 @@ class TournamentManager {
         try {
             // 1. Check Qualifiers -> Finals
             const seriesPolls = Array.from(PollManager.polls.values()).filter(p => p.config.seriesId === seriesId && p.config.stage === 'qualifier');
+            const allEnded = seriesPolls.every(p => p.ended);
+
+            console.log(`[Tournament] Series ${seriesId}: Found ${seriesPolls.length} qualifiers. AllEnded=${allEnded}. Polls: ${seriesPolls.map(p => `${p.config.house}:${p.ended}`).join(', ')}`);
 
             if (seriesPolls.length > 0) {
-                const allEnded = seriesPolls.every(p => p.ended);
                 if (allEnded) {
                     // Check if finals already created
                     const existingFinal = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
@@ -166,6 +168,7 @@ class TournamentManager {
                             Object.values(poll.votes).forEach(voteList => {
                                 voteList.forEach(candId => tally[candId]++);
                             });
+
 
                             // Sort
                             const sorted = [...poll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
@@ -208,6 +211,7 @@ class TournamentManager {
                                 await channel.send({ content: '## ⚡ 決勝進出者決定！', files: passerImages });
                             }
 
+                            console.log(`[Tournament] Series ${seriesId}: Winners Count = ${winners.length}`);
                             if (winners.length > 0) {
                                 // Create Finals
                                 // Use Series Config inheritance if available, else defaults

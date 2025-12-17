@@ -490,7 +490,8 @@ class PollManager {
         if (poll.processing || poll.ended) return; // Dual check
         poll.processing = true;
 
-        // Save immediately to prevent race conditions during long image gen
+        // Critical Fix: Mark as ended immediately
+        poll.ended = true;
         this.save();
 
         console.log(`[PollManager] Publishing results for ${poll.id}...`);
@@ -546,24 +547,21 @@ class PollManager {
 
             await channel.send({ content: '## ⚡ 投票結果発表！', embeds: [embed], files: files });
 
-            // Finalize
-            poll.ended = true;
-            poll.processing = false; // Release lock (though ended=true prevents recurrence)
-            this.save();
-
             const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
             if (msg) await msg.edit({ components: [] });
 
-            // Check for Tournament Progression
-            if (poll.config.seriesId) {
-                const TournamentManager = require('./tournament');
-                TournamentManager.checkSeriesCompletion(poll.config.seriesId, channel.client).catch(console.error);
-            }
-
         } catch (e) {
             console.error('Publish Execution Failed:', e);
-            poll.processing = false; // Release lock on error to retry?
+        } finally {
+            poll.processing = false; // Always release lock
             this.save();
+
+            // Critical: Always check for progression, even if messsage failed
+            if (poll.config.seriesId) {
+                const TournamentManager = require('./tournament');
+                // Run in background to not block finally
+                TournamentManager.checkSeriesCompletion(poll.config.seriesId, channel.client).catch(err => console.error('Series Check Failed:', err));
+            }
         }
     }
 
