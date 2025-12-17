@@ -163,11 +163,11 @@ async function handleCommands(interaction, client) {
             const remaining = COOLDOWN_DURATION - (now - lastUsed);
             const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
             const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-            return interaction.reply({ content: `⛔ このコマンドは3日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間`, ephemeral: true });
+            return interaction.reply({ content: `⛔ このコマンドは3日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間` });
         }
 
         const member = interaction.member;
-        if (!member) return interaction.reply({ content: 'エラー: メンバー情報の取得に失敗しました。', ephemeral: true });
+        if (!member) return interaction.reply({ content: 'エラー: メンバー情報の取得に失敗しました。' });
 
         // Generation Check
         const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
@@ -175,7 +175,7 @@ async function handleCommands(interaction, client) {
         const hasCurrentGen = member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
 
         if (!hasGenRole && !hasCurrentGen) {
-            return interaction.reply({ content: '⛔ このコマンドは世代ロール（I, II, III... または最新世代）を持つメンバー限定です。', ephemeral: true });
+            return interaction.reply({ content: '⛔ このコマンドは世代ロール（I, II, III... または最新世代）を持つメンバー限定です。' });
         }
 
         await interaction.deferReply();
