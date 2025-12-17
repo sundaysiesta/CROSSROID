@@ -187,7 +187,7 @@ async function handleCommands(interaction, client) {
         if (targets.size === 0) return interaction.editReply('❌ No targets found.');
 
         // Logic: 1/6 chance
-        const isHit = Math.random() < (1 / 6);
+        const isHit = Math.random() < (2 / 6);
 
         // Visuals
         await interaction.editReply(`🔫 **Russian Roulette**\n${interaction.user} がシリンダーを回しました...\nターゲット候補: ${targets.size}人`);
@@ -204,11 +204,13 @@ async function handleCommands(interaction, client) {
             const victim = targets.random();
             const victimName = victim.displayName;
 
-            // Generate Wacchoi for Exposure
+            // Generate Wacchoi & Anon Name for Exposure
+            const isElite = victim.roles.cache.has(require('../constants').ELITE_ROLE_ID);
             const wacchoi = generateWacchoi(victim.id);
+            const anonName = getAnonymousName(wacchoi.daily, isElite);
             const wacchoiText = `\`${wacchoi.full}\``;
 
-            await interaction.editReply(`💥 **BANG!!!**\n${interaction.user} の放った弾丸が **${victim}** に命中しました！\n🚑 (10分間のタイムアウト)\n🔍 **Identity Exposed:** 本日のWacchoiは ${wacchoiText} です。`);
+            await interaction.editReply(`💥 **BANG!!!**\n${interaction.user} の放った弾丸が **${victim}** に命中しました！\n🚑 (10分間のタイムアウト)\n� **Wacchoi解析完了:**\nID: ${wacchoiText}\n裏名: **${anonName}**\n正体: **${victimName}**`);
 
             try {
                 if (victim.moderatable) {
