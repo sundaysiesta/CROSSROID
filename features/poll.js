@@ -99,7 +99,14 @@ class PollParser {
                     const limit = parseInt(val);
                     if (!isNaN(limit)) config.finalMaxVotes = limit;
                 }
-                if (key === '公開設定') {
+
+                // Allow Duration/Start in Settings section too
+                if (key === '予選期間' || key === 'QualifierDuration') config.qualifierDuration = parseDuration(val);
+                if (key === '決勝期間' || key === 'FinalDuration') config.finalDuration = parseDuration(val);
+                if (key === '予選開始' || key === 'QualifierStart') config.qualifierStart = parseDate(val);
+                if (key === '決勝開始' || key === '本番開始' || key === 'FinalStart') config.finalStart = parseDate(val);
+
+                if (key === '公開設定' || key === 'Public') {
                     if (val.includes('ブラインド') || val.includes('非公開') || val.includes('完全非公開')) config.public = false;
                 }
                 if (key === 'アカウント制限') {

@@ -36,6 +36,14 @@ function getTodayKey() {
     return `${y}-${m}-${d}`;
 }
 
+function trackMessage(message) {
+    const dateKey = getTodayKey();
+    if (!activityCache[message.author.id]) activityCache[message.author.id] = {};
+    if (!activityCache[message.author.id][dateKey]) activityCache[message.author.id][dateKey] = 0;
+
+    activityCache[message.author.id][dateKey]++;
+}
+
 async function backfill(client) {
     if (isBackfilling) return;
     isBackfilling = true;
