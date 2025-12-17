@@ -236,8 +236,11 @@ class PollManager {
             channelId: channel.id,
             messageId: null,
             ended: false,
+            ended: false,
             processing: false // Lock flag
         };
+
+        console.log(`[PollManager] Created Poll ${pollId}: Starts=${new Date(pollState.startsAt).toLocaleString()} (${pollState.startsAt}), Duration=${pollState.config.duration}ms, Ends=${new Date(pollState.startsAt + pollState.config.duration).toLocaleString()}`);
 
         const embed = this.generateEmbed(pollState);
         const components = this.generateComponents(pollState);
