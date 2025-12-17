@@ -110,6 +110,8 @@ class TournamentManager {
             const groupCandidates = groups[house];
             if (groupCandidates.length === 0) continue;
 
+            console.log(`[Tournament] Config Check for ${house}: qualifierDuration=${config.qualifierDuration} (${typeof config.qualifierDuration}), duration=${config.duration}`);
+
             const pollConfig = {
                 ...config,
                 title: `${config.title} - 予選ブロック: ${house}`,

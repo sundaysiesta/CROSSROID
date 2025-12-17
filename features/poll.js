@@ -165,15 +165,19 @@ class PollManager {
     }
 
     load() {
+        console.log(`[PollManager] Loading polls from: ${POLL_DATA_FILE}`);
         if (fs.existsSync(POLL_DATA_FILE)) {
             try {
                 const data = JSON.parse(fs.readFileSync(POLL_DATA_FILE, 'utf8'));
                 for (const [id, poll] of Object.entries(data)) {
                     this.polls.set(id, poll);
                 }
+                console.log(`[PollManager] Loaded ${this.polls.size} polls.`);
             } catch (e) {
-                console.error('Poll Load Error:', e);
+                console.error('[PollManager] Poll Load Error:', e);
             }
+        } else {
+            console.log('[PollManager] No existing poll data found.');
         }
     }
 
@@ -182,7 +186,12 @@ class PollManager {
         for (const [id, poll] of this.polls) {
             obj[id] = poll;
         }
-        fs.writeFileSync(POLL_DATA_FILE, JSON.stringify(obj, null, 2));
+        try {
+            fs.writeFileSync(POLL_DATA_FILE, JSON.stringify(obj, null, 2));
+            console.log(`[PollManager] Saved ${this.polls.size} polls to ${POLL_DATA_FILE}`);
+        } catch (e) {
+            console.error('[PollManager] Save Failed:', e);
+        }
     }
 
     async createPoll(interaction, textConfig) {
@@ -288,7 +297,7 @@ class PollManager {
         } else {
             let desc = '';
             if (!isStarted) {
-                desc = `⏳ **開始待機中**\n開始まですこしお待ちください。\nTime: <t:${Math.floor(startsAt / 1000)}:R>\n\n`;
+                desc = `⛔ **投票開始待機中**\n開始時刻までお待ちください。\n\n`;
             } else if (ended) {
                 desc = '投票は終了しました。結果発表をお待ちください。\n\n';
             } else {
