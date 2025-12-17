@@ -136,6 +136,7 @@ class TournamentManager {
     }
 
     async checkSeriesCompletion(seriesId, client) {
+        console.log(`[Tournament] CheckSeriesCompletion for ${seriesId}`);
         if (this.seriesLocks.has(seriesId)) return;
         this.seriesLocks.add(seriesId);
 
@@ -283,12 +284,33 @@ class TournamentManager {
                         }));
 
                         // Ensure avatars for ALL (or at least top 12)
-                        await Promise.all(rankingData.map(async c => {
-                            if (c.userId && !c.avatarURL) {
-                                const m = await channel.guild.members.fetch(c.userId).catch(() => null);
-                                if (m) c.avatarURL = m.displayAvatarURL({ extension: 'png' });
+                        // Optimize: Bulk Fetch Avatars
+                        const userIds = rankingData.map(c => c.userId).filter(id => id);
+                        if (userIds.length > 0) {
+                            try {
+                                const members = await channel.guild.members.fetch({ user: userIds });
+                                const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                                const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
+
+                                rankingData.forEach(c => {
+                                    if (c.userId && members.has(c.userId)) {
+                                        const member = members.get(c.userId);
+                                        c.avatarURL = member.displayAvatarURL({ extension: 'png' });
+
+                                        // Generation extraction
+                                        let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
+                                        if (!genRole && currentGenRoleId) genRole = member.roles.cache.get(currentGenRoleId);
+
+                                        if (genRole) {
+                                            c.generation = genRole.name.toUpperCase();
+                                            c.generationColor = genRole.hexColor;
+                                        }
+                                    }
+                                });
+                            } catch (e) {
+                                console.error('Bulk Avatar/Gen Fetch Failed:', e);
                             }
-                        }));
+                        }
 
                         const rankBuffer = await PollVisualizer.generateFinalRankingImage(rankingData, finalPoll.config.title);
                         files.push({ attachment: rankBuffer, name: 'ranking_overview.png' });

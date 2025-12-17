@@ -408,165 +408,176 @@ class PollVisualizer {
     }
 
     async generateFinalRankingImage(candidates, title) {
-        // candidates is assumed sorted: [{ name, avatarURL, votes, rank? }, ...]
-        registerFont(path.join(__dirname, '../assets/fonts/NotoSansJP-Bold.otf'), { family: 'NotoSansJP', weight: 'bold' });
+        registerFont(path.join(__dirname, '../resources/fonts/NotoSansJP-Bold.otf'), { family: 'NotoSansJP', weight: 'bold' });
 
-        const width = 1200;
-        const height = 675;
+        const width = 1920;
+        const height = 1080;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // Theme
-        const theme = {
-            bg: '#0f172a',
-            accent: '#38bdf8',
-            gold: '#fbbf24',
-            silver: '#94a3b8',
-            bronze: '#b45309',
-            text: '#f8fafc'
-        };
+        // --- Helper: Draw Card ---
+        const drawCard = async (c, x, y, w, h, rank) => {
+            // Card Base
+            const colors = ['#FFD700', '#C0C0C0', '#CD7F32', '#4ade80', '#60a5fa', '#a78bfa', '#f472b6', '#fb923c', '#9ca3af', '#f87171'];
+            const baseColor = rank <= 3 ? colors[rank - 1] : colors[(rank - 1) % colors.length];
 
-        // Background
-        const grad = ctx.createLinearGradient(0, 0, width, height);
-        grad.addColorStop(0, '#020617');
-        grad.addColorStop(1, '#1e293b');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
-
-        // Tech Pattern
-        ctx.strokeStyle = '#1e293b';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < width; i += 40) {
-            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
-        }
-        for (let i = 0; i < height; i += 40) {
-            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
-        }
-
-        // Title Header
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-        ctx.fillRect(0, 0, width, 80);
-        ctx.fillStyle = theme.accent;
-        ctx.font = 'bold 40px "NotoSansJP"';
-        ctx.textAlign = 'left';
-        ctx.fillText(title || 'FINAL RANKING', 30, 55);
-
-        // --- Left Side: TOP 3 ---
-        const top3 = candidates.slice(0, 3);
-        const others = candidates.slice(3);
-
-        const positions = [
-            { x: 300, y: 380, r: 80, color: theme.gold, rank: 1, scale: 1.2 },   // Center (Rank 1)
-            { x: 140, y: 420, r: 60, color: theme.silver, rank: 2, scale: 1.0 }, // Left (Rank 2)
-            { x: 460, y: 440, r: 60, color: theme.bronze, rank: 3, scale: 1.0 }  // Right (Rank 3)
-        ];
-
-        for (let i = 0; i < top3.length; i++) {
-            const c = top3[i];
-            const pos = positions[i];
-            if (!pos) continue;
-
-            const cx = pos.x;
-            const cy = pos.y;
-            const r = pos.r * pos.scale;
-
-            // Glow
-            ctx.save();
-            ctx.shadowColor = pos.color;
-            ctx.shadowBlur = 30;
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = '#000'; ctx.fill();
-            ctx.restore();
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(x, y, w, h);
 
             // Avatar
-            ctx.save();
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
             try {
                 if (c.avatarURL) {
                     const img = await loadImage(c.avatarURL);
-                    ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+                    // Aspect ratio crop
+                    const avatarH = h - 80; // Reserve bottom for name
+                    ctx.drawImage(img, x, y, w, avatarH);
                 } else {
-                    ctx.fillStyle = '#333'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(x, y, w, h - 80);
                 }
-            } catch (e) { }
+            } catch (e) {
+                ctx.fillStyle = '#333';
+                ctx.fillRect(x, y, w, h - 80);
+            }
+
+            // Rank Badge (Top Left triangular ribbon style)
+            ctx.fillStyle = baseColor;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + 100, y);
+            ctx.lineTo(x, y + 100);
+            ctx.fill();
+
+            ctx.fillStyle = '#000';
+            ctx.font = rank === 1 ? 'bold 60px "NotoSansJP"' : 'bold 40px "NotoSansJP"';
+            ctx.textAlign = 'left';
+            ctx.fillText(rank, x + 10, y + 45); // Adjust pos
+
+            // Vote Badge (Top Right)
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.beginPath();
+            ctx.moveTo(x + w, y);
+            ctx.lineTo(x + w - 120, y);
+            ctx.lineTo(x + w, y + 80);
+            ctx.fill();
+
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'right';
+            ctx.font = 'bold 30px "NotoSansJP"';
+            ctx.fillText(`${c.votes}票`, x + w - 5, y + 35);
+
+            // Generation Overlay (Bottom Right of Avatar area, Role Color with heavy stroke)
+            if (c.generation) {
+                const genY = y + h - 90;
+                const genX = x + w - 10;
+
+                ctx.save();
+                ctx.font = '900 48px "NotoSansJP"'; // Extra Heavy
+                ctx.textAlign = 'right';
+                // Heavy Stroke
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 8;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(c.generation, genX, genY);
+                // Color Fill (Avoid black on black stroke)
+                const fillColor = (c.generationColor && c.generationColor !== '#000000') ? c.generationColor : '#ffffff';
+                ctx.fillStyle = fillColor;
+                ctx.fillText(c.generation, genX, genY);
+                ctx.restore();
+            }
+
+            // Name Bar (Bottom)
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(x, y + h - 80, w, 80);
+
+            // Name Text
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.font = 'bold 40px "NotoSansJP"';
+
+            // Name Shadow for "Detail"
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            this.wrapText(ctx, c.name, x + w / 2, y + h - 45, w - 20, 40);
             ctx.restore();
 
-            // Ring
-            ctx.strokeStyle = pos.color;
-            ctx.lineWidth = 6;
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+            // Rank Color Strip at bottom
+            ctx.fillStyle = baseColor;
+            ctx.fillRect(x, y + h - 10, w, 10);
+        };
 
-            // Rank Badge
-            ctx.beginPath(); ctx.arc(cx, cy - r, 20, 0, Math.PI * 2); ctx.fillStyle = pos.color; ctx.fill();
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 24px "NotoSansJP"';
-            ctx.textAlign = 'center';
-            ctx.fillText(String(pos.rank), cx, cy - r + 8);
+        // --- Background (Diagonal Stripes) ---
+        const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+        bgGrad.addColorStop(0, '#1e293b');
+        bgGrad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, width, height);
 
-            // Name
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 24px "NotoSansJP"';
-            this.wrapText(ctx, c.name, cx, cy + r + 30, 200, 30);
+        // Stripes
+        ctx.save();
+        ctx.lineWidth = 40;
+        for (let i = -1000; i < width + height; i += 80) {
+            const color = Math.abs(i) % 160 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)';
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i - height, height);
+            ctx.stroke();
+        }
+        ctx.restore();
 
-            // Votes
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '20px "NotoSansJP"';
-            ctx.fillText(`${c.votes || 0} votes`, cx, cy + r + 60);
+        // --- Header ---
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, 120);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 60px "NotoSansJP"';
+        ctx.textAlign = 'left';
+        ctx.fillText(title || 'CHAMPIONSHIP RESULT', 40, 80);
+
+        ctx.textAlign = 'right';
+        ctx.font = 'bold 30px "Arial"';
+        ctx.fillStyle = '#f472b6'; // Pink
+        const dateStr = new Date().toLocaleDateString();
+        ctx.fillText(dateStr, width - 40, 80);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`${candidates.length} Participants`, width - 40, 40);
+
+        // --- Layout Strategy ---
+        // Rank 1: Left Giant
+        const rank1 = candidates[0];
+        if (rank1) {
+            await drawCard(rank1, 50, 150, 500, 800, 1);
         }
 
-        // --- Right Side: LIST ---
-        const listX = 650;
-        const listY = 120;
-        const rowH = 45;
+        // Grid (Rank 2+)
+        const others = candidates.slice(1);
+        const gridStartX = 600;
+        const gridStartY = 150;
+        const gridW = width - gridStartX - 50;
+        const cols = 4;
+        const cardW = (gridW - (cols - 1) * 30) / cols;
+        const cardH = 350;
 
-        ctx.textAlign = 'left';
+        for (let i = 0; i < others.length; i++) {
+            if (i >= 8) break; // Limit to 8 others (Top 9 total) to fit screen
+            const c = others[i];
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const x = gridStartX + col * (cardW + 30);
+            const y = gridStartY + row * (cardH + 30);
 
-        // List Container
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-        this.roundRect(ctx, listX - 20, listY - 20, 520, 540, 10);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.stroke();
+            await drawCard(c, x, y, cardW, cardH, i + 2);
+        }
 
-        ctx.font = 'bold 24px "NotoSansJP"';
-        ctx.fillStyle = theme.accent;
-        ctx.fillText('LEADERBOARD', listX, listY + 10);
-
-        ctx.font = '20px "NotoSansJP"';
-
-        let currentY = listY + 60;
-
-        // Also list Top 3 briefly if needed, but let's list 4th onwards primarily
-        // Or strictly list 4th onwards. User said "output ALL ranks".
-        // Listing 4-12 is fits easily.
-
-        others.forEach((c, index) => {
-            const rank = index + 4;
-            if (currentY > height - 50) return; // Overflow protection
-
-            ctx.fillStyle = '#fff';
-            ctx.fillText(`#${rank}`, listX, currentY);
-
-            ctx.fillStyle = '#cbd5e1';
-            const nameClipped = c.name.length > 18 ? c.name.substring(0, 17) + '...' : c.name;
-            ctx.fillText(nameClipped, listX + 60, currentY);
-
-            ctx.fillStyle = theme.accent;
-            ctx.textAlign = 'right';
-            ctx.fillText(`${c.votes} pts`, listX + 480, currentY);
-            ctx.textAlign = 'left';
-
-            // Divider
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.beginPath(); ctx.moveTo(listX, currentY + 15); ctx.lineTo(listX + 480, currentY + 15); ctx.stroke();
-
-            currentY += rowH;
-        });
-
-        // Watermark
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.font = '20px "NotoSansJP"';
+        // Footer / Watermark
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 20px "Arial"';
         ctx.textAlign = 'right';
-        ctx.fillText('Black Knights Championship', width - 20, height - 20);
+        ctx.fillText('&CROSSROID: OBLIVION', width - 20, height - 10);
 
         return canvas.toBuffer();
     }
