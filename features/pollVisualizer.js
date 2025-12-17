@@ -30,12 +30,40 @@ class PollVisualizer {
             gold: '#fbbf24',
             silver: '#e2e8f0',
             bronze: '#b45309',
+            pass: '#4ade80',
+            fail: '#ef4444',
             accent: '#3b82f6',
             border: 'rgba(255,255,255,0.1)'
         };
+        // Semaphore to prevent OOM
+        this.lock = Promise.resolve();
+    }
+
+    async _runWithLock(fn) {
+        const next = this.lock.then(fn);
+        // Catch errors to prevent queue blockage
+        this.lock = next.catch(e => console.error('Visualizer Lock Error:', e));
+        return next;
+    }
+
+    // Helper: Round Rect
+    roundRect(ctx, x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2;
+        if (h < 2 * r) r = h / 2;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
     }
 
     async generateRankingImage(poll) {
+        return this._runWithLock(() => this._generateRankingImageInternal(poll));
+    }
+
+    async _generateRankingImageInternal(poll) {
         try {
             const { config, votes } = poll;
             const totalVotes = Object.keys(votes).length;
@@ -253,6 +281,10 @@ class PollVisualizer {
     }
 
     async generateQualifierPasserImage(candidates, house, title) {
+        return this._runWithLock(() => this._generateQualifierPasserImageInternal(candidates, house, title));
+    }
+
+    async _generateQualifierPasserImageInternal(candidates, house, title) {
         const width = 1920; // Widen to HD
         const height = 600;
         const canvas = createCanvas(width, height);
@@ -344,6 +376,10 @@ class PollVisualizer {
     }
 
     async generateVictoryImage(candidate, rank) {
+        return this._runWithLock(() => this._generateVictoryImageInternal(candidate, rank));
+    }
+
+    async _generateVictoryImageInternal(candidate, rank) {
         const size = 1024;
         const canvas = createCanvas(size, size);
         const ctx = canvas.getContext('2d');
@@ -422,6 +458,10 @@ class PollVisualizer {
     }
 
     async generateFinalRankingImage(candidates, title) {
+        return this._runWithLock(() => this._generateFinalRankingImageInternal(candidates, title));
+    }
+
+    async _generateFinalRankingImageInternal(candidates, title) {
 
 
         const width = 1920;
