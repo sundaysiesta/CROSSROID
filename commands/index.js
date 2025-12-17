@@ -182,7 +182,7 @@ async function handleCommands(interaction, client) {
 
         // Fetch targets
         await interaction.guild.members.fetch();
-        const targets = interaction.guild.members.cache.filter(m => !m.user.bot && (m.roles.cache.some(r => romanRegex.test(r.name)) || m.roles.cache.has(currentGenRoleId)));
+        const targets = interaction.guild.members.cache.filter(m => !m.user.bot && (m.roles.cache.some(r => romanRegex.test(r.name)) || m.roles.cache.has(CURRENT_GENERATION_ROLE_ID)));
 
         if (targets.size === 0) return interaction.editReply('❌ No targets found.');
 
