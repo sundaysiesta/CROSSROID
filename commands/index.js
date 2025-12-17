@@ -166,7 +166,7 @@ async function handleCommands(interaction, client) {
             return interaction.reply({ content: `⛔ このコマンドは7日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間`, ephemeral: true });
         }
 
-        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        const member = interaction.member;
         if (!member) return interaction.reply({ content: 'エラー: メンバー情報の取得に失敗しました。', ephemeral: true });
 
         // Generation Check
