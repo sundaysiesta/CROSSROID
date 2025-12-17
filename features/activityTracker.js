@@ -226,6 +226,7 @@ function getUserRanking(mode = 30) {
 }
 
 module.exports = {
-    setup,
+    start,
+    backfill,
     getUserRanking
 };
