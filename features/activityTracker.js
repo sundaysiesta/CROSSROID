@@ -140,6 +140,16 @@ async function backfill(client) {
             }
         }
 
+        if (loops >= MAX_LOOPS) {
+            console.log('[ActivityTracker] Stop Reason: Hit message fetch limit.');
+            // CRITICAL FIX: If we hit the limit, consider it "Good Enough" for the month.
+            // Otherwise it will re-scan forever because it never reaches the 1st.
+            oldestReached = startOfMonthTimestamp;
+            require('../utils').logSystem(`⚠️ **Backfill Limit Reached**\nStopped at ${new Date(oldestReached).toLocaleString()}\nMarking as detailed scan complete to prevent loops.`, 'ActivityTracker');
+        }
+
+        console.log(`[ActivityTracker] Backfill finish. Oldest reached: ${new Date(oldestReached).toLocaleString()}`);
+
         // SAVE METADATA
         activityCache._meta = {
             lastDeepScan: Date.now(),
