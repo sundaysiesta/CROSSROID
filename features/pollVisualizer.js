@@ -591,7 +591,7 @@ class PollVisualizer {
         ctx.fillStyle = '#fff';
         ctx.font = `bold 20px ${FONTS.META}`;
         ctx.textAlign = 'right';
-        ctx.fillText('&CROSSROID: OBLIVION', width - 20, height - 10);
+        ctx.fillText('andROMEDA: OBLIVION', width - 20, height - 10);
 
         return canvas.toBuffer();
     }
