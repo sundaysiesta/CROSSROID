@@ -114,8 +114,10 @@ class TournamentManager {
                 ...config,
                 title: `${config.title} - 予選ブロック: ${house}`,
                 candidates: groupCandidates,
-                mode: 'multi', // Qualifiers usually multi
-                // Inherit mode from parent config
+                mode: 'multi',
+                duration: config.qualifierDuration || config.duration,
+                maxVotes: config.qualifierMaxVotes || config.maxVotes || 3,
+                startDate: config.qualifierStart || config.startDate,
                 seriesId: seriesId,
                 stage: 'qualifier',
                 house: house,
