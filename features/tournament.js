@@ -120,7 +120,8 @@ class TournamentManager {
                 stage: 'qualifier',
                 house: house,
                 maxVotes: config.qualifierMaxVotes || config.maxVotes || 2,
-                duration: config.qualifierDuration || config.duration || (60 * 60 * 1000) // Default 1h
+                duration: config.qualifierDuration || config.duration || (60 * 60 * 1000), // Default 1h
+                startDate: config.qualifierStart || config.startDate
             };
 
             await PollManager.createPollInternal(interaction.channel, pollConfig, interaction.user.id);
@@ -209,6 +210,7 @@ class TournamentManager {
                                 mode: parentConfig.finalMaxVotes > 1 ? 'multi' : 'single',
                                 maxVotes: parentConfig.finalMaxVotes || 1,
                                 duration: parentConfig.finalDuration || (24 * 60 * 60 * 1000), // Default 24h
+                                startDate: parentConfig.finalStart, // Schedule if set
                                 seriesId: seriesId,
                                 stage: 'final'
                             };

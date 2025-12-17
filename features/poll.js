@@ -73,9 +73,10 @@ class PollParser {
                 if (key === '終了' || key === 'End') config.duration = parseDuration(val);
                 if (key === '開始' || key === 'Start') config.startDate = parseDate(val);
 
-                // --- Advanced Tournament Config ---
                 if (key === '予選期間' || key === 'QualifierDuration') config.qualifierDuration = parseDuration(val);
                 if (key === '決勝期間' || key === 'FinalDuration') config.finalDuration = parseDuration(val);
+                if (key === '予選開始' || key === 'QualifierStart') config.qualifierStart = parseDate(val);
+                if (key === '決勝開始' || key === '本番開始' || key === 'FinalStart') config.finalStart = parseDate(val);
             } else if (section === 'settings') {
                 const parts = line.split(':');
                 if (parts.length < 2) continue;
