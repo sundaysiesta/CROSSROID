@@ -10,6 +10,7 @@ const {
 } = require('discord.js');
 
 const POLL_DATA_FILE = path.join(__dirname, '../poll_data.json');
+const POLL_STORAGE_DIR = path.join(__dirname, '../poll_storage');
 
 // --- Helper: Time Parser (24h -> ms) ---
 function parseDuration(str) {
@@ -160,38 +161,92 @@ class PollParser {
 
 class PollManager {
     constructor() {
-        this.polls = new Map();
-        this.load();
+        // this.polls is REMOVED. Data is on disk.
+        // We keep active timers in memory.
+        this.activeTimers = new Map();
+
+        // Ensure storage exists
+        if (!fs.existsSync(POLL_STORAGE_DIR)) {
+            fs.mkdirSync(POLL_STORAGE_DIR, { recursive: true });
+        }
+
+        this.initStorage();
     }
 
-    load() {
-        console.log(`[PollManager] Loading polls from: ${POLL_DATA_FILE}`);
+    initStorage() {
+        this.migrateLegacyData();
+        console.log(`[PollManager] Storage initialized at ${POLL_STORAGE_DIR}`);
+    }
+
+    migrateLegacyData() {
         if (fs.existsSync(POLL_DATA_FILE)) {
             try {
+                console.log('[PollManager] Migrating legacy poll_data.json...');
                 const data = JSON.parse(fs.readFileSync(POLL_DATA_FILE, 'utf8'));
+                let count = 0;
                 for (const [id, poll] of Object.entries(data)) {
-                    this.polls.set(id, poll);
+                    this.savePoll(poll);
+                    count++;
                 }
-                console.log(`[PollManager] Loaded ${this.polls.size} polls.`);
+                // Rename legacy file to avoid re-migration
+                fs.renameSync(POLL_DATA_FILE, POLL_DATA_FILE + '.bak');
+                console.log(`[PollManager] Migration Complete: Split ${count} polls.`);
             } catch (e) {
-                console.error('[PollManager] Poll Load Error:', e);
+                console.error('[PollManager] Migration Failed:', e);
             }
-        } else {
-            console.log('[PollManager] No existing poll data found.');
         }
     }
 
-    save() {
-        const obj = {};
-        for (const [id, poll] of this.polls) {
-            obj[id] = poll;
+    // --- File Accessors ---
+
+    getPoll(id) {
+        if (!id) return null;
+        const p = path.join(POLL_STORAGE_DIR, `${id}.json`);
+        if (fs.existsSync(p)) {
+            try {
+                return JSON.parse(fs.readFileSync(p, 'utf8'));
+            } catch (e) {
+                console.error(`[PollManager] Failed to read poll ${id}:`, e);
+                return null;
+            }
         }
+        return null;
+    }
+
+    savePoll(poll) {
+        if (!poll || !poll.id) return;
+        const p = path.join(POLL_STORAGE_DIR, `${poll.id}.json`);
         try {
-            fs.writeFileSync(POLL_DATA_FILE, JSON.stringify(obj, null, 2));
-            console.log(`[PollManager] Saved ${this.polls.size} polls to ${POLL_DATA_FILE}`);
+            fs.writeFileSync(p, JSON.stringify(poll, null, 2));
         } catch (e) {
-            console.error('[PollManager] Save Failed:', e);
+            console.error(`[PollManager] Failed to save poll ${poll.id}:`, e);
         }
+    }
+
+    // For TournamentManager (Scanning)
+    getAllPolls() {
+        const polls = [];
+        try {
+            const files = fs.readdirSync(POLL_STORAGE_DIR).filter(f => f.endsWith('.json'));
+            for (const f of files) {
+                const p = path.join(POLL_STORAGE_DIR, f);
+                try {
+                    polls.push(JSON.parse(fs.readFileSync(p, 'utf8')));
+                } catch (e) { }
+            }
+        } catch (e) {
+            console.error('[PollManager] Directory Scan Failed:', e);
+        }
+        return polls;
+    }
+
+    // save() is DEPRECATED in new architecture (individual saves happen via savePoll)
+    save() {
+        // No-op
+    }
+
+    _saveInternal() {
+        // No-op
     }
 
     async createPoll(interaction, textConfig) {
@@ -248,8 +303,9 @@ class PollManager {
         const msg = await channel.send({ embeds: [embed], components: components });
         pollState.messageId = msg.id;
 
-        this.polls.set(pollId, pollState);
-        this.save();
+        // this.polls.set(pollId, pollState); -> REMOVED
+        // this.save(); -> REMOVED
+        this.savePoll(pollState); // Direct File Save
 
         // Activate Scheduler for this poll
         this.schedulePollEvents(pollState);
@@ -258,6 +314,7 @@ class PollManager {
     }
 
     generateEmbed(poll, forceReveal = false) {
+        // ... (Unchanged)
         const { config, votes, ended, startsAt } = poll;
         const totalVotes = Object.keys(votes).length;
         const now = Date.now();
@@ -377,7 +434,8 @@ class PollManager {
         try {
             const parts = interaction.customId.split('_');
             const pollId = parts[2];
-            const poll = this.polls.get(pollId);
+            // CHANGE: Direct Read
+            const poll = this.getPoll(pollId);
 
             if (!poll) return interaction.reply({ content: 'この投票は終了しているか、存在しません。', ephemeral: true });
             if (Date.now() < poll.startsAt) {
@@ -443,20 +501,27 @@ class PollManager {
             }
 
             votedCands = poll.votes[interaction.user.id] || [];
-            this.save();
+
+            // CHANGE: Direct Write
+            this.savePoll(poll);
 
             const votedNames = votedCands.map(cid => {
                 const c = poll.config.candidates.find(cand => cand.id === cid);
                 return c ? `${c.emoji || ''} ${c.name}` : 'Unknown';
             }).join(', ');
 
-            await interaction.reply({ content: `🗳️ 投票を確認しました:\n**${votedNames || '選択解除'}**`, ephemeral: true });
+            await interaction.reply({ content: `🗳️ 投票を確認しました:\n**${votedNames || '選択解除'}**`, ephemeral: true }).catch(() => { });
 
             const msg = await interaction.channel.messages.fetch(poll.messageId).catch(() => null);
             if (msg) {
-                await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
+                // Background update, don't block
+                msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) }).catch(() => { });
             }
         } catch (error) {
+            // Silence "Unknown Interaction" (10062) which happens on timeout/race
+            if (error.code === 10062 || error.message.includes('Unknown interaction')) {
+                return;
+            }
             console.error('Vote Interaction Error:', error);
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: `❌ エラーが発生しました: ${error.message}`, ephemeral: true }).catch(() => { });
@@ -467,7 +532,8 @@ class PollManager {
     }
 
     async showStatus(interaction, pollId) {
-        const poll = this.polls.get(pollId);
+        // CHANGE: Direct Read
+        const poll = this.getPoll(pollId);
         if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
 
         const embed = this.generateEmbed(poll, true);
@@ -476,7 +542,8 @@ class PollManager {
     }
 
     async publishResult(interaction, pollId) {
-        const poll = this.polls.get(pollId);
+        // CHANGE: Direct Read
+        const poll = this.getPoll(pollId);
         if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
 
         if (poll.processing) return interaction.reply({ content: '⚠️ 現在集計処理中です。しばらくお待ちください。', ephemeral: true });
@@ -492,7 +559,8 @@ class PollManager {
 
         // Critical Fix: Mark as ended immediately
         poll.ended = true;
-        this.save();
+        // CHANGE: Direct Write
+        this.savePoll(poll);
 
         console.log(`[PollManager] Publishing results for ${poll.id}...`);
 
@@ -603,12 +671,14 @@ class PollManager {
     }
 
     async activatePoll(pollId) {
-        const poll = this.polls.get(pollId);
+        // CHANGE: Direct Read
+        const poll = this.getPoll(pollId);
         if (!poll || poll.started || poll.ended) return;
 
         console.log(`[PollManager] Activating poll ${poll.id}`);
         poll.started = true;
-        this.save();
+        // CHANGE: Direct Write
+        this.savePoll(poll);
 
         try {
             if (this.client) {
@@ -626,7 +696,8 @@ class PollManager {
     }
 
     async endPoll(pollId) {
-        const poll = this.polls.get(pollId);
+        // CHANGE: Direct Read
+        const poll = this.getPoll(pollId);
         if (!poll || poll.ended || poll.processing) return;
 
         console.log(`[PollManager] Ending poll ${poll.id}`);
@@ -638,7 +709,8 @@ class PollManager {
                     await this._executePublish(poll, channel);
                 } else {
                     poll.ended = true;
-                    this.save();
+                    // CHANGE: Direct Write
+                    this.savePoll(poll);
                 }
             }
         } catch (e) {
@@ -649,7 +721,12 @@ class PollManager {
     init(client) {
         this.client = client;
         console.log('[PollManager] Scheduler Initialized. Scanning active polls...');
-        for (const poll of this.polls.values()) {
+
+        // CHANGE: Scan directory instead of memory map
+        const allPolls = this.getAllPolls();
+        console.log(`[PollManager] Found ${allPolls.length} total polls in storage.`);
+
+        for (const poll of allPolls) {
             this.schedulePollEvents(poll);
         }
     }

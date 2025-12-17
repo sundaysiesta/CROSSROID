@@ -145,34 +145,48 @@ class TournamentManager {
         const PollManager = require('./poll');
 
         try {
+            // CHANGE: Scan directory
+            const allPolls = PollManager.getAllPolls();
+
             // 1. Check Qualifiers -> Finals
-            const seriesPolls = Array.from(PollManager.polls.values()).filter(p => p.config.seriesId === seriesId && p.config.stage === 'qualifier');
-            const allEnded = seriesPolls.every(p => p.ended);
+            const seriesPolls = allPolls.filter(p => p.config.seriesId === seriesId && p.config.stage === 'qualifier');
 
-            console.log(`[Tournament] Series ${seriesId}: Found ${seriesPolls.length} qualifiers. AllEnded=${allEnded}. Polls: ${seriesPolls.map(p => `${p.config.house}:${p.ended}`).join(', ')}`);
+            // Critical Fix 1: Ensure we see ALL 4 houses before deciding "All Ended".
+            // If creation was slow (1.5s delay), we might see only 1 or 2.
+            if (seriesPolls.length < 4) {
+                console.log(`[Tournament] Series ${seriesId}: Waiting for all 4 houses (Found ${seriesPolls.length}).`);
+                return;
+            }
 
-            if (seriesPolls.length > 0) {
+            // Critical Fix 2: Persistent Lock using Poll Data
+            // If any poll in this series already triggered finals, stop.
+            if (seriesPolls.some(p => p.nextStageCreated)) {
+                console.log(`[Tournament] Series ${seriesId}: Finals already created (Lock Detected).`);
+            } else {
+                const allEnded = seriesPolls.every(p => p.ended);
+                console.log(`[Tournament] Series ${seriesId}: Found ${seriesPolls.length} qualifiers. AllEnded=${allEnded}. Polls: ${seriesPolls.map(p => `${p.config.house}:${p.ended}`).join(', ')}`);
+
                 if (allEnded) {
-                    // Check if finals already created
-                    const existingFinal = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
+                    // Double check existing final
+                    const existingFinal = allPolls.find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
                     if (!existingFinal) {
-                        // Aggregate Winners
-                        const winners = [];
-                        const PollVisualizer = require('./pollVisualizer');
-                        const passerImages = [];
+                        try {
+                            // Aggregate Winners
+                            const winners = [];
+                            const PollVisualizer = require('./pollVisualizer');
+                            const passerImages = [];
 
-                        for (const poll of seriesPolls) {
-                            // Calculate winner
-                            const tally = {};
-                            poll.config.candidates.forEach(c => tally[c.id] = 0);
-                            Object.values(poll.votes).forEach(voteList => {
-                                voteList.forEach(candId => tally[candId]++);
-                            });
+                            for (const poll of seriesPolls) {
+                                // Calculate winner
+                                const tally = {};
+                                poll.config.candidates.forEach(c => tally[c.id] = 0);
+                                Object.values(poll.votes).forEach(voteList => {
+                                    voteList.forEach(candId => tally[candId]++);
+                                });
 
+                                // Sort
+                                const sorted = [...poll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
 
-                            // Sort
-                            const sorted = [...poll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
-                            if (sorted.length > 0) {
                                 if (sorted.length > 0) {
                                     // Select Top 5 (User Request: 5x Dorms)
                                     const topCandidates = sorted.slice(0, 5);
@@ -180,7 +194,6 @@ class TournamentManager {
                                     // Generate Passer Image for this House
                                     try {
                                         const house = poll.config.house;
-                                        // Need to fetch avatars if missing
                                         await Promise.all(topCandidates.map(async c => {
                                             if (c.userId && !c.avatarURL) {
                                                 const ch = await client.channels.fetch(poll.channelId).catch(() => null);
@@ -198,14 +211,13 @@ class TournamentManager {
                                         console.error(`Failed to gen passer image for ${poll.config.house}:`, e);
                                     }
 
-                                    topCandidates.forEach((winner, index) => {
-                                        // Removed: winner.name modification (Rank/House)
+                                    topCandidates.forEach((winner) => {
                                         winners.push(winner);
                                     });
                                 }
                             }
 
-                            // Post Passer Images
+                            // Post Passer Images (Aggregate)
                             const channel = await client.channels.fetch(seriesPolls[0].channelId).catch(() => null);
                             if (channel && passerImages.length > 0) {
                                 await channel.send({ content: '## ⚡ 決勝進出者決定！', files: passerImages });
@@ -214,16 +226,14 @@ class TournamentManager {
                             console.log(`[Tournament] Series ${seriesId}: Winners Count = ${winners.length}`);
                             if (winners.length > 0) {
                                 // Create Finals
-                                // Use Series Config inheritance if available, else defaults
                                 const parentConfig = seriesPolls[0].config;
-
                                 const finalConfig = {
                                     title: `${parentConfig.title.split('-')[0].trim()} - 決勝戦`,
                                     candidates: winners,
                                     mode: parentConfig.finalMaxVotes > 1 ? 'multi' : 'single',
                                     maxVotes: parentConfig.finalMaxVotes || 1,
                                     duration: parentConfig.finalDuration || (24 * 60 * 60 * 1000), // Default 24h
-                                    startDate: parentConfig.finalStart, // Schedule if set
+                                    startDate: parentConfig.finalStart,
                                     seriesId: seriesId,
                                     stage: 'final',
                                     roles: parentConfig.roles || [],
@@ -231,110 +241,118 @@ class TournamentManager {
                                     allowSelfVote: parentConfig.allowSelfVote !== undefined ? parentConfig.allowSelfVote : true
                                 };
 
-                                // Post to same channel as first qualifier
                                 if (channel) {
                                     await channel.send('# 🏆 予選終了！ 決勝戦開始！');
                                     await PollManager.createPollInternal(channel, finalConfig, seriesPolls[0].authorId);
-                                }
-                            }
-                        }
-                    }
-                }
 
-                // 2. Check Finals -> Victory Ceremony
-                const finalPoll = Array.from(PollManager.polls.values()).find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
-                if (finalPoll && finalPoll.ended && !finalPoll.ceremonyDone) {
-                    finalPoll.ceremonyDone = true;
-                    PollManager.save(); // Persist ceremony state
-
-                    // Determine Winners (Rank 1-3)
-                    const tally = {};
-                    finalPoll.config.candidates.forEach(c => tally[c.id] = 0);
-                    Object.values(finalPoll.votes).forEach(voteList => {
-                        voteList.forEach(candId => tally[candId]++);
-                    });
-                    const sorted = [...finalPoll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
-                    const top3 = sorted.slice(0, 3);
-
-                    const channel = await client.channels.fetch(finalPoll.channelId).catch(() => null);
-                    if (channel) {
-                        await channel.send('# 👑 優勝者決定！ おめでとうございます！');
-
-                        // Generate Images
-                        const PollVisualizer = require('./pollVisualizer');
-                        const files = [];
-
-                        // Render Rank 1, 2, 3 (Victory Images)
-                        for (let i = 0; i < top3.length; i++) {
-                            const candidate = top3[i];
-                            // Fetch Avatar
-                            if (candidate.userId && !candidate.avatarURL) {
-                                const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
-                                if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
-                            }
-
-                            try {
-                                const buffer = await PollVisualizer.generateVictoryImage(candidate, i + 1);
-                                files.push({ attachment: buffer, name: `victory_rank${i + 1}.png` });
-                            } catch (e) {
-                                console.error('Victory Image Gen Failed:', e);
-                            }
-                        }
-
-                        // --- GENERATE ALL RANKING BOARD ---
-                        try {
-                            // Prepare data with votes for all candidates
-                            const rankingData = sorted.map((c, idx) => ({
-                                ...c,
-                                votes: tally[c.id] || 0,
-                                rank: idx + 1
-                            }));
-
-                            // Ensure avatars for ALL (or at least top 12)
-                            // Optimize: Bulk Fetch Avatars
-                            const userIds = rankingData.map(c => c.userId).filter(id => id);
-                            if (userIds.length > 0) {
-                                try {
-                                    const members = await channel.guild.members.fetch({ user: userIds });
-                                    const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-                                    const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
-
-                                    rankingData.forEach(c => {
-                                        if (c.userId && members.has(c.userId)) {
-                                            const member = members.get(c.userId);
-                                            c.avatarURL = member.displayAvatarURL({ extension: 'png' });
-
-                                            // Generation extraction
-                                            let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
-                                            if (!genRole && currentGenRoleId) genRole = member.roles.cache.get(currentGenRoleId);
-
-                                            if (genRole) {
-                                                c.generation = genRole.name.toUpperCase();
-                                                c.generationColor = genRole.hexColor;
-                                            }
-                                        }
+                                    // LOCK: Mark execution complete
+                                    seriesPolls.forEach(p => {
+                                        p.nextStageCreated = true;
+                                        PollManager.savePoll(p);
                                     });
-                                } catch (e) {
-                                    console.error('Bulk Avatar/Gen Fetch Failed:', e);
                                 }
                             }
-
-                            const rankBuffer = await PollVisualizer.generateFinalRankingImage(rankingData, finalPoll.config.title);
-                            files.push({ attachment: rankBuffer, name: 'ranking_overview.png' });
                         } catch (e) {
-                            console.error('Final Ranking Image Gen Failed:', e);
-                        }
-
-                        // Send all images
-                        if (files.length > 0) {
-                            await channel.send({ content: `## 🏆 表彰台 & 最終結果`, files: files });
-
-                            // User Request: Prompt for improvements
-                            await channel.send('### 📈 選手権お疲れ様ダラァ！');
+                            console.error('Finals Creation Logic Failed:', e);
                         }
                     }
                 }
             }
+
+            // 2. Check Finals -> Victory Ceremony
+            const finalPoll = allPolls.find(p => p.config.seriesId === seriesId && p.config.stage === 'final');
+            if (finalPoll && finalPoll.ended && !finalPoll.ceremonyDone) {
+                finalPoll.ceremonyDone = true;
+                PollManager.savePoll(finalPoll); // Persist ceremony state
+
+                // Determine Winners (Rank 1-3)
+                const tally = {};
+                finalPoll.config.candidates.forEach(c => tally[c.id] = 0);
+                Object.values(finalPoll.votes).forEach(voteList => {
+                    voteList.forEach(candId => tally[candId]++);
+                });
+                const sorted = [...finalPoll.config.candidates].sort((a, b) => tally[b.id] - tally[a.id]);
+                const top3 = sorted.slice(0, 3);
+
+                const channel = await client.channels.fetch(finalPoll.channelId).catch(() => null);
+                if (channel) {
+                    await channel.send('# 👑 優勝者決定！ おめでとうございます！');
+
+                    // Generate Images
+                    const PollVisualizer = require('./pollVisualizer');
+                    const files = [];
+
+                    // Render Rank 1, 2, 3 (Victory Images)
+                    for (let i = 0; i < top3.length; i++) {
+                        const candidate = top3[i];
+                        // Fetch Avatar
+                        if (candidate.userId && !candidate.avatarURL) {
+                            const member = await channel.guild.members.fetch(candidate.userId).catch(() => null);
+                            if (member) candidate.avatarURL = member.displayAvatarURL({ extension: 'png' });
+                        }
+
+                        try {
+                            const buffer = await PollVisualizer.generateVictoryImage(candidate, i + 1);
+                            files.push({ attachment: buffer, name: `victory_rank${i + 1}.png` });
+                        } catch (e) {
+                            console.error('Victory Image Gen Failed:', e);
+                        }
+                    }
+
+                    // --- GENERATE ALL RANKING BOARD ---
+                    try {
+                        // Prepare data with votes for all candidates
+                        const rankingData = sorted.map((c, idx) => ({
+                            ...c,
+                            votes: tally[c.id] || 0,
+                            rank: idx + 1
+                        }));
+
+                        // Ensure avatars for ALL (or at least top 12)
+                        // Optimize: Bulk Fetch Avatars
+                        const userIds = rankingData.map(c => c.userId).filter(id => id);
+                        if (userIds.length > 0) {
+                            try {
+                                const members = await channel.guild.members.fetch({ user: userIds });
+                                const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                                const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
+
+                                rankingData.forEach(c => {
+                                    if (c.userId && members.has(c.userId)) {
+                                        const member = members.get(c.userId);
+                                        c.avatarURL = member.displayAvatarURL({ extension: 'png' });
+
+                                        // Generation extraction
+                                        let genRole = member.roles.cache.find(r => romanRegex.test(r.name));
+                                        if (!genRole && currentGenRoleId) genRole = member.roles.cache.get(currentGenRoleId);
+
+                                        if (genRole) {
+                                            c.generation = genRole.name.toUpperCase();
+                                            c.generationColor = genRole.hexColor;
+                                        }
+                                    }
+                                });
+                            } catch (e) {
+                                console.error('Bulk Avatar/Gen Fetch Failed:', e);
+                            }
+                        }
+
+                        const rankBuffer = await PollVisualizer.generateFinalRankingImage(rankingData, finalPoll.config.title);
+                        files.push({ attachment: rankBuffer, name: 'ranking_overview.png' });
+                    } catch (e) {
+                        console.error('Final Ranking Image Gen Failed:', e);
+                    }
+
+                    // Send all images
+                    if (files.length > 0) {
+                        await channel.send({ content: `## 🏆 表彰台 & 最終結果`, files: files });
+                        await channel.send('### 📈 選手権お疲れ様ダラァ！');
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('[Tournament] checkSeriesCompletion Error:', error);
         } finally {
             this.seriesLocks.delete(seriesId);
         }
