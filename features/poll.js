@@ -234,8 +234,10 @@ class PollManager {
             startsAt: effectiveStart,
             authorId: authorId,
             channelId: channel.id,
+            authorId: authorId,
+            channelId: channel.id,
             messageId: null,
-            ended: false,
+            started: effectiveStart <= now, // Init status
             ended: false,
             processing: false // Lock flag
         };
@@ -561,21 +563,41 @@ class PollManager {
         this.ticker = setInterval(async () => {
             const now = Date.now();
             for (const poll of this.polls.values()) {
-                if (!poll.ended && !poll.processing) {
-                    const endsAt = poll.startsAt + poll.config.duration;
-                    if (now >= endsAt) {
+                if (!poll.processing) {
+                    // Check Start Transition
+                    if (!poll.ended && !poll.started && now >= poll.startsAt) {
                         try {
+                            console.log(`[PollManager] Starting poll ${poll.id}`);
+                            poll.started = true;
+                            this.save();
                             const channel = await client.channels.fetch(poll.channelId).catch(() => null);
                             if (channel) {
-                                console.log(`Auto-ending poll ${poll.id}`);
-                                await this._executePublish(poll, channel);
-                            } else {
-                                console.warn(`Channel not found for poll ${poll.id}`);
-                                poll.ended = true;
-                                this.save();
+                                const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
+                                if (msg) {
+                                    await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
+                                    // Optional: Ping? await channel.send(`📢 **${poll.config.title}** の投票が開始されました！`);
+                                }
                             }
                         } catch (e) {
-                            console.error(`Error auto-ending poll ${poll.id}:`, e);
+                            console.error(`Error activating poll ${poll.id}:`, e);
+                        }
+                    }
+
+                    // Check End Transition
+                    if (!poll.ended && poll.started) {
+                        const endsAt = poll.startsAt + poll.config.duration;
+                        if (now >= endsAt) {
+                            try {
+                                const channel = await client.channels.fetch(poll.channelId).catch(() => null);
+                                if (channel) {
+                                    console.log(`Auto-ending poll ${poll.id}`);
+                                    await this._executePublish(poll, channel);
+                                } else {
+                                    // ... fallback ...
+                                    poll.ended = true;
+                                    this.save();
+                                }
+                            } catch (e) { console.error(e); }
                         }
                     }
                 }
