@@ -234,8 +234,6 @@ class PollManager {
             startsAt: effectiveStart,
             authorId: authorId,
             channelId: channel.id,
-            authorId: authorId,
-            channelId: channel.id,
             messageId: null,
             started: effectiveStart <= now, // Init status
             ended: false,
@@ -252,6 +250,9 @@ class PollManager {
 
         this.polls.set(pollId, pollState);
         this.save();
+
+        // Activate Scheduler for this poll
+        this.schedulePollEvents(pollState);
 
         return pollState;
     }
@@ -557,52 +558,97 @@ class PollManager {
         }
     }
 
-    startTicker(client) {
-        if (this.ticker) clearInterval(this.ticker);
-        console.log('Poll Scheduler Started.');
-        this.ticker = setInterval(async () => {
-            const now = Date.now();
-            for (const poll of this.polls.values()) {
-                if (!poll.processing) {
-                    // Check Start Transition
-                    if (!poll.ended && !poll.started && now >= poll.startsAt) {
-                        try {
-                            console.log(`[PollManager] Starting poll ${poll.id}`);
-                            poll.started = true;
-                            this.save();
-                            const channel = await client.channels.fetch(poll.channelId).catch(() => null);
-                            if (channel) {
-                                const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
-                                if (msg) {
-                                    await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
-                                    // Optional: Ping? await channel.send(`📢 **${poll.config.title}** の投票が開始されました！`);
-                                }
-                            }
-                        } catch (e) {
-                            console.error(`Error activating poll ${poll.id}:`, e);
-                        }
-                    }
+    // --- Scheduler System (Precise, not 1-min interval) ---
 
-                    // Check End Transition
-                    if (!poll.ended && poll.started) {
-                        const endsAt = poll.startsAt + poll.config.duration;
-                        if (now >= endsAt) {
-                            try {
-                                const channel = await client.channels.fetch(poll.channelId).catch(() => null);
-                                if (channel) {
-                                    console.log(`Auto-ending poll ${poll.id}`);
-                                    await this._executePublish(poll, channel);
-                                } else {
-                                    // ... fallback ...
-                                    poll.ended = true;
-                                    this.save();
-                                }
-                            } catch (e) { console.error(e); }
-                        }
+    schedulePollEvents(poll) {
+        if (poll.ended || poll.processing) return;
+
+        const now = Date.now();
+        const duration = poll.config.duration;
+        const endsAt = poll.startsAt + duration;
+
+        // 1. Check Start Logic
+        if (!poll.started) {
+            if (now < poll.startsAt) {
+                // Future Start
+                const delay = poll.startsAt - now;
+                if (delay > 2147483647) return; // Ignore too far future
+                setTimeout(() => this.activatePoll(poll.id), delay);
+                console.log(`[PollScheduler] Scheduled Start for ${poll.id} in ${Math.ceil(delay / 1000)}s`);
+            } else {
+                // Catch up
+                this.activatePoll(poll.id);
+            }
+        }
+
+        // 2. Check End Logic
+        // Calculate delay until end
+        const effectiveEnd = endsAt;
+        if (now < effectiveEnd) {
+            const delay = effectiveEnd - now;
+            if (delay > 2147483647) return;
+            setTimeout(() => this.endPoll(poll.id), delay);
+            console.log(`[PollScheduler] Scheduled End for ${poll.id} in ${Math.ceil(delay / 1000)}s`);
+        } else {
+            // Overdue
+            this.endPoll(poll.id);
+        }
+    }
+
+    async activatePoll(pollId) {
+        const poll = this.polls.get(pollId);
+        if (!poll || poll.started || poll.ended) return;
+
+        console.log(`[PollManager] Activating poll ${poll.id}`);
+        poll.started = true;
+        this.save();
+
+        try {
+            if (this.client) {
+                const channel = await this.client.channels.fetch(poll.channelId).catch(() => null);
+                if (channel) {
+                    const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
+                    if (msg) {
+                        await msg.edit({ embeds: [this.generateEmbed(poll)], components: this.generateComponents(poll) });
                     }
                 }
             }
-        }, 60 * 1000);
+        } catch (e) {
+            console.error(`Activation UI Update Failed for ${poll.id}:`, e);
+        }
+    }
+
+    async endPoll(pollId) {
+        const poll = this.polls.get(pollId);
+        if (!poll || poll.ended || poll.processing) return;
+
+        console.log(`[PollManager] Ending poll ${poll.id}`);
+
+        try {
+            if (this.client) {
+                const channel = await this.client.channels.fetch(poll.channelId).catch(() => null);
+                if (channel) {
+                    await this._executePublish(poll, channel);
+                } else {
+                    poll.ended = true;
+                    this.save();
+                }
+            }
+        } catch (e) {
+            console.error(`End Poll Failed for ${poll.id}:`, e);
+        }
+    }
+
+    init(client) {
+        this.client = client;
+        console.log('[PollManager] Scheduler Initialized. Scanning active polls...');
+        for (const poll of this.polls.values()) {
+            this.schedulePollEvents(poll);
+        }
+    }
+
+    startTicker(client) {
+        this.init(client);
     }
 
     async previewPoll(interaction, count = 5) {
