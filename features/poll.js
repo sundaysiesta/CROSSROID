@@ -25,10 +25,29 @@ function parseDuration(str) {
 }
 
 // --- Helper: Date Parser ---
+// --- Helper: Date Parser ---
 function parseDate(str) {
     if (!str) return null;
-    let date = new Date(str);
-    if (!isNaN(date.getTime())) return date.getTime();
+
+    // Normalize: Replace space with T if missing, assume JST if no offset
+    let formatted = str.trim();
+    if (formatted.match(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}$/)) {
+        formatted = formatted.replace(' ', 'T') + ':00+09:00';
+    } else if (formatted.match(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$/)) {
+        formatted = formatted.replace(' ', 'T') + '+09:00';
+    }
+
+    let date = new Date(formatted);
+    // Fallback for simple string if regex didn't catch it
+    if (isNaN(date.getTime())) {
+        date = new Date(str); // Attempt raw
+    }
+
+    if (!isNaN(date.getTime())) {
+        console.log(`[PollParser] Date Parsed: "${str}" -> ${formatted} -> ${date.toLocaleString()} (${date.getTime()})`);
+        return date.getTime();
+    }
+    console.warn(`[PollParser] Invalid Date detected: "${str}"`);
     return null;
 }
 
