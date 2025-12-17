@@ -101,7 +101,7 @@ class PollParser {
                 const parts = line.split(':');
                 if (parts.length < 2) continue;
                 const key = parts[0].trim();
-                const val = parts[1].trim();
+                const val = parts.slice(1).join(':').trim();
 
                 if (key === '投票モード') {
                     if (val.includes('単一')) config.mode = 'single';
