@@ -1,4 +1,4 @@
-const { EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
 const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName, getAnonymousName } = require('../utils');
 const {
     ANONYMOUS_COOLDOWN_MS,
@@ -74,6 +74,7 @@ async function handleCommands(interaction, client) {
                 return interaction.reply({ content: `連投制限中です（残り${remainSec}秒）`, ephemeral: true });
             }
 
+            const content = interaction.options.getString('内容');
             if (content.includes('\n') || content.length > 256 || content.includes('@everyone') || content.includes('@here') || content.includes('<@&')) {
                 processingCommands.delete(commandKey);
                 const errEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription('❌ エラー: 改行不可/256文字以内/メンション不可');
