@@ -523,6 +523,54 @@ async function handleCommands(interaction, client) {
         return;
     }
 
+    if (interaction.commandName === 'duel_ranking') {
+        const fs = require('fs');
+        const path = require('path');
+        const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
+
+        if (!fs.existsSync(DATA_FILE)) {
+            return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📊 ランキング').setDescription('データがまだありません。').setColor(0x2F3136)], ephemeral: true });
+        }
+
+        let duelData = {};
+        try {
+            duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        } catch (e) {
+            console.error(e);
+            return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
+        }
+
+        // Convert object to array
+        const players = Object.entries(duelData).map(([id, data]) => ({ id, ...data }));
+
+        // Top Wins
+        const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
+        // Top Streaks (Current)
+        const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
+
+        const buildLeaderboard = (list, type) => {
+            if (list.length === 0) return 'なし';
+            return list.map((p, i) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
+                return `${medal} <@${p.id}> (**${val}**)`;
+            }).join('\n');
+        };
+
+        const embed = new EmbedBuilder()
+            .setTitle('🏆 決闘ランキング')
+            .setColor(0xFFD700)
+            .addFields(
+                { name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
+                { name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
+            )
+            .setFooter({ text: '※ 通常決闘とロシアン・デスマッチの合算戦績です' })
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+        return;
+    }
+
     if (interaction.commandName === 'event_create') {
         try {
             // Robust Defer: Catch 10062 (Unknown Interaction) immediately

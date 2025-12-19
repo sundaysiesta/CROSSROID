@@ -170,6 +170,10 @@ client.once('ready', async () => {
       ]
     },
     {
+      name: 'duel_ranking',
+      description: '【決闘】決闘のランキングを表示します（勝利数 / 連勝数）'
+    },
+    {
       name: 'duel_russian',
       description: '【ロシアン】実弾1発のリボルバーを回して交互に撃ち合います（敗者は闇に葬られます）',
       options: [
