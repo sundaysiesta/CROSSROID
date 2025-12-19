@@ -295,7 +295,8 @@ async function handleCommands(interaction, client) {
 
         collector.on('collect', async i => {
             if (i.customId === 'duel_deny') {
-                await i.update({ content: `🏳️ ${opponentUser} は決闘から逃亡しました...`, components: [] });
+                await i.update({ content: `🏳️ ${opponentUser} は決闘から逃亡しました...\n🚑 **臆病者への罰:** 1分間のタイムアウト`, components: [] });
+                if (opponentMember.moderatable) await opponentMember.timeout(60 * 1000, 'Fled from Duel').catch(console.error);
                 return;
             }
 
@@ -316,15 +317,18 @@ async function handleCommands(interaction, client) {
 
             let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
             let loser = null;
+            let winner = null;
             let diff = 0;
 
             if (rollA > rollB) {
                 diff = rollA - rollB;
                 loser = opponentMember;
+                winner = member;
                 resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
             } else if (rollB > rollA) {
                 diff = rollB - rollA;
                 loser = member;
+                winner = opponentMember;
                 resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
             } else {
                 resultMsg += `🤝 **引き分け**\n両者生還です。`;
@@ -333,10 +337,11 @@ async function handleCommands(interaction, client) {
             }
 
             // Calc Timeout
-            const timeoutMinutes = Math.min(30, Math.ceil(diff / 3)); // Max 30, scaled
+            const timeoutMinutes = Math.min(15, Math.ceil(diff / 3)); // Max 30, scaled
             const timeoutMs = timeoutMinutes * 60 * 1000;
 
             resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})`;
+            resultMsg += `\n👑 **報酬:** 勝者に1時間の「上級ロメダ民ロール」が付与されました。`;
 
             await interaction.followUp(resultMsg);
 
@@ -349,6 +354,19 @@ async function handleCommands(interaction, client) {
                 }
             } else if (loser) {
                 await interaction.channel.send(`⚠️ ${loser} は権限により守られました（処罰無効）。`);
+            }
+
+            // Apply Reward
+            if (winner) {
+                try {
+                    const { ELITE_ROLE_ID } = require('../constants');
+                    await winner.roles.add(ELITE_ROLE_ID);
+                    setTimeout(async () => {
+                        await winner.roles.remove(ELITE_ROLE_ID).catch(() => { });
+                    }, 60 * 60 * 1000);
+                } catch (e) {
+                    console.error('Failed to grant reward:', e);
+                }
             }
         });
 
