@@ -1076,7 +1076,7 @@ async function handleCommands(interaction, client) {
     }
     else if (interaction.isMessageContextMenuCommand()) {
         if (interaction.commandName === '匿名開示 (運営専用)') {
-            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+            const member = await interaction.guild.members.fetch(interaction.user.id);
             if (member) {
                 if (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID)) {
                     if (interaction.targetMessage.webhookId != null) {
