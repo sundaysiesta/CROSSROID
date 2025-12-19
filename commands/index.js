@@ -286,7 +286,7 @@ async function handleCommands(interaction, client) {
         );
 
         await interaction.reply({
-            content: `⚔️ **決闘状** ⚔️\n${opponentUser}！\n${interaction.user} から決闘を申し込まれました。\n\n**ルール:**\n- 1d100のダイス勝負\n- 敗者は [点数差/4] 分間(MAX 15分)のタイムアウト\n- **受諾後はキャンセル不可**`,
+            content: `⚔️ **決闘状** ⚔️\n${opponentUser}！\n${interaction.user} から決闘を申し込まれました。\n\n**ルール:**\n- 1d100のダイス勝負\n- **仕掛け人ハンデ:** 実行側は最大95 & 引き分けは敗北\n- 敗者は [点数差/4] 分間(MAX 15分)のタイムアウト\n- **受諾後はキャンセル不可**`,
             components: [row]
         });
 
@@ -312,10 +312,16 @@ async function handleCommands(interaction, client) {
 
             await new Promise(r => setTimeout(r, 2000));
 
-            const rollA = Math.floor(Math.random() * 100) + 1;
+            const rollA = Math.floor(Math.random() * 95) + 1; // Handicap: Max 95
             const rollB = Math.floor(Math.random() * 100) + 1;
 
-            let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
+            // Draw = Challenger Loss
+            if (rollA === rollB) {
+                // Technically B wins
+                // But let's handle it in the if/else logic below
+            }
+
+            let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}** (Handicap)\n${opponentUser}: **${rollB}**\n\n`;
             let loser = null;
             let winner = null;
             let diff = 0;
@@ -327,15 +333,13 @@ async function handleCommands(interaction, client) {
                 loser = opponentMember;
                 winner = member;
                 resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
-            } else if (rollB > rollA) {
-                diff = rollB - rollA;
+            } else {
+                // Win or Draw (Defender Wins Ties)
+                diff = Math.abs(rollB - rollA);
                 loser = member;
                 winner = opponentMember;
-                resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
-            } else {
-                resultMsg += `🤝 **引き分け**\n両者生還です。`;
-                await interaction.followUp(resultMsg);
-                return;
+                if (rollA === rollB) resultMsg += `⚖️ **引き分け (防御側の勝利)**\n💀 **敗者: ${interaction.user}**`;
+                else resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
             }
 
             // --- Stats Tracking ---
@@ -384,10 +388,18 @@ async function handleCommands(interaction, client) {
 
 
             // Calc Timeout
-            const timeoutMinutes = Math.min(15, Math.ceil(diff / 4)); // Max 15, scaled
+            let timeoutMinutes = Math.min(15, Math.ceil(diff / 4)); // Max 15, scaled
+
+            // Challenger Penalty (Recklessness Tax)
+            let penaltyMsg = '';
+            if (loser.id === userId) {
+                timeoutMinutes += 2;
+                penaltyMsg = ' (内: 無謀な挑戦ハラキリ +2分)';
+            }
+
             const timeoutMs = timeoutMinutes * 60 * 1000;
 
-            resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})`;
+            resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})${penaltyMsg}`;
             resultMsg += `\n👑 **報酬:** 勝者に1時間の「上級ロメダ民ロール」が付与されました。`;
 
             await interaction.followUp(resultMsg);
@@ -455,9 +467,36 @@ async function handleCommands(interaction, client) {
             }
         });
 
-        collector.on('end', collected => {
+        collector.on('end', async collected => {
             if (collected.size === 0) {
-                interaction.editReply({ content: `⌛ 時間切れにより決闘は無効となりました。`, components: [] }).catch(() => { });
+                // Determine AFK status
+                const currentOpponent = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                const status = currentOpponent?.presence?.status || 'offline';
+                const isAFK = status === 'idle' || status === 'offline' || status === 'invisible';
+
+                let msg = `⌛ **時間切れ** ⌛\n決闘は成立しませんでした。`;
+
+                if (!isAFK) {
+                    // Active Ignore -> Cowardice Penalty
+                    msg += `\n💢 **${opponentUser} は起きていますが無視しました！**\n🚑 **臆病者への罰:** 1分間のタイムアウト`;
+                    if (currentOpponent && currentOpponent.moderatable) {
+                        try {
+                            await currentOpponent.timeout(60 * 1000, 'Ignored Duel (Active)').catch(() => { });
+                            const oldName = currentOpponent.nickname || currentOpponent.user.username;
+                            await currentOpponent.setNickname(`チキン ${oldName.substring(0, 20)}`).catch(() => { });
+                        } catch (e) { }
+                    }
+                } else {
+                    // AFK -> Disturbance Penalty (Challenger Fault)
+                    msg += `\n💤 **${opponentUser} は寝ています...**\n🚑 **迷惑行為への罰:** 挑んだ ${interaction.user} に5分間のタイムアウト`;
+                    if (member.moderatable) {
+                        try {
+                            await member.timeout(5 * 60 * 1000, 'Challenged AFK User').catch(() => { });
+                        } catch (e) { }
+                    }
+                }
+
+                interaction.editReply({ content: msg, components: [] }).catch(() => { });
             }
         });
         return;
