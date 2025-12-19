@@ -286,7 +286,7 @@ async function handleCommands(interaction, client) {
         );
 
         await interaction.reply({
-            content: `⚔️ **決闘状** ⚔️\n${opponentUser}！\n${interaction.user} から決闘を申し込まれました。\n\n**ルール:**\n- 1d100のダイス勝負\n- 敗者は [点数差/3] 分間(MAX 30分)のタイムアウト\n- **受諾後はキャンセル不可**`,
+            content: `⚔️ **決闘状** ⚔️\n${opponentUser}！\n${interaction.user} から決闘を申し込まれました。\n\n**ルール:**\n- 1d100のダイス勝負\n- 敗者は [点数差/4] 分間(MAX 15分)のタイムアウト\n- **受諾後はキャンセル不可**`,
             components: [row]
         });
 
@@ -320,6 +320,8 @@ async function handleCommands(interaction, client) {
             let winner = null;
             let diff = 0;
 
+
+
             if (rollA > rollB) {
                 diff = rollA - rollB;
                 loser = opponentMember;
@@ -336,8 +338,53 @@ async function handleCommands(interaction, client) {
                 return;
             }
 
+            // --- Stats Tracking ---
+            const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
+            let duelData = {};
+            if (fs.existsSync(DATA_FILE)) { try { duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { } }
+
+            // Initialize records
+            if (!duelData[winner.id]) duelData[winner.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+            if (!duelData[loser.id]) duelData[loser.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+
+            // Update Winner
+            duelData[winner.id].wins++;
+            duelData[winner.id].streak++;
+            if (duelData[winner.id].streak > duelData[winner.id].maxStreak) duelData[winner.id].maxStreak = duelData[winner.id].streak;
+
+            // Update Loser
+            duelData[loser.id].losses++;
+            duelData[loser.id].streak = 0; // Reset streak
+
+            try {
+                fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2));
+                // We save persistence later with the cooldowns
+            } catch (e) {
+                console.error('Failed to save duel stats:', e);
+            }
+
+            resultMsg += `\n📊 **Stats:** ${winner} (${duelData[winner.id].streak}連勝中) vs ${loser}`;
+
+            // --- Main Channel Announcement (Streak >= 3) ---
+            if (duelData[winner.id].streak >= 3) {
+                const { MAIN_CHANNEL_ID } = require('../constants');
+                const mainCh = client.channels.cache.get(MAIN_CHANNEL_ID);
+                if (mainCh) {
+                    mainCh.send(`🔥 **NEWS:** ${winner} が決闘で **${duelData[winner.id].streak}連勝** を達成しました！誰も彼を止められないのか！？`);
+                }
+
+                // Extra Benefit for Streak: Rename Loser (Total Defeat)
+                try {
+                    if (loser.moderatable) {
+                        const oldName = loser.nickname || loser.user.username;
+                        await loser.setNickname(`敗北者 ${oldName.substring(0, 20)}`).catch(() => { });
+                    }
+                } catch (e) { }
+            }
+
+
             // Calc Timeout
-            const timeoutMinutes = Math.min(15, Math.ceil(diff / 3)); // Max 30, scaled
+            const timeoutMinutes = Math.min(15, Math.ceil(diff / 4)); // Max 15, scaled
             const timeoutMs = timeoutMinutes * 60 * 1000;
 
             resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})`;
@@ -347,7 +394,10 @@ async function handleCommands(interaction, client) {
 
             if (loser && loser.moderatable) {
                 try {
-                    await loser.timeout(timeoutMs, `Dulled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`);
+                    await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => {
+                        interaction.channel.send(`⚠️ タイムアウトエラー: ${e.message}`);
+                    });
+
                     await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
                 } catch (e) {
                     await interaction.channel.send(`⚠️ 敗者への処罰中にエラーが発生しました: ${e.message}`);
@@ -358,14 +408,49 @@ async function handleCommands(interaction, client) {
 
             // Apply Reward
             if (winner) {
+                const { ELITE_ROLE_ID, HIGHLIGHT_CHANNEL_ID } = require('../constants');
+
+                // 1. Role Award
                 try {
-                    const { ELITE_ROLE_ID } = require('../constants');
                     await winner.roles.add(ELITE_ROLE_ID);
                     setTimeout(async () => {
                         await winner.roles.remove(ELITE_ROLE_ID).catch(() => { });
-                    }, 60 * 60 * 1000);
+                    }, 24 * 60 * 60 * 1000);
                 } catch (e) {
-                    console.error('Failed to grant reward:', e);
+                    console.error('Failed to grant role:', e);
+                }
+
+                // 2. Refresh Roulette Cooldown
+                try {
+                    const freshCooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
+                    delete freshCooldowns[`roulette_${winner.id}`];
+                    fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(freshCooldowns, null, 2));
+                    require('../features/persistence').save(client);
+                    await interaction.channel.send(`✨ **ボーナス:** ${winner} のロシアンルーレット制限が解除されました！`);
+                } catch (e) {
+                    console.error('Failed to reset cooldown:', e);
+                }
+
+                // 3. Highlight Log
+                try {
+                    const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
+                    if (highlightChannel) {
+                        const embed = new EmbedBuilder()
+                            .setTitle('⚔️ 決闘勝者誕生 ⚔️')
+                            .setDescription(`${winner} が ${loser} との死闘を制しました！`)
+                            .setColor(0xFFD700) // Gold
+                            .addFields(
+                                { name: '勝者', value: `${winner}`, inline: true },
+                                { name: '敗者', value: `${loser}`, inline: true },
+                                { name: 'スコア', value: `${Math.max(rollA, rollB)} vs ${Math.min(rollA, rollB)}`, inline: true },
+                                { name: '獲得報酬', value: '上級国民ロール(24h)\nロシアンルーレット再装填', inline: false }
+                            )
+                            .setThumbnail(winner.user.displayAvatarURL())
+                            .setTimestamp();
+                        await highlightChannel.send({ embeds: [embed] });
+                    }
+                } catch (e) {
+                    console.error('Failed to send highlight:', e);
                 }
             }
         });

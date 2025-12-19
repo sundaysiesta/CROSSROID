@@ -6,7 +6,7 @@ const https = require('https');
 
 // Config
 const CHANNEL_NAME = '🛡️memory-store';
-const FILES = ['poll_data.json', 'activity_data.json', 'poll_storage/poll_index.json', 'custom_cooldowns.json'];
+const FILES = ['poll_data.json', 'activity_data.json', 'poll_storage/poll_index.json', 'custom_cooldowns.json', 'duel_data.json'];
 const SAVE_INTERVAL = 60 * 1000; // 1 min
 
 let storedMessageId = null;
