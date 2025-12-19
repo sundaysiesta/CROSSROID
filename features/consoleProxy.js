@@ -45,7 +45,7 @@ async function flush() {
     }
 
     // Take snapshot
-    const chunk = logQueue.slice(0, 15); // Send max 15 lines at a time to stay under char limit
+    const chunk = logQueue.slice(0, 15); // Send max 15 lines
     logQueue = logQueue.slice(15);
 
     // If still have items, schedule next flush soon
@@ -59,16 +59,24 @@ async function flush() {
     // Send to Webhook
     if (!ERROR_WEBHOOK_URL) return;
 
+    // Determine Color based on content
+    let color = 0x00b0f4; // Default Info Blue
+    if (content.includes('[ERROR]')) color = 0xFF0000; // Red
+    else if (content.includes('[WARN]')) color = 0xFFA500; // Orange
+
     try {
-        // We use a simple message instead of Embed for dense logs, or Embed for neatness?
-        // Code block is best.
-        // Truncate if needed (2000 limit)
-        const payload = `\`\`\`log\n${content.substring(0, 1900)}\n\`\`\``;
+        const payload = `\`\`\`log\n${content.substring(0, 4000)}\n\`\`\``; // Embed Desc Limit is 4096
 
         await fetch(ERROR_WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: payload })
+            body: JSON.stringify({
+                embeds: [{
+                    description: payload,
+                    color: color,
+                    footer: { text: `System Log • ${new Date().toLocaleTimeString('ja-JP')}` }
+                }]
+            })
         });
     } catch (e) {
         // USE ORIGINAL ERROR to avoid loop

@@ -186,78 +186,26 @@ async function handleCommands(interaction, client) {
 
         if (targets.size === 0) return interaction.editReply('❌ No targets found.');
 
-        // Logic: 1/6 chance
-        const isHit = Math.random() < (4 / 6);
-
-        // Visuals
-        await interaction.editReply(`🔫 **Russian Roulette**\n${interaction.user} がシリンダーを回しました...\nターゲット候補: ${targets.size}人`);
-        await new Promise(r => setTimeout(r, 3000)); // Suspense
-
-        if (isHit) {
-            cooldowns[`roulette_${userId}`] = now;
-            try {
-                fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
-                require('../features/persistence').save(client);
-            } catch (e) { console.error('Cooldown save error:', e); }
-
-            // Select Victim
-            const victim = targets.random();
-            const victimName = victim.displayName;
-
-            // Generate Wacchoi & Anon Name for Exposure
-            const isElite = victim.roles.cache.has(require('../constants').ELITE_ROLE_ID);
-            const wacchoi = generateWacchoi(victim.id);
-            const anonName = getAnonymousName(wacchoi.daily, isElite);
-            const wacchoiText = `\`${wacchoi.full}\``;
-
-            await interaction.editReply(`💥 **BANG!!!**\n${interaction.user} の放った弾丸が **${victim}** に命中しました！\n🚑 (10分間のタイムアウト)\n� **Wacchoi解析完了:**\nID: ${wacchoiText}\n裏名: **${anonName}**\n正体: **${victimName}**`);
-
-            try {
-                if (victim.moderatable) {
-                    await victim.timeout(10 * 60 * 1000, `Russian Roulette: Shot by ${interaction.user.tag}`).catch(e => console.error('Timeout API Failed:', e));
-                    await interaction.channel.send(`💀 ${victimName} は10分間の暗闇に葬られました... (Wacchoi: ${wacchoiText})`);
-                    // DM
-                    await victim.send(`🔫 あなたは **${interaction.user.tag}** のロシアンルーレットの流れ弾に当たりました。\n10分間サーバーにアクセスできません。\nなお、本日のあなたの匿名ID(Wacchoi)は ${wacchoiText} として公開されました。`).catch(() => { });
-                } else {
-                    await interaction.followUp(`⚠️ **${victimName}** に命中しましたが、防弾ベスト(権限)により無効化されました。\nしかし、匿名IDは公開されます: ${wacchoiText}`);
-                }
-            } catch (e) {
-                console.error('Timeout execution failed:', e);
-                await interaction.followUp('⚠️ タイムアウトの適用中にエラーが発生しました。命拾いしましたね。');
-            }
-
-        } else {
-            cooldowns[`roulette_${userId}`] = now;
-            try {
-                fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
-                require('../features/persistence').save(client);
-            } catch (e) { console.error('Cooldown save error:', e); }
-
-            await interaction.editReply(`💨 **Click...**\n不発でした。今日の死者はいないようです...`);
-        }
-        return;
     }
 
     if (interaction.commandName === 'duel') {
         const fs = require('fs');
         const path = require('path');
-        const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
         const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
 
         let cooldowns = {};
-        if (fs.existsSync(COOLDOWN_FILE)) {
-            try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { }
-        }
+        if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
 
         const userId = interaction.user.id;
         const now = Date.now();
-        const lastUsed = cooldowns[`duel_${userId}`] || 0;
-        const COOLDOWN_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 Days
+        const lastUsed = cooldowns[`battle_${userId}`] || 0;
+        const COOLDOWN_DURATION = 24 * 60 * 60 * 1000; // 1 Day (Shared)
 
         if (now - lastUsed < COOLDOWN_DURATION) {
             const remaining = COOLDOWN_DURATION - (now - lastUsed);
-            const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
-            return interaction.reply({ content: `⛔ 決闘は神聖な儀式です。週に1回しか行えません。\n残り: ${days}日`, ephemeral: true });
+            const hours = Math.ceil(remaining / (60 * 60 * 1000));
+            return interaction.reply({ content: `⛔ 戦闘（決闘/ロシアン）は1日1回までです。\n残り: ${hours}時間`, ephemeral: true });
         }
 
         const opponentUser = interaction.options.getUser('opponent');
@@ -269,7 +217,7 @@ async function handleCommands(interaction, client) {
 
         if (!opponentMember) return interaction.reply({ content: '対戦相手の情報を取得できませんでした。', ephemeral: true });
 
-        // Role Check logic (Reuse regex)
+        // Role Check logic
         const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
         const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
 
@@ -295,16 +243,15 @@ async function handleCommands(interaction, client) {
 
         collector.on('collect', async i => {
             if (i.customId === 'duel_deny') {
-                await i.update({ content: `🏳️ ${opponentUser} は決闘から逃亡しました...\n🚑 **臆病者への罰:** 1分間のタイムアウト`, components: [] });
-                if (opponentMember.moderatable) await opponentMember.timeout(60 * 1000, 'Fled from Duel').catch(console.error);
+                await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [] });
                 return;
             }
 
             // Accepted
             await i.update({ content: `⚔️ **決闘開始** ⚔️\n${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`, components: [] });
 
-            // Cooldown Commit (Challenger pays) - saved immediately on start to prevent abuse
-            cooldowns[`duel_${userId}`] = Date.now();
+            // Cooldown Commit
+            cooldowns[`battle_${userId}`] = Date.now();
             try {
                 fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
                 require('../features/persistence').save(client);
@@ -315,18 +262,10 @@ async function handleCommands(interaction, client) {
             const rollA = Math.floor(Math.random() * 95) + 1; // Handicap: Max 95
             const rollB = Math.floor(Math.random() * 100) + 1;
 
-            // Draw = Challenger Loss
-            if (rollA === rollB) {
-                // Technically B wins
-                // But let's handle it in the if/else logic below
-            }
-
             let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}** (Handicap)\n${opponentUser}: **${rollB}**\n\n`;
             let loser = null;
             let winner = null;
             let diff = 0;
-
-
 
             if (rollA > rollB) {
                 diff = rollA - rollB;
@@ -334,7 +273,6 @@ async function handleCommands(interaction, client) {
                 winner = member;
                 resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
             } else {
-                // Win or Draw (Defender Wins Ties)
                 diff = Math.abs(rollB - rollA);
                 loser = member;
                 winner = opponentMember;
@@ -342,42 +280,31 @@ async function handleCommands(interaction, client) {
                 else resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
             }
 
-            // --- Stats Tracking ---
+            // Stats Tracking
             const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
             let duelData = {};
             if (fs.existsSync(DATA_FILE)) { try { duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { } }
 
-            // Initialize records
             if (!duelData[winner.id]) duelData[winner.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
             if (!duelData[loser.id]) duelData[loser.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
 
-            // Update Winner
             duelData[winner.id].wins++;
             duelData[winner.id].streak++;
             if (duelData[winner.id].streak > duelData[winner.id].maxStreak) duelData[winner.id].maxStreak = duelData[winner.id].streak;
 
-            // Update Loser
             duelData[loser.id].losses++;
-            duelData[loser.id].streak = 0; // Reset streak
+            duelData[loser.id].streak = 0;
 
-            try {
-                fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2));
-                // We save persistence later with the cooldowns
-            } catch (e) {
-                console.error('Failed to save duel stats:', e);
-            }
+            try { fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2)); } catch (e) { }
 
             resultMsg += `\n📊 **Stats:** ${winner} (${duelData[winner.id].streak}連勝中) vs ${loser}`;
 
-            // --- Main Channel Announcement (Streak >= 3) ---
             if (duelData[winner.id].streak >= 3) {
                 const { MAIN_CHANNEL_ID } = require('../constants');
                 const mainCh = client.channels.cache.get(MAIN_CHANNEL_ID);
                 if (mainCh) {
-                    mainCh.send(`🔥 **NEWS:** ${winner} が決闘で **${duelData[winner.id].streak}連勝** を達成しました！誰も彼を止められないのか！？`);
+                    mainCh.send(`🔥 **NEWS:** ${winner} が決闘で **${duelData[winner.id].streak}連勝** を達成しました！`);
                 }
-
-                // Extra Benefit for Streak: Rename Loser (Total Defeat)
                 try {
                     if (loser.moderatable) {
                         const oldName = loser.nickname || loser.user.username;
@@ -386,17 +313,12 @@ async function handleCommands(interaction, client) {
                 } catch (e) { }
             }
 
-
-            // Calc Timeout
-            let timeoutMinutes = Math.min(15, Math.ceil(diff / 4)); // Max 15, scaled
-
-            // Challenger Penalty (Recklessness Tax)
+            let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
             let penaltyMsg = '';
             if (loser.id === userId) {
                 timeoutMinutes += 2;
                 penaltyMsg = ' (内: 無謀な挑戦ハラキリ +2分)';
             }
-
             const timeoutMs = timeoutMinutes * 60 * 1000;
 
             resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})${penaltyMsg}`;
@@ -406,98 +328,174 @@ async function handleCommands(interaction, client) {
 
             if (loser && loser.moderatable) {
                 try {
-                    await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => {
-                        interaction.channel.send(`⚠️ タイムアウトエラー: ${e.message}`);
-                    });
-
+                    await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => { });
                     await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
-                } catch (e) {
-                    await interaction.channel.send(`⚠️ 敗者への処罰中にエラーが発生しました: ${e.message}`);
-                }
-            } else if (loser) {
-                await interaction.channel.send(`⚠️ ${loser} は権限により守られました（処罰無効）。`);
+                } catch (e) { }
             }
 
-            // Apply Reward
             if (winner) {
                 const { ELITE_ROLE_ID, HIGHLIGHT_CHANNEL_ID } = require('../constants');
-
-                // 1. Role Award
                 try {
                     await winner.roles.add(ELITE_ROLE_ID);
-                    setTimeout(async () => {
-                        await winner.roles.remove(ELITE_ROLE_ID).catch(() => { });
-                    }, 24 * 60 * 60 * 1000);
-                } catch (e) {
-                    console.error('Failed to grant role:', e);
-                }
+                    setTimeout(async () => { await winner.roles.remove(ELITE_ROLE_ID).catch(() => { }); }, 24 * 60 * 60 * 1000);
+                } catch (e) { }
 
-                // 2. Refresh Roulette Cooldown
-                try {
-                    const freshCooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
-                    delete freshCooldowns[`roulette_${winner.id}`];
-                    fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(freshCooldowns, null, 2));
-                    require('../features/persistence').save(client);
-                    await interaction.channel.send(`✨ **ボーナス:** ${winner} のロシアンルーレット制限が解除されました！`);
-                } catch (e) {
-                    console.error('Failed to reset cooldown:', e);
-                }
-
-                // 3. Highlight Log
                 try {
                     const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
                     if (highlightChannel) {
-                        const embed = new EmbedBuilder()
+                        const embed = new EmbedBuilder() // Requires EmbedBuilder in scope?
                             .setTitle('⚔️ 決闘勝者誕生 ⚔️')
                             .setDescription(`${winner} が ${loser} との死闘を制しました！`)
-                            .setColor(0xFFD700) // Gold
-                            .addFields(
-                                { name: '勝者', value: `${winner}`, inline: true },
-                                { name: '敗者', value: `${loser}`, inline: true },
-                                { name: 'スコア', value: `${Math.max(rollA, rollB)} vs ${Math.min(rollA, rollB)}`, inline: true },
-                                { name: '獲得報酬', value: '上級国民ロール(24h)\nロシアンルーレット再装填', inline: false }
-                            )
+                            .setColor(0xFFD700)
                             .setThumbnail(winner.user.displayAvatarURL())
                             .setTimestamp();
                         await highlightChannel.send({ embeds: [embed] });
                     }
-                } catch (e) {
-                    console.error('Failed to send highlight:', e);
-                }
+                } catch (e) { }
             }
         });
 
+        // Timeout Handler
         collector.on('end', async collected => {
             if (collected.size === 0) {
-                // Determine AFK status
-                const currentOpponent = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
-                const status = currentOpponent?.presence?.status || 'offline';
-                const isAFK = status === 'idle' || status === 'offline' || status === 'invisible';
-
-                let msg = `⌛ **時間切れ** ⌛\n決闘は成立しませんでした。`;
-
-                if (!isAFK) {
-                    // Active Ignore -> Cowardice Penalty
-                    msg += `\n💢 **${opponentUser} は起きていますが無視しました！**\n🚑 **臆病者への罰:** 1分間のタイムアウト`;
-                    if (currentOpponent && currentOpponent.moderatable) {
-                        try {
-                            await currentOpponent.timeout(60 * 1000, 'Ignored Duel (Active)').catch(() => { });
-                            const oldName = currentOpponent.nickname || currentOpponent.user.username;
-                            await currentOpponent.setNickname(`チキン ${oldName.substring(0, 20)}`).catch(() => { });
-                        } catch (e) { }
-                    }
-                } else {
-                    // AFK -> Disturbance Penalty (Challenger Fault)
-                    msg += `\n💤 **${opponentUser} は寝ています...**\n🚑 **迷惑行為への罰:** 挑んだ ${interaction.user} に5分間のタイムアウト`;
-                    if (member.moderatable) {
-                        try {
-                            await member.timeout(5 * 60 * 1000, 'Challenged AFK User').catch(() => { });
-                        } catch (e) { }
-                    }
-                }
-
-                interaction.editReply({ content: msg, components: [] }).catch(() => { });
+                await interaction.editReply({ content: '⌛ 時間切れで決闘はキャンセルされました。', components: [] });
             }
+        });
+    }
+
+    if (interaction.commandName === 'duel_russian') {
+        const userId = interaction.user.id;
+        const opponentUser = interaction.options.getUser('opponent');
+
+        // Validation
+        if (opponentUser.id === userId || opponentUser.bot) return interaction.reply({ content: '自分やBotとは対戦できません。', ephemeral: true });
+
+        // Cooldown Check
+        const fs = require('fs');
+        const path = require('path');
+        const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
+        let cooldowns = {};
+        if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
+
+        const now = Date.now();
+        const lastUsed = cooldowns[`battle_${userId}`] || 0;
+        const CD_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 Day Cooldown for Russian
+
+        if (now - lastUsed < CD_DURATION) {
+            const h = Math.ceil((CD_DURATION - (now - lastUsed)) / (60 * 60 * 1000));
+            return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, ephemeral: true });
+        }
+
+        // UI
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('russian_accept').setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('🔫'),
+            new ButtonBuilder().setCustomId('russian_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary)
+        );
+
+        await interaction.reply({
+            content: `☠️ **ロシアン・デスマッチ** ☠️\n${opponentUser}！\n${interaction.user} から死のゲームへの招待状です。\n\n**ルール:**\n- 実弾1発のリボルバーを回して交互に撃ちます。\n- **敗者は15分間のタイムアウト + Wacchoi(IP)公開**\n- 勝者は24時間の「上級ロメダ民」`,
+            components: [row]
+        });
+
+        const filter = i => i.user.id === opponentUser.id && (i.customId === 'russian_accept' || i.customId === 'russian_deny');
+        const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+
+        collector.on('collect', async i => {
+            if (i.customId === 'russian_deny') {
+                await i.update({ content: '🏳️ デスマッチは回避されました。', components: [] });
+                return;
+            }
+
+            // Start
+            cooldowns[`battle_${userId}`] = Date.now();
+            try { fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2)); require('../features/persistence').save(client); } catch (e) { }
+
+            // Game State
+            let cylinder = [0, 0, 0, 0, 0, 0];
+            cylinder[Math.floor(Math.random() * 6)] = 1; // Load 1 bullet
+
+            let state = {
+                current: 0, // Cylinder Index
+                turn: Math.random() < 0.5 ? userId : opponentUser.id
+            };
+
+            const triggerRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('trigger').setLabel('引金を引く').setStyle(ButtonStyle.Danger).setEmoji('💀')
+            );
+
+            await i.update({ content: `🎲 **ゲーム開始** 🎲\n最初のターン: <@${state.turn}>\n\n現在のシリンダー: ${state.current + 1}/6`, components: [triggerRow] });
+
+            const gameFilter = m => (m.user.id === userId || m.user.id === opponentUser.id) && m.customId === 'trigger';
+            const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
+
+            gameCollector.on('collect', async move => {
+                if (move.user.id !== state.turn) return move.reply({ content: 'あなたの番ではありません。', ephemeral: true });
+
+                const isHit = cylinder[state.current] === 1;
+
+                if (isHit) {
+                    await move.update({ content: `💥 **BANG!!!**\n<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝者: ${move.user.id === userId ? opponentUser : interaction.user}**`, components: [] });
+                    gameCollector.stop('death');
+
+                    // Process Death
+                    const loserId = move.user.id;
+                    const winnerId = loserId === userId ? opponentUser.id : userId;
+                    const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
+                    const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
+
+                    // Penalty: Timeout + Wacchoi
+                    if (loserMember) {
+                        const { generateWacchoi, getAnonymousName } = require('../utils');
+                        const isElite = loserMember.roles.cache.has(require('../constants').ELITE_ROLE_ID);
+                        const wacchoi = generateWacchoi(loserId);
+                        const anonName = getAnonymousName(wacchoi.daily, isElite);
+
+                        interaction.channel.send(`⚰️ **死亡確認**\nID: \`${wacchoi.full}\`\n裏名: **${anonName}**\n処罰: 15分間のタイムアウト`);
+                        if (loserMember.moderatable) {
+                            loserMember.timeout(15 * 60 * 1000, 'Russian Deathpoints').catch(() => { });
+                        }
+                    }
+
+                    // Reward
+                    if (winnerMember) {
+                        const { ELITE_ROLE_ID, HIGHLIGHT_CHANNEL_ID } = require('../constants');
+                        try {
+                            await winnerMember.roles.add(ELITE_ROLE_ID);
+                            setTimeout(() => winnerMember.roles.remove(ELITE_ROLE_ID).catch(() => { }), 24 * 60 * 60 * 1000);
+
+                            // Stats Update
+                            const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
+                            let duelData = {};
+                            if (fs.existsSync(DATA_FILE)) { try { duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { } }
+                            if (!duelData[winnerId]) duelData[winnerId] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+                            duelData[winnerId].wins++;
+                            duelData[winnerId].streak++;
+                            if (duelData[winnerId].streak > duelData[winnerId].maxStreak) duelData[winnerId].maxStreak = duelData[winnerId].streak;
+                            try { fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2)); } catch (e) { }
+
+                            // Highlight
+                            const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
+                            if (highlightChannel) {
+                                interaction.channel.send(`✨ **勝者** <@${winnerId}> は死地を潜り抜けました！ (現在 ${duelData[winnerId].streak}連勝)`);
+                            }
+                        } catch (e) { }
+                    }
+
+                    return;
+                } else {
+                    // Miss - Next Turn
+                    state.current++;
+                    state.turn = state.turn === userId ? opponentUser.id : userId;
+                    await move.update({ content: `💨 **Click...**\nセーフです。\n\n次のターン: <@${state.turn}>\n現在のシリンダー: ${state.current + 1}/6`, components: [triggerRow] });
+                }
+            });
+
+            gameCollector.on('end', (c, reason) => {
+                if (reason !== 'death') {
+                    interaction.channel.send('⌛ ゲームは時間切れで中断されました。');
+                }
+            });
         });
         return;
     }

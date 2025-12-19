@@ -29,6 +29,7 @@ const highlight = require('./features/highlight');
 const imageLog = require('./features/imageLog');
 const roleAward = require('./features/roleAward');
 const legacyMigration = require('./features/legacyMigration');
+const githubWatcher = require('./features/githubWatcher');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -88,6 +89,9 @@ client.once('ready', async () => {
     console.log(`現在の世代ロールID: ${CURRENT_GENERATION_ROLE_ID}`);
     console.log(`メインチャンネルID: ${MAIN_CHANNEL_ID}`);
   }
+
+  // Start GitHub Watcher
+  githubWatcher.startWatcher(client);
 
   // スラッシュコマンドを登録
   const commands = [
@@ -154,16 +158,24 @@ client.once('ready', async () => {
       description: 'サーバーメンバーをランダムでメンションします'
     },
     {
-      name: 'roulette',
-      description: '【運試し】10分間のタイムアウトを賭けたロシアンルーレット（世代ロール限定）'
-    },
-    {
       name: 'duel',
       description: '【決闘】世代ロール持ちに決闘を申し込みます（敗者は即座にタイムアウト）',
       options: [
         {
           name: 'opponent',
           description: '決闘相手（世代ロール必須）',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'duel_russian',
+      description: '【ロシアン】実弾1発のリボルバーを回して交互に撃ち合います（敗者は闇に葬られます）',
+      options: [
+        {
+          name: 'opponent',
+          description: '対戦相手',
           type: 6, // USER
           required: true
         }
