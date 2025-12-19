@@ -157,5 +157,5 @@ module.exports = {
     ELITE_NAMING_PREFIXES,
     ELITE_NAMING_SUFFIXES,
     ELITE_ROLE_ID,
-    ERROR_WEBHOOK_URL: 'https://discord.com/api/webhooks/1400059920841310298/W3s4enp1TxcyrhScXa3_7siqpDefeFHA5EXxIXC8x645UUJ85d7begtkAUncuJCOcIHy'
+    ERROR_WEBHOOK_URL: 'https://discord.com/api/webhooks/1451581546816475279/28nAWpCDNJh_ms9yIl-keP2S35WToKLuD_MWHWXF28qnTkdrgSc_7WBKyR5rHR4kI2eG'
 };

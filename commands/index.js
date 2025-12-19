@@ -74,10 +74,10 @@ async function handleCommands(interaction, client) {
             return interaction.reply({ content: `連投制限中です（残り${remainSec}秒）`, ephemeral: true });
         }
 
-        const content = interaction.options.getString('内容');
         if (content.includes('\n') || content.length > 256 || content.includes('@everyone') || content.includes('@here') || content.includes('<@&')) {
             processingCommands.delete(commandKey);
-            return interaction.reply({ content: 'エラー: 改行不可/256文字以内/メンション不可', ephemeral: true });
+            const errEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription('❌ エラー: 改行不可/256文字以内/メンション不可');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
         }
 
         try {
@@ -103,7 +103,8 @@ async function handleCommands(interaction, client) {
             anonymousCooldowns.set(interaction.user.id, Date.now());
             usageData.count++;
             anonymousUsageCounts.set(interaction.user.id, usageData);
-            await interaction.reply({ content: `送信しました (本日${usageData.count}回目)`, ephemeral: true }).catch(err => {
+            const successEmbed = new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ 送信しました (本日${usageData.count}回目)`);
+            await interaction.reply({ embeds: [successEmbed], ephemeral: true }).catch(err => {
                 if (err.code !== 10062) console.error('Silent Error:', err);
             });
 
@@ -121,72 +122,25 @@ async function handleCommands(interaction, client) {
         const userId = interaction.user.id;
         const now = Date.now();
         const last = bumpCooldowns.get(userId) || 0;
-        if (now - last < BUMP_COOLDOWN_MS) return interaction.reply({ content: 'クールダウン中', ephemeral: true });
+        if (now - last < BUMP_COOLDOWN_MS) return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setDescription('⏳ クールダウン中')], ephemeral: true });
         bumpCooldowns.set(userId, now);
-        await interaction.reply({ content: 'Bumpしました', ephemeral: true });
+        await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription('👊 Bumpしました')], ephemeral: true });
         return;
     }
 
     if (interaction.commandName === 'random_mention') {
         const userId = interaction.user.id;
         const now = Date.now();
-        if (now - (randomMentionCooldowns.get(userId) || 0) < RANDOM_MENTION_COOLDOWN_MS) return interaction.reply({ content: 'CoolIng down', ephemeral: true });
+        if (now - (randomMentionCooldowns.get(userId) || 0) < RANDOM_MENTION_COOLDOWN_MS) return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setDescription('⏳ Cooling down')], ephemeral: true });
         randomMentionCooldowns.set(userId, now);
         const members = await interaction.guild.members.fetch();
         const random = members.filter(m => !m.user.bot).random();
-        if (random) interaction.reply({ content: `${random} Hello!`, allowedMentions: { users: [random.id] } });
-        else interaction.reply('No members');
+        if (random) interaction.reply({ content: `${random}`, embeds: [new EmbedBuilder().setColor(0x00FFFF).setDescription(`👋 Hello! You were randomly selected by ${interaction.user.username}!`)], allowedMentions: { users: [random.id] } });
+        else interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ No members')] });
         return;
     }
 
-    if (interaction.commandName === 'roulette') {
-        const fs = require('fs');
-        const path = require('path');
-        const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
 
-        // Load Cooldowns
-        let cooldowns = {};
-        if (fs.existsSync(COOLDOWN_FILE)) {
-            try {
-                cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
-            } catch (e) {
-                console.error('Cooldown load error:', e);
-            }
-        }
-
-        const userId = interaction.user.id;
-        const now = Date.now();
-        const lastUsed = cooldowns[`roulette_${userId}`] || 0;
-        const COOLDOWN_DURATION = 3 * 24 * 60 * 60 * 1000;
-
-        if (now - lastUsed < COOLDOWN_DURATION) {
-            const remaining = COOLDOWN_DURATION - (now - lastUsed);
-            const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
-            const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-            return interaction.reply({ content: `⛔ このコマンドは3日に1回のみ実行できます。\n残り: ${days}日 ${hours}時間` });
-        }
-
-        const member = interaction.member;
-        if (!member) return interaction.reply({ content: 'エラー: メンバー情報の取得に失敗しました。' });
-
-        // Generation Check
-        const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-        const hasGenRole = member.roles.cache.some(r => romanRegex.test(r.name));
-        const hasCurrentGen = member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
-
-        if (!hasGenRole && !hasCurrentGen) {
-            return interaction.reply({ content: '⛔ このコマンドは世代ロール（I, II, III... または最新世代）を持つメンバー限定です。' });
-        }
-
-        await interaction.deferReply();
-
-        // Fetch targets
-        await interaction.guild.members.fetch();
-        const targets = interaction.guild.members.cache.filter(m => !m.user.bot && (m.roles.cache.some(r => romanRegex.test(r.name)) || m.roles.cache.has(CURRENT_GENERATION_ROLE_ID)));
-
-        if (targets.size === 0) return interaction.editReply('❌ No targets found.');
-
-    }
 
     if (interaction.commandName === 'duel') {
         const fs = require('fs');
@@ -233,8 +187,21 @@ async function handleCommands(interaction, client) {
             new ButtonBuilder().setCustomId('duel_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary).setEmoji('🏳️')
         );
 
+        const embed = new EmbedBuilder()
+            .setTitle('⚔️ 決闘状')
+            .setDescription(`${opponentUser}！\n${interaction.user} から決闘を申し込まれました。`)
+            .addFields(
+                { name: 'ルール', value: '1d100のダイス勝負', inline: true },
+                { name: 'ハンデ', value: '仕掛け人は最大95 & 引き分け敗北', inline: true },
+                { name: 'ペナルティ', value: '敗者はタイムアウト (Max 15分)', inline: false },
+                { name: '注意', value: '受諾後のキャンセル不可', inline: false }
+            )
+            .setColor(0xFF0000)
+            .setThumbnail(interaction.user.displayAvatarURL());
+
         await interaction.reply({
-            content: `⚔️ **決闘状** ⚔️\n${opponentUser}！\n${interaction.user} から決闘を申し込まれました。\n\n**ルール:**\n- 1d100のダイス勝負\n- **仕掛け人ハンデ:** 実行側は最大95 & 引き分けは敗北\n- 敗者は [点数差/4] 分間(MAX 15分)のタイムアウト\n- **受諾後はキャンセル不可**`,
+            content: `${opponentUser}`,
+            embeds: [embed],
             components: [row]
         });
 
@@ -248,7 +215,12 @@ async function handleCommands(interaction, client) {
             }
 
             // Accepted
-            await i.update({ content: `⚔️ **決闘開始** ⚔️\n${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`, components: [] });
+            const startEmbed = new EmbedBuilder()
+                .setTitle('⚔️ 決闘開始')
+                .setDescription(`${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`)
+                .setColor(0xFFA500);
+
+            await i.update({ content: null, embeds: [startEmbed], components: [] });
 
             // Cooldown Commit
             cooldowns[`battle_${userId}`] = Date.now();
@@ -317,14 +289,24 @@ async function handleCommands(interaction, client) {
             let penaltyMsg = '';
             if (loser.id === userId) {
                 timeoutMinutes += 2;
-                penaltyMsg = ' (内: 無謀な挑戦ハラキリ +2分)';
+                penaltyMsg = ' (自爆 +2分)';
             }
             const timeoutMs = timeoutMinutes * 60 * 1000;
 
-            resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})${penaltyMsg}`;
-            resultMsg += `\n👑 **報酬:** 勝者に1時間の「上級ロメダ民ロール」が付与されました。`;
+            const resultEmbed = new EmbedBuilder()
+                .setTitle(winner.id === interaction.user.id || winner.id === opponentUser.id ? '🏆 決闘決着' : '⚖️ 引き分け')
+                .setColor(winner.id === interaction.user.id || winner.id === opponentUser.id ? 0xFFD700 : 0x99AAB5)
+                .setDescription(`**勝者:** ${winner}\n**敗者:** ${loser}`)
+                .addFields(
+                    { name: `${interaction.user.username} (攻)`, value: `🎲 **${rollA}**`, inline: true },
+                    { name: `${opponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
+                    { name: '差分', value: `${diff}`, inline: true },
+                    { name: '処罰', value: `🚨 ${timeoutMinutes}分 タイムアウト${penaltyMsg}`, inline: false },
+                    { name: '戦績', value: `${winner}: ${duelData[winner.id].streak}連勝中`, inline: false }
+                )
+                .setThumbnail(winner.user.displayAvatarURL());
 
-            await interaction.followUp(resultMsg);
+            await interaction.followUp({ embeds: [resultEmbed] });
 
             if (loser && loser.moderatable) {
                 try {
@@ -393,8 +375,20 @@ async function handleCommands(interaction, client) {
             new ButtonBuilder().setCustomId('russian_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary)
         );
 
+        const embed = new EmbedBuilder()
+            .setTitle('☠️ ロシアン・デスマッチ')
+            .setDescription(`${opponentUser}！\n${interaction.user} から死のゲームへの招待状です。`)
+            .addFields(
+                { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に撃つ', inline: false },
+                { name: '敗北時', value: '15分 Timeout + Wacchoi(IP)公開', inline: true },
+                { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true }
+            )
+            .setColor(0x000000)
+            .setThumbnail('https://cdn.discordapp.com/emojis/1198240562545954936.webp'); // Assuming a skull emoji or similar exists, or remove if not
+
         await interaction.reply({
-            content: `☠️ **ロシアン・デスマッチ** ☠️\n${opponentUser}！\n${interaction.user} から死のゲームへの招待状です。\n\n**ルール:**\n- 実弾1発のリボルバーを回して交互に撃ちます。\n- **敗者は15分間のタイムアウト + Wacchoi(IP)公開**\n- 勝者は24時間の「上級ロメダ民」`,
+            content: `${opponentUser}`,
+            embeds: [embed],
             components: [row]
         });
 
@@ -424,7 +418,12 @@ async function handleCommands(interaction, client) {
                 new ButtonBuilder().setCustomId('trigger').setLabel('引金を引く').setStyle(ButtonStyle.Danger).setEmoji('💀')
             );
 
-            await i.update({ content: `🎲 **ゲーム開始** 🎲\n最初のターン: <@${state.turn}>\n\n現在のシリンダー: ${state.current + 1}/6`, components: [triggerRow] });
+            const gameEmbed = new EmbedBuilder()
+                .setTitle('🎲 ゲーム開始')
+                .setDescription(`**現在のシリンダー:** ${state.current + 1}/6\n**ターン:** <@${state.turn}>`)
+                .setColor(0x36393f); // Dark Grey
+
+            await i.update({ content: null, embeds: [gameEmbed], components: [triggerRow] });
 
             const gameFilter = m => (m.user.id === userId || m.user.id === opponentUser.id) && m.customId === 'trigger';
             const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
@@ -435,7 +434,13 @@ async function handleCommands(interaction, client) {
                 const isHit = cylinder[state.current] === 1;
 
                 if (isHit) {
-                    await move.update({ content: `💥 **BANG!!!**\n<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝者: ${move.user.id === userId ? opponentUser : interaction.user}**`, components: [] });
+                    const deathEmbed = new EmbedBuilder()
+                        .setTitle('💥 BANG!!!')
+                        .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝者:** ${move.user.id === userId ? opponentUser : interaction.user}`)
+                        .setColor(0x880000)
+                        .setImage('https://media1.tenor.com/m/X215c2D-i_0AAAAC/gun-gunshot.gif'); // Optional: Add visual flair
+
+                    await move.update({ content: null, embeds: [deathEmbed], components: [] });
                     gameCollector.stop('death');
 
                     // Process Death
@@ -451,7 +456,16 @@ async function handleCommands(interaction, client) {
                         const wacchoi = generateWacchoi(loserId);
                         const anonName = getAnonymousName(wacchoi.daily, isElite);
 
-                        interaction.channel.send(`⚰️ **死亡確認**\nID: \`${wacchoi.full}\`\n裏名: **${anonName}**\n処罰: 15分間のタイムアウト`);
+                        const deathReportEmbed = new EmbedBuilder()
+                            .setTitle('⚰️ 死亡確認')
+                            .setColor(0x000000)
+                            .addFields(
+                                { name: 'ID (Wacchoi)', value: `\`${wacchoi.full}\``, inline: true },
+                                { name: '裏名', value: `**${anonName}**`, inline: true },
+                                { name: '処罰', value: '15分間のタイムアウト', inline: false }
+                            )
+                            .setTimestamp();
+                        interaction.channel.send({ embeds: [deathReportEmbed] });
                         if (loserMember.moderatable) {
                             loserMember.timeout(15 * 60 * 1000, 'Russian Deathpoints').catch(() => { });
                         }
@@ -487,7 +501,16 @@ async function handleCommands(interaction, client) {
                     // Miss - Next Turn
                     state.current++;
                     state.turn = state.turn === userId ? opponentUser.id : userId;
-                    await move.update({ content: `💨 **Click...**\nセーフです。\n\n次のターン: <@${state.turn}>\n現在のシリンダー: ${state.current + 1}/6`, components: [triggerRow] });
+                    const nextEmbed = new EmbedBuilder()
+                        .setTitle('💨 Click...')
+                        .setDescription('セーフです。')
+                        .addFields(
+                            { name: '次のターン', value: `<@${state.turn}>`, inline: true },
+                            { name: 'シリンダー', value: `${state.current + 1}/6`, inline: true }
+                        )
+                        .setColor(0x57F287); // Green
+
+                    await move.update({ content: null, embeds: [nextEmbed], components: [triggerRow] });
                 }
             });
 
@@ -823,14 +846,17 @@ async function handleCommands(interaction, client) {
 
                 if (subcommand === 'lock') {
                     await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
-                    await interaction.editReply(`🔒 ${channel} をロック（書き込み禁止）しました。`);
+                    const embed = new EmbedBuilder().setDescription(`🔒 ${channel} をロックしました。`).setColor(0xFF0000);
+                    await interaction.editReply({ content: null, embeds: [embed] });
                 } else if (subcommand === 'unlock') {
                     await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
-                    await interaction.editReply(`🔓 ${channel} のロックを解除しました。`);
+                    const embed = new EmbedBuilder().setDescription(`🔓 ${channel} のロックを解除しました。`).setColor(0x00FF00);
+                    await interaction.editReply({ content: null, embeds: [embed] });
                 } else if (subcommand === 'slowmode') {
                     const seconds = interaction.options.getInteger('seconds');
                     await channel.setRateLimitPerUser(seconds);
-                    await interaction.editReply(`⏱️ ${channel} の低速モードを ${seconds}秒 に設定しました。`);
+                    const embed = new EmbedBuilder().setDescription(`⏱️ ${channel} の低速モードを ${seconds}秒 に設定しました。`).setColor(0x0099FF);
+                    await interaction.editReply({ content: null, embeds: [embed] });
                 } else if (subcommand === 'wipe') {
                     if (channel.id === MAIN_CHANNEL_ID) return interaction.editReply('❌ メインチャンネルはWipeできません。');
 
@@ -859,25 +885,30 @@ async function handleCommands(interaction, client) {
 
                     if (type === 'unban') {
                         await interaction.guild.members.unban(targetUser.id, reason);
-                        await interaction.editReply(`✅ ${targetUser.tag} のBanを解除しました。`);
+                        const embed = new EmbedBuilder().setTitle('✅ Unban Success').setDescription(`${targetUser.tag} のBanを解除しました。`).setColor(0x00FF00);
+                        await interaction.editReply({ content: null, embeds: [embed] });
                     } else {
-                        if (!member) return interaction.editReply('❌ ユーザーがサーバーに見つかりません。');
+                        if (!member) return interaction.editReply({ embeds: [new EmbedBuilder().setTitle('❌ User Not Found').setColor(0xFF0000).setDescription('ユーザーがサーバーに見つかりません。')] });
 
                         if (type === 'timeout') {
                             const duration = interaction.options.getInteger('duration') || 60;
                             await member.timeout(duration * 60 * 1000, reason);
-                            await interaction.editReply(`✅ ${targetUser.tag} を ${duration}分間タイムアウトしました。`);
+                            const embed = new EmbedBuilder().setTitle('✅ Timeout Success').setDescription(`${targetUser.tag} を ${duration}分間タイムアウトしました。`).setColor(0xFFA500);
+                            await interaction.editReply({ content: null, embeds: [embed] });
                         } else if (type === 'untimeout') {
                             await member.timeout(null, reason);
-                            await interaction.editReply(`✅ ${targetUser.tag} のタイムアウトを解除しました。`);
+                            const embed = new EmbedBuilder().setTitle('✅ Untimeout Success').setDescription(`${targetUser.tag} のタイムアウトを解除しました。`).setColor(0x00FF00);
+                            await interaction.editReply({ content: null, embeds: [embed] });
                         } else if (type === 'kick') {
-                            if (!member.kickable) return interaction.editReply('❌ このユーザーをKickできません。');
+                            if (!member.kickable) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ このユーザーをKickできません。')] });
                             await member.kick(reason);
-                            await interaction.editReply(`✅ ${targetUser.tag} をKickしました。`);
+                            const embed = new EmbedBuilder().setTitle('✅ Kick Success').setDescription(`${targetUser.tag} をKickしました。`).setColor(0xFFA500);
+                            await interaction.editReply({ content: null, embeds: [embed] });
                         } else if (type === 'ban') {
-                            if (!member.bannable) return interaction.editReply('❌ このユーザーをBanできません。');
+                            if (!member.bannable) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ このユーザーをBanできません。')] });
                             await member.ban({ reason });
-                            await interaction.editReply(`✅ ${targetUser.tag} をBanしました。`);
+                            const embed = new EmbedBuilder().setTitle('✅ Ban Success').setDescription(`${targetUser.tag} をBanしました。`).setColor(0xFF0000);
+                            await interaction.editReply({ content: null, embeds: [embed] });
                         }
                     }
                 } else if (subcommand === 'nick') {
@@ -927,19 +958,17 @@ async function handleCommands(interaction, client) {
                     return interaction.reply({ content: '❌ 権限がありません。', ephemeral: true });
                 }
                 const ActivityTracker = require('../features/activityTracker');
-                await interaction.reply({ content: '✅ アクティビティログのBackfill（過去ログ取得）を手動開始します...', ephemeral: true });
+                await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription('✅ アクティビティログのBackfill（過去ログ取得）を手動開始します...')], ephemeral: true });
 
                 ActivityTracker.backfill(interaction.client).catch(e => {
                     console.error('Backfill Error:', e);
                 });
-            }
-
-            else if (interaction.commandName === 'admin_logistics') {
+            } else if (interaction.commandName === 'admin_logistics') {
                 if (subcommand === 'move_all') {
                     const fromCh = interaction.options.getChannel('from');
                     const toCh = interaction.options.getChannel('to');
                     if (fromCh.type !== ChannelType.GuildVoice || toCh.type !== ChannelType.GuildVoice) {
-                        return interaction.editReply('❌ 音声チャンネルを指定してください。');
+                        return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ 音声チャンネルを指定してください。')] });
                     }
                     const members = fromCh.members;
                     let count = 0;
@@ -947,25 +976,24 @@ async function handleCommands(interaction, client) {
                         await m.voice.setChannel(toCh);
                         count++;
                     }
-                    await interaction.editReply(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`);
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`)] });
                 } else if (subcommand === 'say') {
                     const channel = interaction.options.getChannel('channel');
-                    if (!channel.isTextBased()) return interaction.editReply('❌ テキストチャンネルを指定してください。');
+                    if (!channel.isTextBased()) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ テキストチャンネルを指定してください。')] });
                     await channel.send(interaction.options.getString('content'));
-                    await interaction.editReply(`✅ ${channel} に発言しました。`);
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${channel} に発言しました。`)] });
                 } else if (subcommand === 'create') {
-                    // ... create logic is fine usually, assuming simpler block
                     const name = interaction.options.getString('name');
                     const cType = interaction.options.getString('type') === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
                     const catId = interaction.options.getString('category');
                     const opts = { name, type: cType };
                     if (catId) opts.parent = catId;
                     const newCh = await interaction.guild.channels.create(opts);
-                    await interaction.editReply(`✅ チャンネル ${newCh} を作成しました。`);
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ チャンネル ${newCh} を作成しました。`)] });
                 } else if (subcommand === 'delete') {
                     const ch = interaction.options.getChannel('channel');
                     await ch.delete();
-                    await interaction.editReply(`✅ チャンネル ${ch.name} を削除しました。`);
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ チャンネル ${ch.name} を削除しました。`)] });
                 } else if (subcommand === 'purge') {
                     const channel = interaction.options.getChannel('channel') || interaction.channel;
                     const amount = interaction.options.getInteger('amount');
@@ -978,10 +1006,10 @@ async function handleCommands(interaction, client) {
                     if (keyword) filtered = filtered.filter(m => m.content.includes(keyword));
 
                     const toDelete = filtered.first(amount);
-                    if (!toDelete || toDelete.length === 0) return interaction.editReply('対象なし');
+                    if (!toDelete || toDelete.length === 0) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setDescription('対象なし')] });
 
                     await channel.bulkDelete(toDelete, true);
-                    await interaction.editReply(`✅ ${toDelete.length}件削除しました。`);
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${toDelete.length}件削除しました。`)] });
                 } else if (subcommand === 'role') {
                     const target = interaction.options.getUser('target');
                     const role = interaction.options.getRole('role');
@@ -989,12 +1017,12 @@ async function handleCommands(interaction, client) {
                     const member = await interaction.guild.members.fetch(target.id);
                     if (action === 'give') await member.roles.add(role);
                     else await member.roles.remove(role);
-                    await interaction.editReply(`✅ ${target.tag} に ${role.name} を ${action} しました。`);
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${target.tag} に ${role.name} を ${action} しました。`)] });
                 }
             }
         } catch (error) {
             console.error('Admin Command Error:', error);
-            await interaction.editReply(`⚠ エラーが発生しました: ${error.message}`);
+            await interaction.editReply({ embeds: [new EmbedBuilder().setTitle(' Admin Error').setColor(0xFF0000).setDescription(`⚠ エラーが発生しました: ${error.message}`)] });
         }
     }
 }
