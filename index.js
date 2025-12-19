@@ -157,6 +157,18 @@ client.once('ready', async () => {
       description: '【運試し】10分間のタイムアウトを賭けたロシアンルーレット（世代ロール限定）'
     },
     {
+      name: 'duel',
+      description: '【決闘】世代ロール持ちに決闘を申し込みます（敗者は即座にタイムアウト）',
+      options: [
+        {
+          name: 'opponent',
+          description: '決闘相手（世代ロール必須）',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
       name: 'event_create',
       description: 'イベント用チャンネルを作成し、告知を行います',
       options: [

@@ -24,7 +24,7 @@ const bumpCooldowns = new Map();
 const randomMentionCooldowns = new Map();
 const processingCommands = new Set();
 
-const SUPER_ADMIN_ID = '1122179390403510335';
+const SUPER_ADMIN_ID = '1198230780032323594';
 
 // 権限チェックヘルパー
 async function checkAdmin(interaction) {
@@ -235,6 +235,128 @@ async function handleCommands(interaction, client) {
 
             await interaction.editReply(`💨 **Click...**\n不発でした。今日の死者はいないようです...`);
         }
+        return;
+    }
+
+    if (interaction.commandName === 'duel') {
+        const fs = require('fs');
+        const path = require('path');
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+        const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
+
+        let cooldowns = {};
+        if (fs.existsSync(COOLDOWN_FILE)) {
+            try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { }
+        }
+
+        const userId = interaction.user.id;
+        const now = Date.now();
+        const lastUsed = cooldowns[`duel_${userId}`] || 0;
+        const COOLDOWN_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 Days
+
+        if (now - lastUsed < COOLDOWN_DURATION) {
+            const remaining = COOLDOWN_DURATION - (now - lastUsed);
+            const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+            return interaction.reply({ content: `⛔ 決闘は神聖な儀式です。週に1回しか行えません。\n残り: ${days}日`, ephemeral: true });
+        }
+
+        const opponentUser = interaction.options.getUser('opponent');
+        if (opponentUser.id === userId) return interaction.reply({ content: '自分自身と決闘することはできません（それはただの自害です）。', ephemeral: true });
+        if (opponentUser.bot) return interaction.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
+
+        const member = interaction.member;
+        const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+
+        if (!opponentMember) return interaction.reply({ content: '対戦相手の情報を取得できませんでした。', ephemeral: true });
+
+        // Role Check logic (Reuse regex)
+        const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+        const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
+
+        const isChallengerEligible = member.roles.cache.some(r => romanRegex.test(r.name)) || member.roles.cache.has(currentGenRoleId);
+        const isOpponentEligible = opponentMember.roles.cache.some(r => romanRegex.test(r.name)) || opponentMember.roles.cache.has(currentGenRoleId);
+
+        if (!isChallengerEligible) return interaction.reply({ content: '⛔ あなたは決闘の資格（世代ロール）を持っていません。', ephemeral: true });
+        if (!isOpponentEligible) return interaction.reply({ content: '⛔ 対戦相手は決闘の資格（世代ロール）を持っていません。', ephemeral: true });
+
+        // Challenge UI
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('duel_accept').setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
+            new ButtonBuilder().setCustomId('duel_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary).setEmoji('🏳️')
+        );
+
+        await interaction.reply({
+            content: `⚔️ **決闘状** ⚔️\n${opponentUser}！\n${interaction.user} から決闘を申し込まれました。\n\n**ルール:**\n- 1d100のダイス勝負\n- 敗者は [点数差/3] 分間(MAX 30分)のタイムアウト\n- **受諾後はキャンセル不可**`,
+            components: [row]
+        });
+
+        const filter = i => i.user.id === opponentUser.id && (i.customId === 'duel_accept' || i.customId === 'duel_deny');
+        const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+
+        collector.on('collect', async i => {
+            if (i.customId === 'duel_deny') {
+                await i.update({ content: `🏳️ ${opponentUser} は決闘から逃亡しました...`, components: [] });
+                return;
+            }
+
+            // Accepted
+            await i.update({ content: `⚔️ **決闘開始** ⚔️\n${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`, components: [] });
+
+            // Cooldown Commit (Challenger pays) - saved immediately on start to prevent abuse
+            cooldowns[`duel_${userId}`] = Date.now();
+            try {
+                fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
+                require('../features/persistence').save(client);
+            } catch (e) { }
+
+            await new Promise(r => setTimeout(r, 2000));
+
+            const rollA = Math.floor(Math.random() * 100) + 1;
+            const rollB = Math.floor(Math.random() * 100) + 1;
+
+            let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
+            let loser = null;
+            let diff = 0;
+
+            if (rollA > rollB) {
+                diff = rollA - rollB;
+                loser = opponentMember;
+                resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
+            } else if (rollB > rollA) {
+                diff = rollB - rollA;
+                loser = member;
+                resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
+            } else {
+                resultMsg += `🤝 **引き分け**\n両者生還です。`;
+                await interaction.followUp(resultMsg);
+                return;
+            }
+
+            // Calc Timeout
+            const timeoutMinutes = Math.min(30, Math.ceil(diff / 3)); // Max 30, scaled
+            const timeoutMs = timeoutMinutes * 60 * 1000;
+
+            resultMsg += `\n🚑 **処罰:** ${timeoutMinutes}分間のタイムアウト (点数差: ${diff})`;
+
+            await interaction.followUp(resultMsg);
+
+            if (loser && loser.moderatable) {
+                try {
+                    await loser.timeout(timeoutMs, `Dulled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`);
+                    await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
+                } catch (e) {
+                    await interaction.channel.send(`⚠️ 敗者への処罰中にエラーが発生しました: ${e.message}`);
+                }
+            } else if (loser) {
+                await interaction.channel.send(`⚠️ ${loser} は権限により守られました（処罰無効）。`);
+            }
+        });
+
+        collector.on('end', collected => {
+            if (collected.size === 0) {
+                interaction.editReply({ content: `⌛ 時間切れにより決闘は無効となりました。`, components: [] }).catch(() => { });
+            }
+        });
         return;
     }
 
