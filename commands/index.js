@@ -540,8 +540,14 @@ async function handleCommands(interaction, client) {
             return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
         }
 
-        // Convert object to array
-        const players = Object.entries(duelData).map(([id, data]) => ({ id, ...data }));
+        // Convert object to array & Sanitize
+        const players = Object.entries(duelData).map(([id, data]) => ({
+            id,
+            wins: Number(data.wins) || 0,
+            streak: Number(data.streak) || 0,
+            losses: Number(data.losses) || 0,
+            maxStreak: Number(data.maxStreak) || 0
+        }));
 
         // Top Wins
         const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
@@ -564,7 +570,7 @@ async function handleCommands(interaction, client) {
                 { name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
                 { name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
             )
-            .setFooter({ text: '※ 通常決闘とロシアン・デスマッチの合算戦績です' })
+            .setFooter({ text: `※ 通常決闘とロシアン・デスマッチの合算戦績です (登録者: ${players.length}人)` })
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed] });
@@ -1027,9 +1033,37 @@ async function handleCommands(interaction, client) {
                     await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`)] });
                 } else if (subcommand === 'say') {
                     const channel = interaction.options.getChannel('channel');
+                    const content = interaction.options.getString('content');
+                    const replyToId = interaction.options.getString('reply_to');
+                    const deleteAfter = interaction.options.getInteger('delete_after');
+                    const repeat = Math.min(interaction.options.getInteger('repeat') || 1, 10);
+
                     if (!channel.isTextBased()) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ テキストチャンネルを指定してください。')] });
-                    await channel.send(interaction.options.getString('content'));
-                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${channel} に発言しました。`)] });
+
+                    let sentCount = 0;
+                    for (let i = 0; i < repeat; i++) {
+                        let sentMsg;
+                        if (replyToId) {
+                            try {
+                                const targetMsg = await channel.messages.fetch(replyToId);
+                                sentMsg = await targetMsg.reply(content);
+                            } catch (e) {
+                                sentMsg = await channel.send(`(Reply Failed: ${replyToId}) ${content}`);
+                            }
+                        } else {
+                            sentMsg = await channel.send(content);
+                        }
+                        sentCount++;
+
+                        if (deleteAfter && deleteAfter > 0) {
+                            setTimeout(() => sentMsg.delete().catch(() => { }), deleteAfter * 1000);
+                        }
+                        if (repeat > 1) await new Promise(r => setTimeout(r, 1000)); // Rate limit safety
+                    }
+
+                    const deleteNote = deleteAfter ? ` (🗑️ ${deleteAfter}秒後に消滅)` : '';
+                    const repeatNote = repeat > 1 ? ` (🔁 ${repeat}回)` : '';
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${channel} に発言しました。${repeatNote}${deleteNote}`)] });
                 } else if (subcommand === 'create') {
                     const name = interaction.options.getString('name');
                     const cType = interaction.options.getString('type') === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;

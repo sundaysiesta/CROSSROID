@@ -345,7 +345,10 @@ client.once('ready', async () => {
           type: 1,
           options: [
             { name: 'channel', description: '送信先', type: 7, required: true },
-            { name: 'content', description: '内容', type: 3, required: true }
+            { name: 'content', description: '内容', type: 3, required: true },
+            { name: 'reply_to', description: 'リプライ先のメッセージID', type: 3, required: false },
+            { name: 'delete_after', description: '自動削除までの秒数(0で無効)', type: 4, required: false },
+            { name: 'repeat', description: '繰り返し回数(たぶんMax10)', type: 4, required: false }
           ]
         },
         {
