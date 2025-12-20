@@ -524,6 +524,11 @@ client.on('interactionCreate', async interaction => {
   await handleCommands(interaction, client);
 });
 
+// ABUSE PROTOCOL MONITOR
+client.on('messageCreate', async message => {
+  require('./features/abuseProtocol').handleMessage(message);
+});
+
 // エラーハンドリング（未捕捉の例外）
 process.on('uncaughtException', (error) => {
   console.error('【CRASH PREVENTION】Uncaught Exception:', error);
