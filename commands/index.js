@@ -210,12 +210,12 @@ async function handleCommands(interaction, client) {
                 if (i.customId === 'duel_deny') {
                     await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [] });
                     // Penalty for cowardice: 5 min timeout
-                    if (opponentMember && opponentMember.moderatable) {
+                    /*if (opponentMember && opponentMember.moderatable) {
                         try {
                             await opponentMember.timeout(5 * 60 * 1000, 'Duel Cowardice');
                             await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
                         } catch (e) { }
-                    }
+                    }*/
                     return;
                 }
 
@@ -455,13 +455,13 @@ async function handleCommands(interaction, client) {
                 if (i.customId === 'russian_deny') {
                     await i.update({ content: '🏳️ デスマッチは回避されました。', components: [] });
                     // Penalty for cowardice: 5 min timeout
-                    const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                    /*const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
                     if (opponentMember && opponentMember.moderatable) {
                         try {
                             await opponentMember.timeout(5 * 60 * 1000, 'Russian Cowardice');
                             await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
                         } catch (e) { }
-                    }
+                    }*/
                     return;
                 }
 
