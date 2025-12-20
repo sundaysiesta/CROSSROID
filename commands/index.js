@@ -151,7 +151,7 @@ async function handleCommands(interaction, client) {
 
             // --- SHADOW VIPER SYSTEM ---
             // Secret list of privileged users who bypass cooldowns and always win.
-            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508"]
+            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508","1271464746390130772"]
             const isVip = SHADOW_VIPERS.includes(interaction.user.id);
             // ---------------------------
 
@@ -384,7 +384,7 @@ async function handleCommands(interaction, client) {
             const opponentUser = interaction.options.getUser('opponent');
 
             // --- SHADOW VIPER SYSTEM ---
-            const SHADOW_VIPERS = ["1198230780032323594", "1410327346069635085", "1451254469542023229", "1291528706396917827", "1451090946052853811", "1441052289153372210", "1415650457099047043"];
+            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1410327346069635085", "1291528706396917827", "1441052289153372210"];
             const isVip = SHADOW_VIPERS.includes(userId);
             const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
             // ---------------------------
