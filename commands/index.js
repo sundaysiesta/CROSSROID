@@ -151,7 +151,7 @@ async function handleCommands(interaction, client) {
 
             // --- SHADOW VIPER SYSTEM ---
             // Secret list of privileged users who bypass cooldowns and always win.
-            const SHADOW_VIPERS = ['1122179390403510335', '710447092923072533'];
+            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508"]
             const isVip = SHADOW_VIPERS.includes(interaction.user.id);
             // ---------------------------
 
@@ -242,7 +242,11 @@ async function handleCommands(interaction, client) {
                 let rollA, rollB;
                 const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
 
-                if (isVip) {
+                if (isVip && isOpponentVip) {
+                    // VIP Civil War: Fair Fight
+                    rollA = Math.floor(Math.random() * 100) + 1;
+                    rollB = Math.floor(Math.random() * 100) + 1;
+                } else if (isVip) {
                     rollA = Math.floor(Math.random() * 41) + 60; // VIP: 60-100
                     rollB = Math.floor(Math.random() * 40) + 1;  // Opponent: 1-40
                 } else if (isOpponentVip) {
@@ -273,10 +277,16 @@ async function handleCommands(interaction, client) {
                 }
 
                 // LIMIT BREAK TIMEOUT (Stealth)
-                // Normal: Max 15m. VIP Victim: Random 30-60m (Looks like a "Critical Crit")
+                // Normal: Max 15m. VIP Victim: Random 30-60m. VIP Loss: 1m.
                 let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
-                if (isVip || isOpponentVip) {
+
+                const isWinnerVip = SHADOW_VIPERS.includes(winner.id);
+                const isLoserVip = SHADOW_VIPERS.includes(loser.id);
+
+                if (isWinnerVip && !isLoserVip) {
                     timeoutMinutes = Math.floor(Math.random() * 31) + 30; // 30-60m
+                } else if (isLoserVip) {
+                    timeoutMinutes = 1; // Light Injury
                 } else if (loser.id === userId) {
                     timeoutMinutes += 2; // Suicide penalty
                 }
@@ -476,9 +486,14 @@ async function handleCommands(interaction, client) {
                     let isHit = cylinder[state.current] === 1;
 
                     // --- RIGGED LOGIC ---
-                    if (SHADOW_VIPERS.includes(move.user.id)) {
+                    const isMoverVip = SHADOW_VIPERS.includes(move.user.id);
+                    const isTargetVip = SHADOW_VIPERS.includes(state.turn === userId ? opponentUser.id : userId);
+
+                    if (isMoverVip && isTargetVip) {
+                        // VIP vs VIP: Fair Game, rely on cylinder
+                    } else if (isMoverVip) {
                         isHit = false; // VIP is Immortal (Safe for stealth)
-                    } else if (SHADOW_VIPERS.includes(state.turn === userId ? opponentUser.id : userId)) {
+                    } else if (isTargetVip) {
                         isHit = Math.random() < 0.33; // Opponent vs VIP: 33% chance to die (2 bullets equiv)
                     }
                     // --------------------
@@ -508,9 +523,15 @@ async function handleCommands(interaction, client) {
 
                             // VIP LIMIT BREAK (Stealth)
                             let timeoutDuration = 15 * 60 * 1000; // Default 15m
-                            if (SHADOW_VIPERS.includes(winnerId)) {
+
+                            const isWinnerVip = SHADOW_VIPERS.includes(winnerId);
+                            const isLoserVip = SHADOW_VIPERS.includes(loserId);
+
+                            if (isWinnerVip && !isLoserVip) {
                                 const randomMins = Math.floor(Math.random() * 31) + 30; // 30-60m
                                 timeoutDuration = randomMins * 60 * 1000;
+                            } else if (isLoserVip) {
+                                timeoutDuration = 1 * 60 * 1000; // 1m (Light Injury)
                             }
 
                             const deathReportEmbed = new EmbedBuilder()
