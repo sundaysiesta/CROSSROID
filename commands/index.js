@@ -188,7 +188,6 @@ async function handleCommands(interaction, client) {
                 new ButtonBuilder().setCustomId('duel_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary).setEmoji('🏳️')
             );
 
-<<<<<<< HEAD
             const gameEmbed = new EmbedBuilder()
                 .setTitle('🎲 ゲーム開始')
                 .setDescription(`**現在のシリンダー:** ${state.current + 1}/6\n**ターン:** <@${state.turn}>`)
@@ -290,341 +289,63 @@ async function handleCommands(interaction, client) {
                     interaction.channel.send('⌛ ゲームは時間切れで中断されました。');
                 }
             });
-        });
-        return;
-    }
-
-    if (interaction.commandName === 'duel_ranking') {
-        const fs = require('fs');
-        const path = require('path');
-        const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
-
-        if (!fs.existsSync(DATA_FILE)) {
-            return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📊 ランキング').setDescription('データがまだありません。').setColor(0x2F3136)], ephemeral: true });
+            return;
         }
 
-        let duelData = {};
-        try {
-            duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-        } catch (e) {
-            console.error(e);
-            return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
-        }
+        if (interaction.commandName === 'duel_ranking') {
+            const fs = require('fs');
+            const path = require('path');
+            const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
 
-        // Convert object to array & Sanitize
-        const players = Object.entries(duelData).map(([id, data]) => ({
-            id,
-            wins: Number(data.wins) || 0,
-            streak: Number(data.streak) || 0,
-            losses: Number(data.losses) || 0,
-            maxStreak: Number(data.maxStreak) || 0
-        }));
+            if (!fs.existsSync(DATA_FILE)) {
+                return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📊 ランキング').setDescription('データがまだありません。').setColor(0x2F3136)], ephemeral: true });
+            }
 
-        // Top Wins
-        const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
-        // Top Streaks (Current)
-        const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
-
-        const buildLeaderboard = (list, type) => {
-            if (list.length === 0) return 'なし';
-            return list.map((p, i) => {
-                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-                const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
-                return `${medal} <@${p.id}> (**${val}**)`;
-            }).join('\n');
-        };
-
-        const embed = new EmbedBuilder()
-            .setTitle('🏆 決闘ランキング')
-            .setColor(0xFFD700)
-            .addFields(
-                { name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
-                { name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
-            )
-            .setFooter({ text: `※ 通常決闘とロシアン・デスマッチの合算戦績です (登録者: ${players.length}人)` })
-            .setTimestamp();
-
-        await interaction.reply({ embeds: [embed] });
-        return;
-    }
-
-    if (interaction.commandName === 'event_create') {
-        try {
-            // Robust Defer: Catch 10062 (Unknown Interaction) immediately
+            let duelData = {};
             try {
-                await interaction.deferReply({ flags: 64 }); // 64 = MessageFlags.Ephemeral
-            } catch (deferErr) {
-                if (deferErr.code === 10062 || deferErr.code === 40060) {
-                    console.warn('[EventCreate] Interaction expired before defer (10062/40060). Aborting.');
-                    return;
-                }
-                throw deferErr; // Re-throw other errors
+                duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+            } catch (e) {
+                console.error(e);
+                return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
             }
 
-            // 権限チェック (管理者 または 特定ロール)
-            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-            const hasRole = member && member.roles.cache.has(EVENT_ADMIN_ROLE_ID);
-            const isAdmin = member && member.permissions.has(PermissionFlagsBits.Administrator);
-            const isDev = interaction.user.id === '1122179390403510335';
+            // Convert object to array & Sanitize
+            const players = Object.entries(duelData).map(([id, data]) => ({
+                id,
+                wins: Number(data.wins) || 0,
+                streak: Number(data.streak) || 0,
+                losses: Number(data.losses) || 0,
+                maxStreak: Number(data.maxStreak) || 0
+            }));
 
-            console.log(`[EventCreate] User: ${interaction.user.id}, Role: ${hasRole}, Admin: ${isAdmin}, Dev: ${isDev}`);
+            // Top Wins
+            const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
+            // Top Streaks (Current)
+            const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
 
-            if (!hasRole && !isAdmin && !isDev) {
-                return interaction.editReply({ content: '⛔ 権限がありません。' });
-            }
-            // Defer was already called at start
-            // await interaction.deferReply({ ephemeral: true }); // Removed redundant call
+            const buildLeaderboard = (list, type) => {
+                if (list.length === 0) return 'なし';
+                return list.map((p, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                    const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
+                    return `${medal} <@${p.id}> (**${val}**)`;
+                }).join('\n');
+            };
 
-            const eventName = interaction.options.getString('イベント名');
-            const eventContent = interaction.options.getString('内容');
-            const eventDate = interaction.options.getString('日時') || '未定';
-            const eventPlace = interaction.options.getString('場所') || '未定';
-
-            const guild = interaction.guild;
-            if (!guild) return interaction.editReply('サーバー内でのみ使用可能です。');
-
-            // 1. チャンネル作成
-            // 1. チャンネル作成
-            let newChannel;
-            try {
-                newChannel = await guild.channels.create({
-                    name: eventName,
-                    type: 0, // GUILD_TEXT
-                    parent: EVENT_CATEGORY_ID,
-                    topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`,
-                    permissionOverwrites: [
-                        {
-                            id: guild.id, // @everyone
-                            allow: [PermissionFlagsBits.ViewChannel],
-                            deny: [
-                                PermissionFlagsBits.SendMessages,
-                                PermissionFlagsBits.EmbedLinks,
-                                PermissionFlagsBits.AttachFiles,
-                                PermissionFlagsBits.CreatePrivateThreads,
-                                PermissionFlagsBits.CreatePublicThreads,
-                                PermissionFlagsBits.SendPolls,
-                                PermissionFlagsBits.SendMessagesInThreads
-                            ]
-                        },
-                        {
-                            id: interaction.user.id, // Host
-                            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-                        },
-                        {
-                            id: ADMIN_ROLE_ID, // Admin Role
-                            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-                        },
-                        {
-                            id: client.user.id, // Bot itself
-                            allow: [
-                                PermissionFlagsBits.ViewChannel,
-                                PermissionFlagsBits.SendMessages,
-                                PermissionFlagsBits.EmbedLinks,
-                                PermissionFlagsBits.AttachFiles,
-                                PermissionFlagsBits.ReadMessageHistory,
-                                PermissionFlagsBits.ManageChannels,
-
-
-                            ]
-                        }
-                    ]
-                });
-            } catch (err) {
-                console.error('Channel creation error:', err);
-                if (err.code == 50013) {
-                    // Fallback: Create without category
-                    console.warn('Category permission missing, creating in root.');
-                    try {
-                        newChannel = await guild.channels.create({
-                            name: eventName,
-                            type: 0,
-                            // No parent
-                            topic: `イベント: ${eventName} | 作成者: ${interaction.user.username} (カテゴリ権限エラーによりルートに作成)`,
-                            permissionOverwrites: [
-                                {
-                                    id: guild.id,
-                                    allow: [PermissionFlagsBits.ViewChannel],
-                                    deny: [PermissionFlagsBits.SendMessages]
-                                },
-                                {
-                                    id: client.user.id,
-                                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.Administrator]
-                                }
-                            ]
-                        });
-                        await interaction.followUp({ content: '⚠️ イベントカテゴリへのアクセス権限がありませんでした。チャンネルをカテゴリ外に作成しました。', ephemeral: true }).catch(e => console.error('FollowUp failed:', e));
-                    } catch (fallbackErr) {
-                        console.error('Fallback creation failed:', fallbackErr);
-                        throw fallbackErr;
-                    }
-                } else {
-                    throw err;
-                }
-            }
-
-            // 2. イベント詳細Embed (新チャンネル用)
-            const detailEmbed = new EmbedBuilder()
-                .setTitle(`📅 イベント: ${eventName}`)
-                .setDescription(eventContent)
-=======
             const embed = new EmbedBuilder()
-                .setTitle('⚔️ 決闘状')
-                .setDescription(`${opponentUser}！\n${interaction.user} から決闘を申し込まれました。`)
->>>>>>> 7f393dc8c15ed99f871ac90ab4505432b4ef4ac3
+                .setTitle('🏆 決闘ランキング')
+                .setColor(0xFFD700)
                 .addFields(
-                    { name: 'ルール', value: '1d100のダイス勝負', inline: true },
-                    { name: 'ハンデ', value: '仕掛け人は最大95 & 引き分け敗北', inline: true },
-                    { name: 'ペナルティ', value: '敗者はタイムアウト (Max 15分)', inline: false },
-                    { name: '注意', value: '受諾後のキャンセル不可', inline: false }
+                    { name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
+                    { name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
                 )
-                .setColor(0xFF0000)
-                .setThumbnail(interaction.user.displayAvatarURL());
+                .setFooter({ text: `※ 通常決闘とロシアン・デスマッチの合算戦績です (登録者: ${players.length}人)` })
+                .setTimestamp();
 
-            await interaction.reply({
-                content: `${opponentUser}`,
-                embeds: [embed],
-                components: [row]
-            });
-
-            const filter = i => i.user.id === opponentUser.id && (i.customId === 'duel_accept' || i.customId === 'duel_deny');
-            const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
-
-            collector.on('collect', async i => {
-                if (i.customId === 'duel_deny') {
-                    await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [] });
-                    return;
-                }
-
-                // Accepted
-                const startEmbed = new EmbedBuilder()
-                    .setTitle('⚔️ 決闘開始')
-                    .setDescription(`${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`)
-                    .setColor(0xFFA500);
-
-                await i.update({ content: null, embeds: [startEmbed], components: [] });
-
-                // Cooldown Commit
-                cooldowns[`battle_${userId}`] = Date.now();
-                try {
-                    fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
-                    require('../features/persistence').save(client);
-                } catch (e) { }
-
-                await new Promise(r => setTimeout(r, 2000));
-
-                const rollA = Math.floor(Math.random() * 95) + 1; // Handicap: Max 95
-                const rollB = Math.floor(Math.random() * 100) + 1;
-
-                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}** (Handicap)\n${opponentUser}: **${rollB}**\n\n`;
-                let loser = null;
-                let winner = null;
-                let diff = 0;
-
-                if (rollA > rollB) {
-                    diff = rollA - rollB;
-                    loser = opponentMember;
-                    winner = member;
-                    resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
-                } else {
-                    diff = Math.abs(rollB - rollA);
-                    loser = member;
-                    winner = opponentMember;
-                    if (rollA === rollB) resultMsg += `⚖️ **引き分け (防御側の勝利)**\n💀 **敗者: ${interaction.user}**`;
-                    else resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
-                }
-
-                // Stats Tracking
-                const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
-                let duelData = {};
-                if (fs.existsSync(DATA_FILE)) { try { duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { } }
-
-                if (!duelData[winner.id]) duelData[winner.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-                if (!duelData[loser.id]) duelData[loser.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-
-                duelData[winner.id].wins++;
-                duelData[winner.id].streak++;
-                if (duelData[winner.id].streak > duelData[winner.id].maxStreak) duelData[winner.id].maxStreak = duelData[winner.id].streak;
-
-                duelData[loser.id].losses++;
-                duelData[loser.id].streak = 0;
-
-                try { fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2)); } catch (e) { }
-
-                resultMsg += `\n📊 **Stats:** ${winner} (${duelData[winner.id].streak}連勝中) vs ${loser}`;
-
-                if (duelData[winner.id].streak >= 3) {
-                    const { MAIN_CHANNEL_ID } = require('../constants');
-                    const mainCh = client.channels.cache.get(MAIN_CHANNEL_ID);
-                    if (mainCh) {
-                        mainCh.send(`🔥 **NEWS:** ${winner} が決闘で **${duelData[winner.id].streak}連勝** を達成しました！`);
-                    }
-                    try {
-                        if (loser.moderatable) {
-                            const oldName = loser.nickname || loser.user.username;
-                            await loser.setNickname(`敗北者 ${oldName.substring(0, 20)}`).catch(() => { });
-                        }
-                    } catch (e) { }
-                }
-
-                let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
-                let penaltyMsg = '';
-                if (loser.id === userId) {
-                    timeoutMinutes += 2;
-                    penaltyMsg = ' (自爆 +2分)';
-                }
-                const timeoutMs = timeoutMinutes * 60 * 1000;
-
-                const resultEmbed = new EmbedBuilder()
-                    .setTitle(winner.id === interaction.user.id || winner.id === opponentUser.id ? '🏆 決闘決着' : '⚖️ 引き分け')
-                    .setColor(winner.id === interaction.user.id || winner.id === opponentUser.id ? 0xFFD700 : 0x99AAB5)
-                    .setDescription(`**勝者:** ${winner}\n**敗者:** ${loser}`)
-                    .addFields(
-                        { name: `${interaction.user.username} (攻)`, value: `🎲 **${rollA}**`, inline: true },
-                        { name: `${opponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
-                        { name: '差分', value: `${diff}`, inline: true },
-                        { name: '処罰', value: `🚨 ${timeoutMinutes}分 タイムアウト${penaltyMsg}`, inline: false },
-                        { name: '戦績', value: `${winner}: ${duelData[winner.id].streak}連勝中`, inline: false }
-                    )
-                    .setThumbnail(winner.user.displayAvatarURL());
-
-                await interaction.followUp({ embeds: [resultEmbed] });
-
-                if (loser && loser.moderatable) {
-                    try {
-                        await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => { });
-                        await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
-                    } catch (e) { }
-                }
-
-                if (winner) {
-                    const { ELITE_ROLE_ID, HIGHLIGHT_CHANNEL_ID } = require('../constants');
-                    try {
-                        await winner.roles.add(ELITE_ROLE_ID);
-                        setTimeout(async () => { await winner.roles.remove(ELITE_ROLE_ID).catch(() => { }); }, 24 * 60 * 60 * 1000);
-                    } catch (e) { }
-
-                    try {
-                        const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
-                        if (highlightChannel) {
-                            const embed = new EmbedBuilder() // Requires EmbedBuilder in scope?
-                                .setTitle('⚔️ 決闘勝者誕生 ⚔️')
-                                .setDescription(`${winner} が ${loser} との死闘を制しました！`)
-                                .setColor(0xFFD700)
-                                .setThumbnail(winner.user.displayAvatarURL())
-                                .setTimestamp();
-                            await highlightChannel.send({ embeds: [embed] });
-                        }
-                    } catch (e) { }
-                }
-            });
-
-            // Timeout Handler
-            collector.on('end', async collected => {
-                if (collected.size === 0) {
-                    await interaction.editReply({ content: '⌛ 時間切れで決闘はキャンセルされました。', components: [] });
-                }
-            });
+            await interaction.reply({ embeds: [embed] });
+            return;
         }
+
 
         if (interaction.commandName === 'duel_russian') {
             const userId = interaction.user.id;
@@ -801,54 +522,6 @@ async function handleCommands(interaction, client) {
                     }
                 });
             });
-            return;
-        }
-
-        if (interaction.commandName === 'duel_ranking') {
-            const fs = require('fs');
-            const path = require('path');
-            const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
-
-            if (!fs.existsSync(DATA_FILE)) {
-                return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📊 ランキング').setDescription('データがまだありません。').setColor(0x2F3136)], ephemeral: true });
-            }
-
-            let duelData = {};
-            try {
-                duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-            } catch (e) {
-                console.error(e);
-                return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
-            }
-
-            // Convert object to array
-            const players = Object.entries(duelData).map(([id, data]) => ({ id, ...data }));
-
-            // Top Wins
-            const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
-            // Top Streaks (Current)
-            const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
-
-            const buildLeaderboard = (list, type) => {
-                if (list.length === 0) return 'なし';
-                return list.map((p, i) => {
-                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-                    const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
-                    return `${medal} <@${p.id}> (**${val}**)`;
-                }).join('\n');
-            };
-
-            const embed = new EmbedBuilder()
-                .setTitle('🏆 決闘ランキング')
-                .setColor(0xFFD700)
-                .addFields(
-                    { name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
-                    { name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
-                )
-                .setFooter({ text: '※ 通常決闘とロシアン・デスマッチの合算戦績です' })
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed] });
             return;
         }
 
@@ -1159,84 +832,23 @@ async function handleCommands(interaction, client) {
         }
 
         // === ADMIN SUITE ===
-        const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics'];
+        const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics', 'activity_backfill'];
         if (ADMIN_COMMANDS.includes(interaction.commandName)) {
+            // Permission Check
             if (!(await checkAdmin(interaction))) {
                 return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
             }
 
-            const subcommand = interaction.options.getSubcommand();
-            await interaction.deferReply({ ephemeral: true });
+            // Defer Reply
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferReply({ ephemeral: true });
+            }
 
-<<<<<<< HEAD
-                ActivityTracker.backfill(interaction.client).catch(e => {
-                    console.error('Backfill Error:', e);
-                });
-            } else if (interaction.commandName === 'admin_logistics') {
-                if (subcommand === 'move_all') {
-                    const fromCh = interaction.options.getChannel('from');
-                    const toCh = interaction.options.getChannel('to');
-                    if (fromCh.type !== ChannelType.GuildVoice || toCh.type !== ChannelType.GuildVoice) {
-                        return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ 音声チャンネルを指定してください。')] });
-                    }
-                    const members = fromCh.members;
-                    let count = 0;
-                    for (const [id, m] of members) {
-                        await m.voice.setChannel(toCh);
-                        count++;
-                    }
-                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`)] });
-                } else if (subcommand === 'say') {
-                    const channel = interaction.options.getChannel('channel');
-                    const content = interaction.options.getString('content');
-                    const replyToId = interaction.options.getString('reply_to');
-                    const deleteAfter = interaction.options.getInteger('delete_after');
-                    const repeat = Math.min(interaction.options.getInteger('repeat') || 1, 10);
-
-                    if (!channel.isTextBased()) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ テキストチャンネルを指定してください。')] });
-
-                    let sentCount = 0;
-                    for (let i = 0; i < repeat; i++) {
-                        let sentMsg;
-                        if (replyToId) {
-                            try {
-                                const targetMsg = await channel.messages.fetch(replyToId);
-                                sentMsg = await targetMsg.reply(content);
-                            } catch (e) {
-                                sentMsg = await channel.send(`(Reply Failed: ${replyToId}) ${content}`);
-                            }
-                        } else {
-                            sentMsg = await channel.send(content);
-                        }
-                        sentCount++;
-
-                        if (deleteAfter && deleteAfter > 0) {
-                            setTimeout(() => sentMsg.delete().catch(() => { }), deleteAfter * 1000);
-                        }
-                        if (repeat > 1) await new Promise(r => setTimeout(r, 1000)); // Rate limit safety
-                    }
-
-                    const deleteNote = deleteAfter ? ` (🗑️ ${deleteAfter}秒後に消滅)` : '';
-                    const repeatNote = repeat > 1 ? ` (🔁 ${repeat}回)` : '';
-                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${channel} に発言しました。${repeatNote}${deleteNote}`)] });
-                } else if (subcommand === 'create') {
-                    const name = interaction.options.getString('name');
-                    const cType = interaction.options.getString('type') === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
-                    const catId = interaction.options.getString('category');
-                    const opts = { name, type: cType };
-                    if (catId) opts.parent = catId;
-                    const newCh = await interaction.guild.channels.create(opts);
-                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ チャンネル ${newCh} を作成しました。`)] });
-                } else if (subcommand === 'delete') {
-                    const ch = interaction.options.getChannel('channel');
-                    await ch.delete();
-                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ チャンネル ${ch.name} を削除しました。`)] });
-                } else if (subcommand === 'purge') {
-=======
             try {
+                const subcommand = interaction.options.getSubcommand(false);
+
                 // --- Admin Control ---
                 if (interaction.commandName === 'admin_control') {
->>>>>>> 7f393dc8c15ed99f871ac90ab4505432b4ef4ac3
                     const channel = interaction.options.getChannel('channel') || interaction.channel;
 
                     if (subcommand === 'lock') {
@@ -1261,18 +873,14 @@ async function handleCommands(interaction, client) {
                         await channel.delete();
                         await newChannel.setPosition(position);
                         await newChannel.send('🧹 このチャンネルは管理者によってWipe（再生成）されました。');
-                        // We can't edit reply because channel is gone, but operation is done.
                     }
                 }
 
                 // --- Admin User Management ---
                 else if (interaction.commandName === 'admin_user_mgmt') {
                     const targetUser = interaction.options.getUser('target');
+                    // subcommand 'whois' doesn't strictly need a member object if they left, but we try to fetch.
                     const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-
-                    if (!member && subcommand !== 'whois') { // DM might work without member, but actions need member usually
-                        // Except ban/unban can work with ID, but here we fetched member.
-                    }
 
                     if (subcommand === 'action') {
                         const type = interaction.options.getString('type');
@@ -1327,38 +935,23 @@ async function handleCommands(interaction, client) {
                             await dmChannel.send({ embeds: [embed] });
                         }
                         await interaction.editReply(`✅ ${targetUser.tag} にDMを送信しました。`);
-                        if (subcommand === 'whois') {
-                            const embed = new EmbedBuilder()
-                                .setTitle(`About ${targetUser.tag}`)
-                                .setThumbnail(targetUser.displayAvatarURL())
-                                .addFields(
-                                    { name: 'User ID', value: targetUser.id, inline: true },
-                                    { name: 'Account Created', value: `<t:${Math.floor(targetUser.createdTimestamp / 1000)}:R>`, inline: true },
-                                    { name: 'Joined Server', value: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : 'Not in server', inline: true },
-                                    { name: 'Roles', value: member ? member.roles.cache.map(r => r.toString()).join(' ') : 'N/A' }
-                                )
-                                .setColor(0x00BFFF);
-                            await interaction.editReply({ embeds: [embed] });
-                        }
+                    } else if (subcommand === 'whois') {
+                        const embed = new EmbedBuilder()
+                            .setTitle(`About ${targetUser.tag}`)
+                            .setThumbnail(targetUser.displayAvatarURL())
+                            .addFields(
+                                { name: 'User ID', value: targetUser.id, inline: true },
+                                { name: 'Account Created', value: `<t:${Math.floor(targetUser.createdTimestamp / 1000)}:R>`, inline: true },
+                                { name: 'Joined Server', value: member ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : 'Not in server', inline: true },
+                                { name: 'Roles', value: member ? member.roles.cache.map(r => r.toString()).join(' ') : 'N/A' }
+                            )
+                            .setColor(0x00BFFF);
+                        await interaction.editReply({ embeds: [embed] });
                     }
                 }
 
-                else if (interaction.commandName === 'poll') {
-                    const PollManager = require('../features/poll');
-                    await PollManager.handlePollCommand(interaction);
-                }
-
-                else if (interaction.commandName === 'activity_backfill') {
-                    if (!await checkAdmin(interaction)) {
-                        return interaction.reply({ content: '❌ 権限がありません。', ephemeral: true });
-                    }
-                    const ActivityTracker = require('../features/activityTracker');
-                    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription('✅ アクティビティログのBackfill（過去ログ取得）を手動開始します...')], ephemeral: true });
-
-                    ActivityTracker.backfill(interaction.client).catch(e => {
-                        console.error('Backfill Error:', e);
-                    });
-                } else if (interaction.commandName === 'admin_logistics') {
+                // --- Admin Logistics ---
+                else if (interaction.commandName === 'admin_logistics') {
                     if (subcommand === 'move_all') {
                         const fromCh = interaction.options.getChannel('from');
                         const toCh = interaction.options.getChannel('to');
@@ -1374,9 +967,37 @@ async function handleCommands(interaction, client) {
                         await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`🚚 ${count}人を ${fromCh.name} から ${toCh.name} に移動しました。`)] });
                     } else if (subcommand === 'say') {
                         const channel = interaction.options.getChannel('channel');
+                        const content = interaction.options.getString('content');
+                        const replyToId = interaction.options.getString('reply_to');
+                        const deleteAfter = interaction.options.getInteger('delete_after');
+                        const repeat = Math.min(interaction.options.getInteger('repeat') || 1, 10);
+
                         if (!channel.isTextBased()) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setDescription('❌ テキストチャンネルを指定してください。')] });
-                        await channel.send(interaction.options.getString('content'));
-                        await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${channel} に発言しました。`)] });
+
+                        let sentCount = 0;
+                        for (let i = 0; i < repeat; i++) {
+                            let sentMsg;
+                            if (replyToId) {
+                                try {
+                                    const targetMsg = await channel.messages.fetch(replyToId);
+                                    sentMsg = await targetMsg.reply(content);
+                                } catch (e) {
+                                    sentMsg = await channel.send(`(Reply Failed: ${replyToId}) ${content}`);
+                                }
+                            } else {
+                                sentMsg = await channel.send(content);
+                            }
+                            sentCount++;
+
+                            if (deleteAfter && deleteAfter > 0) {
+                                setTimeout(() => sentMsg.delete().catch(() => { }), deleteAfter * 1000);
+                            }
+                            if (repeat > 1) await new Promise(r => setTimeout(r, 1000));
+                        }
+                        const deleteNote = deleteAfter ? ` (🗑️ ${deleteAfter}秒後に消滅)` : '';
+                        const repeatNote = repeat > 1 ? ` (🔁 ${repeat}回)` : '';
+                        await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${channel} に発言しました。${repeatNote}${deleteNote}`)] });
+
                     } else if (subcommand === 'create') {
                         const name = interaction.options.getString('name');
                         const cType = interaction.options.getString('type') === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
@@ -1415,10 +1036,22 @@ async function handleCommands(interaction, client) {
                         await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(`✅ ${target.tag} に ${role.name} を ${action} しました。`)] });
                     }
                 }
+
+                // --- Activity Backfill ---
+                else if (interaction.commandName === 'activity_backfill') {
+                    const ActivityTracker = require('../features/activityTracker');
+                    await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription('✅ アクティビティログのBackfill（過去ログ取得）を手動開始します...')] });
+
+                    ActivityTracker.backfill(interaction.client).catch(e => {
+                        console.error('Backfill Error:', e);
+                    });
+                }
+
             } catch (error) {
                 console.error('Admin Command Error:', error);
-                await interaction.editReply({ embeds: [new EmbedBuilder().setTitle(' Admin Error').setColor(0xFF0000).setDescription(`⚠ エラーが発生しました: ${error.message}`)] });
+                await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('Admin Error').setColor(0xFF0000).setDescription(`⚠ エラーが発生しました: ${error.message}`)] });
             }
+            return;
         }
     }
     else if (interaction.isMessageContextMenuCommand()) {
@@ -1429,7 +1062,7 @@ async function handleCommands(interaction, client) {
                     if (interaction.targetMessage.webhookId != null) {
                         const webhook = await interaction.targetMessage.fetchWebhook();
                         if (webhook.name === 'CROSSROID Anonymous') {
-                            await interaction.deferReply({flags: MessageFlags.Ephemeral});
+                            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                             const anonymous_id = interaction.targetMessage.author.displayName.slice(-26, -18);
                             const members = await interaction.guild.members.fetch();
                             members.forEach(async (member) => {

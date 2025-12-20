@@ -510,7 +510,6 @@ client.once('ready', async () => {
 });
 
 // コマンド処理
-// コマンド処理
 client.on('interactionCreate', async interaction => {
   // Poll Interaction (Button/Select)
   if (interaction.isButton() || interaction.isStringSelectMenu()) {
