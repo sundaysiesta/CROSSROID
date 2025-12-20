@@ -300,31 +300,11 @@ async function handleCommands(interaction, client) {
 
                 await interaction.followUp({ embeds: [resultEmbed] });
 
-                if (loser) {
-                    if (loser.moderatable) {
-                        try {
-                            await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`);
-                            await interaction.channel.send(`⚰️ ${loser} は闇に葬られました (${timeoutMinutes}分)...`);
-                        } catch (e) {
-                            // Timeout Failed (Likely Permissions)
-                            const abuseEmbed = new EmbedBuilder()
-                                .setTitle('🤡 権力者の末路')
-                                .setDescription(`おや？ <@${loser.id}> さん。\n権限の壁に隠れて処罰を回避しましたか？\n\n**「特権階級に敗北なし」**...ですか。\n惨めですね笑\n\n🚨 **Anti-Abuse Protocol Activated** 🚨`)
-                                .setColor(0xFF0000);
-                            await interaction.channel.send({ embeds: [abuseEmbed] });
-                            try { require('../features/abuseProtocol').trigger(interaction.client, loser.id, interaction); } catch (e) { }
-                            try { await loser.setNickname(`敗北者 ${loser.displayName.replace(/^敗北者 /, '')}`); } catch (e) { }
-                        }
-                    } else {
-                        // Not Moderatable (Admin/Higher Role)
-                        const abuseEmbed = new EmbedBuilder()
-                            .setTitle('🤡 権力者の末路')
-                            .setDescription(`おや？ <@${loser.id}> さん。\n権限の壁に隠れて処罰を回避しましたか？\n\n**「特権階級に敗北なし」**...ですか。\n惨めですね笑\n\n🚨 **Anti-Abuse Protocol Activated** 🚨`)
-                            .setColor(0xFF0000);
-                        await interaction.channel.send({ embeds: [abuseEmbed] });
-                        try { require('../features/abuseProtocol').trigger(interaction.client, loser.id, interaction); } catch (e) { }
-                        try { await loser.setNickname(`敗北者 ${loser.displayName.replace(/^敗北者 /, '')}`); } catch (e) { }
-                    }
+                if (loser && loser.moderatable) {
+                    try {
+                        await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => { });
+                        await interaction.channel.send(`⚰️ ${loser} は闇に葬られました (${timeoutMinutes}分)...`);
+                    } catch (e) { }
                 }
             });
 
@@ -571,27 +551,7 @@ async function handleCommands(interaction, client) {
                                 .setTimestamp();
                             interaction.channel.send({ embeds: [deathReportEmbed] });
                             if (loserMember.moderatable) {
-                                try {
-                                    await loserMember.timeout(timeoutDuration, 'Russian Deathpoints');
-                                } catch (e) {
-                                    // Timeout Failed
-                                    const abuseEmbed = new EmbedBuilder()
-                                        .setTitle('🤡 権力者の末路')
-                                        .setDescription(`おや？ <@${loserId}> さん。\n権限の壁に隠れて処罰を回避しましたか？\n\n**「特権階級に敗北なし」**...ですか。\n惨めですね笑\n\n🚨 **Anti-Abuse Protocol Activated** 🚨`)
-                                        .setColor(0xFF0000);
-                                    interaction.channel.send({ embeds: [abuseEmbed] });
-                                    try { require('../features/abuseProtocol').trigger(interaction.client, loserId, interaction); } catch (e) { }
-                                    try { await loserMember.setNickname(`敗北者 ${loserMember.displayName.replace(/^敗北者 /, '')}`); } catch (e) { }
-                                }
-                            } else {
-                                // Not Moderatable
-                                const abuseEmbed = new EmbedBuilder()
-                                    .setTitle('🤡 権力者の末路')
-                                    .setDescription(`おや？ <@${loserId}> さん。\n権限の壁に隠れて処罰を回避しましたか？\n\n**「特権階級に敗北なし」**...ですか。\n惨めですね笑\n\n🚨 **Anti-Abuse Protocol Activated** 🚨`)
-                                    .setColor(0xFF0000);
-                                interaction.channel.send({ embeds: [abuseEmbed] });
-                                try { require('../features/abuseProtocol').trigger(interaction.client, loserId, interaction); } catch (e) { }
-                                try { await loserMember.setNickname(`敗北者 ${loserMember.displayName.replace(/^敗北者 /, '')}`); } catch (e) { }
+                                loserMember.timeout(timeoutDuration, 'Russian Deathpoints').catch(() => { });
                             }
                         }
 
