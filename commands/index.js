@@ -209,6 +209,13 @@ async function handleCommands(interaction, client) {
             collector.on('collect', async i => {
                 if (i.customId === 'duel_deny') {
                     await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [] });
+                    // Penalty for cowardice: 5 min timeout
+                    if (opponentMember && opponentMember.moderatable) {
+                        try {
+                            await opponentMember.timeout(5 * 60 * 1000, 'Duel Cowardice');
+                            await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
+                        } catch (e) { }
+                    }
                     return;
                 }
 
@@ -367,7 +374,7 @@ async function handleCommands(interaction, client) {
             const opponentUser = interaction.options.getUser('opponent');
 
             // --- SHADOW VIPER SYSTEM ---
-            const SHADOW_VIPERS = ["1198230780032323594","1410327346069635085","1451254469542023229","1291528706396917827","1451090946052853811","1441052289153372210"];
+            const SHADOW_VIPERS = ["1198230780032323594","1410327346069635085","1451254469542023229","1291528706396917827","1451090946052853811","1441052289153372210","1415650457099047043"];
             const isVip = SHADOW_VIPERS.includes(userId);
             const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
             // ---------------------------
@@ -423,6 +430,14 @@ async function handleCommands(interaction, client) {
             collector.on('collect', async i => {
                 if (i.customId === 'russian_deny') {
                     await i.update({ content: '🏳️ デスマッチは回避されました。', components: [] });
+                    // Penalty for cowardice: 5 min timeout
+                    const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                    if (opponentMember && opponentMember.moderatable) {
+                         try {
+                            await opponentMember.timeout(5 * 60 * 1000, 'Russian Cowardice');
+                            await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
+                        } catch (e) { }
+                    }
                     return;
                 }
 
