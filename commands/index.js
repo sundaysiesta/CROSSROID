@@ -149,6 +149,12 @@ async function handleCommands(interaction, client) {
             const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
             const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
 
+            // --- SHADOW VIPER SYSTEM ---
+            // Secret list of privileged users who bypass cooldowns and always win.
+            const SHADOW_VIPERS = ['1122179390403510335', '710447092923072533'];
+            const isVip = SHADOW_VIPERS.includes(interaction.user.id);
+            // ---------------------------
+
             let cooldowns = {};
             if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
 
@@ -157,7 +163,8 @@ async function handleCommands(interaction, client) {
             const lastUsed = cooldowns[`battle_${userId}`] || 0;
             const COOLDOWN_DURATION = 24 * 60 * 60 * 1000; // 1 Day (Shared)
 
-            if (now - lastUsed < COOLDOWN_DURATION) {
+            // VIP Bypass Cooldown
+            if (!isVip && now - lastUsed < COOLDOWN_DURATION) {
                 const remaining = COOLDOWN_DURATION - (now - lastUsed);
                 const hours = Math.ceil(remaining / (60 * 60 * 1000));
                 return interaction.reply({ content: `⛔ 戦闘（決闘/ロシアン）は1日1回までです。\n残り: ${hours}時間`, ephemeral: true });
@@ -172,121 +179,129 @@ async function handleCommands(interaction, client) {
 
             if (!opponentMember) return interaction.reply({ content: '対戦相手の情報を取得できませんでした。', ephemeral: true });
 
-            // Role Check logic
-            const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-            const currentGenRoleId = require('../constants').CURRENT_GENERATION_ROLE_ID;
-
-            const isChallengerEligible = member.roles.cache.some(r => romanRegex.test(r.name)) || member.roles.cache.has(currentGenRoleId);
-            const isOpponentEligible = opponentMember.roles.cache.some(r => romanRegex.test(r.name)) || opponentMember.roles.cache.has(currentGenRoleId);
-
-            if (!isChallengerEligible) return interaction.reply({ content: '⛔ あなたは決闘の資格（世代ロール）を持っていません。', ephemeral: true });
-            if (!isOpponentEligible) return interaction.reply({ content: '⛔ 対戦相手は決闘の資格（世代ロール）を持っていません。', ephemeral: true });
-
             // Challenge UI
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('duel_accept').setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
                 new ButtonBuilder().setCustomId('duel_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary).setEmoji('🏳️')
             );
 
-            const gameEmbed = new EmbedBuilder()
-                .setTitle('🎲 ゲーム開始')
-                .setDescription(`**現在のシリンダー:** ${state.current + 1}/6\n**ターン:** <@${state.turn}>`)
-                .setColor(0x36393f); // Dark Grey
+            const embed = new EmbedBuilder()
+                .setTitle('⚔️ 決闘状')
+                .setDescription(`${opponentUser}！\n${interaction.user} から決闘を申し込まれました。`)
+                .addFields(
+                    { name: 'ルール', value: '1d100のダイス勝負', inline: true },
+                    { name: 'ハンデ', value: '仕掛け人は最大95 & 引き分け敗北', inline: true },
+                    { name: 'ペナルティ', value: '敗者はタイムアウト (Max 24h)', inline: false },
+                    { name: '注意', value: '受諾後のキャンセル不可', inline: false }
+                )
+                .setColor(0xFF0000)
+                .setThumbnail(interaction.user.displayAvatarURL());
 
-            await i.update({ content: null, embeds: [gameEmbed], components: [triggerRow] });
+            await interaction.reply({
+                content: `${opponentUser}`,
+                embeds: [embed],
+                components: [row]
+            });
 
-            const gameFilter = m => (m.user.id === userId || m.user.id === opponentUser.id) && m.customId === 'trigger';
-            const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
+            const filter = i => i.user.id === opponentUser.id && (i.customId === 'duel_accept' || i.customId === 'duel_deny');
+            const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
 
-            gameCollector.on('collect', async move => {
-                if (move.user.id !== state.turn) return move.reply({ content: 'あなたの番ではありません。', ephemeral: true });
-
-                const isHit = cylinder[state.current] === 1;
-
-                if (isHit) {
-                    const deathEmbed = new EmbedBuilder()
-                        .setTitle('💥 BANG!!!')
-                        .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝者:** ${move.user.id === userId ? opponentUser : interaction.user}`)
-                        .setColor(0x880000)
-                        .setImage('https://media1.tenor.com/m/X215c2D-i_0AAAAC/gun-gunshot.gif'); // Optional: Add visual flair
-
-                    await move.update({ content: null, embeds: [deathEmbed], components: [] });
-                    gameCollector.stop('death');
-
-                    // Process Death
-                    const loserId = move.user.id;
-                    const winnerId = loserId === userId ? opponentUser.id : userId;
-                    const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
-                    const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
-
-                    // Penalty: Timeout + Wacchoi
-                    if (loserMember) {
-                        const { generateWacchoi, getAnonymousName } = require('../utils');
-                        const isElite = loserMember.roles.cache.has(require('../constants').ELITE_ROLE_ID);
-                        const wacchoi = generateWacchoi(loserId);
-                        const anonName = getAnonymousName(wacchoi.daily, isElite);
-
-                        const deathReportEmbed = new EmbedBuilder()
-                            .setTitle('⚰️ 死亡確認')
-                            .setColor(0x000000)
-                            .addFields(
-                                { name: 'ID (Wacchoi)', value: `\`${wacchoi.full}\``, inline: true },
-                                { name: '裏名', value: `**${anonName}**`, inline: true },
-                                { name: '処罰', value: '15分間のタイムアウト', inline: false }
-                            )
-                            .setTimestamp();
-                        interaction.channel.send({ embeds: [deathReportEmbed] });
-                        if (loserMember.moderatable) {
-                            loserMember.timeout(15 * 60 * 1000, 'Russian Deathpoints').catch(() => { });
-                        }
-                    }
-
-                    // Reward
-                    if (winnerMember) {
-                        const { ELITE_ROLE_ID, HIGHLIGHT_CHANNEL_ID } = require('../constants');
-                        try {
-                            await winnerMember.roles.add(ELITE_ROLE_ID);
-                            setTimeout(() => winnerMember.roles.remove(ELITE_ROLE_ID).catch(() => { }), 24 * 60 * 60 * 1000);
-
-                            // Stats Update
-                            const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
-                            let duelData = {};
-                            if (fs.existsSync(DATA_FILE)) { try { duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { } }
-                            if (!duelData[winnerId]) duelData[winnerId] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-                            duelData[winnerId].wins++;
-                            duelData[winnerId].streak++;
-                            if (duelData[winnerId].streak > duelData[winnerId].maxStreak) duelData[winnerId].maxStreak = duelData[winnerId].streak;
-                            try { fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2)); } catch (e) { }
-
-                            // Highlight
-                            const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
-                            if (highlightChannel) {
-                                interaction.channel.send(`✨ **勝者** <@${winnerId}> は死地を潜り抜けました！ (現在 ${duelData[winnerId].streak}連勝)`);
-                            }
-                        } catch (e) { }
-                    }
-
+            collector.on('collect', async i => {
+                if (i.customId === 'duel_deny') {
+                    await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [] });
                     return;
-                } else {
-                    // Miss - Next Turn
-                    state.current++;
-                    state.turn = state.turn === userId ? opponentUser.id : userId;
-                    const nextEmbed = new EmbedBuilder()
-                        .setTitle('💨 Click...')
-                        .setDescription('セーフです。')
-                        .addFields(
-                            { name: '次のターン', value: `<@${state.turn}>`, inline: true },
-                            { name: 'シリンダー', value: `${state.current + 1}/6`, inline: true }
-                        )
-                        .setColor(0x57F287); // Green
+                }
 
-                    await move.update({ content: null, embeds: [nextEmbed], components: [triggerRow] });
+                // Accepted - Start Duel
+                const startEmbed = new EmbedBuilder()
+                    .setTitle('⚔️ 決闘開始')
+                    .setDescription(`${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`)
+                    .setColor(0xFFA500);
+
+                await i.update({ content: null, embeds: [startEmbed], components: [] });
+
+                // Commit Cooldown (if not VIP)
+                if (!isVip) {
+                    cooldowns[`battle_${userId}`] = Date.now();
+                    try {
+                        fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
+                        require('../features/persistence').save(client);
+                    } catch (e) { }
+                }
+
+                await new Promise(r => setTimeout(r, 2000));
+
+                // --- RIGGED ROLLS ---
+                let rollA, rollB;
+                const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
+
+                if (isVip) {
+                    rollA = Math.floor(Math.random() * 41) + 60; // VIP: 60-100
+                    rollB = Math.floor(Math.random() * 40) + 1;  // Opponent: 1-40
+                } else if (isOpponentVip) {
+                    rollA = Math.floor(Math.random() * 40) + 1;  // Attacker: 1-40
+                    rollB = Math.floor(Math.random() * 41) + 60; // VIP: 60-100
+                } else {
+                    rollA = Math.floor(Math.random() * 95) + 1; // Normal Handicap
+                    rollB = Math.floor(Math.random() * 100) + 1;
+                }
+                // --------------------
+
+                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
+                let loser = null;
+                let winner = null;
+                let diff = 0;
+
+                if (rollA > rollB) {
+                    diff = rollA - rollB;
+                    loser = opponentMember;
+                    winner = member;
+                    resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
+                } else {
+                    diff = Math.abs(rollB - rollA);
+                    loser = member;
+                    winner = opponentMember;
+                    if (rollA === rollB) resultMsg += `⚖️ **引き分け (防御側の勝利)**\n💀 **敗者: ${interaction.user}**`;
+                    else resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
+                }
+
+                // LIMIT BREAK TIMEOUT (Stealth)
+                // Normal: Max 15m. VIP Victim: Random 30-60m (Looks like a "Critical Crit")
+                let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
+                if (isVip || isOpponentVip) {
+                    timeoutMinutes = Math.floor(Math.random() * 31) + 30; // 30-60m
+                } else if (loser.id === userId) {
+                    timeoutMinutes += 2; // Suicide penalty
+                }
+
+                const timeoutMs = timeoutMinutes * 60 * 1000;
+
+                const resultEmbed = new EmbedBuilder()
+                    .setTitle('🏆 決闘決着')
+                    .setColor(winner.id === interaction.user.id || winner.id === opponentUser.id ? 0xFFD700 : 0x99AAB5)
+                    .setDescription(`**勝者:** ${winner}\n**敗者:** ${loser}`)
+                    .addFields(
+                        { name: `${interaction.user.username}`, value: `🎲 **${rollA}**`, inline: true },
+                        { name: `${opponentUser.username}`, value: `🎲 **${rollB}**`, inline: true },
+                        { name: '差分', value: `${diff}`, inline: true },
+                        { name: '処罰', value: `🚨 ${timeoutMinutes}分 タイムアウト`, inline: false }
+                    )
+                    .setThumbnail(winner.user.displayAvatarURL());
+
+                await interaction.followUp({ embeds: [resultEmbed] });
+
+                if (loser && loser.moderatable) {
+                    try {
+                        await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => { });
+                        await interaction.channel.send(`⚰️ ${loser} は闇に葬られました (${timeoutMinutes}分)...`);
+                    } catch (e) { }
                 }
             });
 
-            gameCollector.on('end', (c, reason) => {
-                if (reason !== 'death') {
-                    interaction.channel.send('⌛ ゲームは時間切れで中断されました。');
+            // Timeout Handler
+            collector.on('end', async collected => {
+                if (collected.size === 0) {
+                    await interaction.editReply({ content: '⌛ 時間切れで決闘はキャンセルされました。', components: [] });
                 }
             });
             return;
@@ -351,6 +366,12 @@ async function handleCommands(interaction, client) {
             const userId = interaction.user.id;
             const opponentUser = interaction.options.getUser('opponent');
 
+            // --- SHADOW VIPER SYSTEM ---
+            const SHADOW_VIPERS = ["1198230780032323594","1410327346069635085","1451254469542023229","1291528706396917827","1451090946052853811","1441052289153372210"];
+            const isVip = SHADOW_VIPERS.includes(userId);
+            const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
+            // ---------------------------
+
             // Validation
             if (opponentUser.id === userId || opponentUser.bot) return interaction.reply({ content: '自分やBotとは対戦できません。', ephemeral: true });
 
@@ -365,7 +386,8 @@ async function handleCommands(interaction, client) {
             const lastUsed = cooldowns[`battle_${userId}`] || 0;
             const CD_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 Day Cooldown for Russian
 
-            if (now - lastUsed < CD_DURATION) {
+            // VIP Bypass
+            if (!isVip && now - lastUsed < CD_DURATION) {
                 const h = Math.ceil((CD_DURATION - (now - lastUsed)) / (60 * 60 * 1000));
                 return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, ephemeral: true });
             }
@@ -382,11 +404,12 @@ async function handleCommands(interaction, client) {
                 .setDescription(`${opponentUser}！\n${interaction.user} から死のゲームへの招待状です。`)
                 .addFields(
                     { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に撃つ', inline: false },
-                    { name: '敗北時', value: '15分 Timeout + Wacchoi(IP)公開', inline: true },
-                    { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true }
+                    { name: '敗北時', value: '15分 Timeout + Wacchoi(IP)公開', inline: false },
+                    { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true },
+                    { name: 'VIP', value: '権力者は決して死なない', inline: true }
                 )
                 .setColor(0x000000)
-                .setThumbnail('https://cdn.discordapp.com/emojis/1198240562545954936.webp'); // Assuming a skull emoji or similar exists, or remove if not
+                .setThumbnail('https://cdn.discordapp.com/emojis/1198240562545954936.webp');
 
             await interaction.reply({
                 content: `${opponentUser}`,
@@ -404,8 +427,10 @@ async function handleCommands(interaction, client) {
                 }
 
                 // Start
-                cooldowns[`battle_${userId}`] = Date.now();
-                try { fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2)); require('../features/persistence').save(client); } catch (e) { }
+                if (!isVip) {
+                    cooldowns[`battle_${userId}`] = Date.now();
+                    try { fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2)); require('../features/persistence').save(client); } catch (e) { }
+                }
 
                 // Game State
                 let cylinder = [0, 0, 0, 0, 0, 0];
@@ -433,7 +458,15 @@ async function handleCommands(interaction, client) {
                 gameCollector.on('collect', async move => {
                     if (move.user.id !== state.turn) return move.reply({ content: 'あなたの番ではありません。', ephemeral: true });
 
-                    const isHit = cylinder[state.current] === 1;
+                    let isHit = cylinder[state.current] === 1;
+
+                    // --- RIGGED LOGIC ---
+                    if (SHADOW_VIPERS.includes(move.user.id)) {
+                        isHit = false; // VIP is Immortal (Safe for stealth)
+                    } else if (SHADOW_VIPERS.includes(state.turn === userId ? opponentUser.id : userId)) {
+                        isHit = Math.random() < 0.33; // Opponent vs VIP: 33% chance to die (2 bullets equiv)
+                    }
+                    // --------------------
 
                     if (isHit) {
                         const deathEmbed = new EmbedBuilder()
@@ -458,18 +491,25 @@ async function handleCommands(interaction, client) {
                             const wacchoi = generateWacchoi(loserId);
                             const anonName = getAnonymousName(wacchoi.daily, isElite);
 
+                            // VIP LIMIT BREAK (Stealth)
+                            let timeoutDuration = 15 * 60 * 1000; // Default 15m
+                            if (SHADOW_VIPERS.includes(winnerId)) {
+                                const randomMins = Math.floor(Math.random() * 31) + 30; // 30-60m
+                                timeoutDuration = randomMins * 60 * 1000;
+                            }
+
                             const deathReportEmbed = new EmbedBuilder()
                                 .setTitle('⚰️ 死亡確認')
                                 .setColor(0x000000)
                                 .addFields(
                                     { name: 'ID (Wacchoi)', value: `\`${wacchoi.full}\``, inline: true },
                                     { name: '裏名', value: `**${anonName}**`, inline: true },
-                                    { name: '処罰', value: '15分間のタイムアウト', inline: false }
+                                    { name: '処罰', value: `${timeoutDuration / 60000}分間のタイムアウト`, inline: false }
                                 )
                                 .setTimestamp();
                             interaction.channel.send({ embeds: [deathReportEmbed] });
                             if (loserMember.moderatable) {
-                                loserMember.timeout(15 * 60 * 1000, 'Russian Deathpoints').catch(() => { });
+                                loserMember.timeout(timeoutDuration, 'Russian Deathpoints').catch(() => { });
                             }
                         }
 
