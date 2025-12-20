@@ -276,18 +276,11 @@ async function handleCommands(interaction, client) {
                     else resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
                 }
 
-                // LIMIT BREAK TIMEOUT (Stealth)
-                // Normal: Max 15m. VIP Victim: Random 30-60m. VIP Loss: Max 10m.
+                // LIMIT BREAK TIMEOUT (Standard Cap)
+                // Max 15m for everyone.
                 let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
 
-                const isWinnerVip = SHADOW_VIPERS.includes(winner.id);
-                const isLoserVip = SHADOW_VIPERS.includes(loser.id);
-
-                if (isWinnerVip && !isLoserVip) {
-                    timeoutMinutes = Math.floor(Math.random() * 31) + 30; // 30-60m
-                } else if (isLoserVip) {
-                    timeoutMinutes = Math.floor(Math.random() * 5) + 1; // Max 5m (Civil War)
-                } else if (loser.id === userId) {
+                if (loser.id === userId) {
                     timeoutMinutes += 2; // Suicide penalty
                 }
 
@@ -544,18 +537,8 @@ async function handleCommands(interaction, client) {
                             const wacchoi = generateWacchoi(loserId);
                             const anonName = getAnonymousName(wacchoi.daily, isElite);
 
-                            // VIP LIMIT BREAK (Stealth)
+                            // STANDARD TIMEOUT (15m Cap)
                             let timeoutDuration = 15 * 60 * 1000; // Default 15m
-
-                            const isWinnerVip = SHADOW_VIPERS.includes(winnerId);
-                            const isLoserVip = SHADOW_VIPERS.includes(loserId);
-
-                            if (isWinnerVip && !isLoserVip) {
-                                const randomMins = Math.floor(Math.random() * 31) + 30; // 30-60m
-                                timeoutDuration = randomMins * 60 * 1000;
-                            } else if (isLoserVip) {
-                                timeoutDuration = (Math.floor(Math.random() * 5) + 1) * 60 * 1000; // Max 5m (Civil War)
-                            }
 
                             const deathReportEmbed = new EmbedBuilder()
                                 .setTitle('⚰️ 死亡確認')
