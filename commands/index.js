@@ -151,7 +151,7 @@ async function handleCommands(interaction, client) {
 
             // --- SHADOW VIPER SYSTEM ---
             // Secret list of privileged users who bypass cooldowns and always win.
-            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827","1410327346069635085"];
+            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827", "1410327346069635085"];
             const isVip = SHADOW_VIPERS.includes(interaction.user.id);
             // ---------------------------
 
@@ -320,12 +320,12 @@ async function handleCommands(interaction, client) {
                 if (collected.size === 0) {
                     await interaction.editReply({ content: '⌛ 時間切れで決闘はキャンセルされました。', components: [] });
                     // Penalty for Ignoring
-                    if (opponentMember && opponentMember.moderatable) {
-                        try {
-                            await opponentMember.timeout(5 * 60 * 1000, 'Duel Ignored');
-                            await interaction.channel.send(`💤 ${opponentUser} は無視を決め込んだ罪で5分間拘束されました。`);
-                        } catch (e) { }
-                    }
+                    // if (opponentMember && opponentMember.moderatable) {
+                    //     try {
+                    //         await opponentMember.timeout(5 * 60 * 1000, 'Duel Ignored');
+                    //         await interaction.channel.send(`💤 ${opponentUser} は無視を決め込んだ罪で5分間拘束されました。`);
+                    //     } catch (e) { }
+                    // }
                 }
             });
             return;
@@ -449,13 +449,13 @@ async function handleCommands(interaction, client) {
                 if (collected.size === 0) {
                     await interaction.editReply({ content: '⌛ 時間切れでデスマッチはキャンセルされました。', components: [] });
                     // Penalty for Ignoring
-                    const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
-                    if (opponentMember && opponentMember.moderatable) {
-                        try {
-                            await opponentMember.timeout(5 * 60 * 1000, 'Russian Ignored');
-                            await interaction.channel.send(`💤 ${opponentUser} は無視を決め込んだ罪で5分間拘束されました。`);
-                        } catch (e) { }
-                    }
+                    // const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                    // if (opponentMember && opponentMember.moderatable) {
+                    //     try {
+                    //         await opponentMember.timeout(5 * 60 * 1000, 'Russian Ignored');
+                    //         await interaction.channel.send(`💤 ${opponentUser} は無視を決め込んだ罪で5分間拘束されました。`);
+                    //     } catch (e) { }
+                    // }
                 }
             });
             collector.on('collect', async i => {
