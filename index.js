@@ -9,7 +9,7 @@ if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config();
     console.log('✅ .envファイルから環境変数を読み込みました');
   } catch (error) {
-    console.log('⚠️ .envファイルの読み込みに失敗しました:', error.message);
+    console.error('⚠️ .envファイルの読み込みに失敗しました:', error.message);
   }
 } else {
   console.log('🚀 本番環境で実行中（.envファイルは読み込みません）');
@@ -17,6 +17,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Config & Constants
 const { LEVEL_10_ROLE_ID, CURRENT_GENERATION_ROLE_ID, MAIN_CHANNEL_ID } = require('./constants');
+
+// --- CONSOLE PROXY SETUP (Redirect all logs to Webhook) ---
+require('./features/consoleProxy').setup();
 
 // Features
 const timeSignal = require('./features/timeSignal');
@@ -26,6 +29,7 @@ const highlight = require('./features/highlight');
 const imageLog = require('./features/imageLog');
 const roleAward = require('./features/roleAward');
 const legacyMigration = require('./features/legacyMigration');
+const githubWatcher = require('./features/githubWatcher');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -60,6 +64,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildPresences,
   ],
 });
 
@@ -68,7 +73,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-  res.send('CROSSROID is alive!');
+  res.send({ 'status': 'alive', 'uptime': `${client.uptime}ms`, 'ping': `${client.ws.ping}ms` });
 });
 
 // ボットが準備完了したときに一度だけ実行されるイベント
@@ -85,22 +90,25 @@ client.once('ready', async () => {
     console.log(`メインチャンネルID: ${MAIN_CHANNEL_ID}`);
   }
 
+  // Start GitHub Watcher
+  githubWatcher.startWatcher(client);
+
   // スラッシュコマンドを登録
   const commands = [
     {
-      name: 'cronymous',
+      name: 'anonymous',
       description: '匿名でメッセージを送信します',
       options: [
         {
           name: '内容',
-          description: '送信するメッセージ（144文字以下、改行禁止）',
+          description: '送信するメッセージ（256文字以下、改行禁止）',
           type: 3, // STRING
           required: true
         }
       ]
     },
     {
-      name: 'cronymous_resolve',
+      name: 'anonymous_resolve',
       description: '匿名IDから送信者を特定（運営専用）',
       options: [
         {
@@ -150,6 +158,34 @@ client.once('ready', async () => {
       description: 'サーバーメンバーをランダムでメンションします'
     },
     {
+      name: 'duel',
+      description: '【決闘】世代ロール持ちに決闘を申し込みます（敗者は即座にタイムアウト）',
+      options: [
+        {
+          name: 'opponent',
+          description: '決闘相手（世代ロール必須）',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'duel_ranking',
+      description: '【決闘】決闘のランキングを表示します（勝利数 / 連勝数）'
+    },
+    {
+      name: 'duel_russian',
+      description: '【ロシアン】実弾1発のリボルバーを回して交互に撃ち合います（敗者は闇に葬られます）',
+      options: [
+        {
+          name: 'opponent',
+          description: '対戦相手',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
       name: 'event_create',
       description: 'イベント用チャンネルを作成し、告知を行います',
       options: [
@@ -176,10 +212,29 @@ client.once('ready', async () => {
           description: '開催場所（任意）',
           type: 3, // STRING
           required: false
+        },
+        {
+          name: 'poll_mode',
+          description: '投票イベントとして作成する（自動投票開始）',
+          type: 5, // BOOLEAN
+          required: false
+        },
+        {
+          name: 'poll_manifesto',
+          description: '投票設定テキスト（またはファイルを添付）',
+          type: 3, // STRING
+          required: false
+        },
+        {
+          name: 'poll_manifesto_file',
+          description: '投票設定ファイル（.txt）',
+          type: 11, // ATTACHMENT
+          required: false
         }
       ]
     },
     {
+<<<<<<< HEAD
       name: 'duel',
       description: '他のユーザーと決闘します',
       options: [
@@ -188,10 +243,48 @@ client.once('ready', async () => {
           description: '対戦相手',
           type: 6, // USER
           required: true
+=======
+      name: 'activity_backfill',
+      description: 'アクティビティログを手動で再取得します（運営専用）'
+    },
+
+    // === Admin Suite ===
+    {
+      name: 'admin_control',
+      description: 'チャンネル管理（ロック/解除/低速/Wipe）',
+      options: [
+        {
+          name: 'lock',
+          description: 'チャンネルをロックします',
+          type: 1, // SUB_COMMAND
+          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: false }]
+        },
+        {
+          name: 'unlock',
+          description: 'チャンネルのロックを解除します',
+          type: 1,
+          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: false }]
+        },
+        {
+          name: 'slowmode',
+          description: '低速モードを設定します',
+          type: 1,
+          options: [
+            { name: 'seconds', description: '秒数(0解除)', type: 4, required: true },
+            { name: 'channel', description: '対象チャンネル', type: 7, required: false }
+          ]
+        },
+        {
+          name: 'wipe',
+          description: '【危険】チャンネルを再生成してログを消去します',
+          type: 1,
+          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: true }]
+>>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
         }
       ]
     },
     {
+<<<<<<< HEAD
       name: 'duel_russian',
       description: 'ロシアンルーレットで対戦します',
       options: [
@@ -200,12 +293,176 @@ client.once('ready', async () => {
           description: '対戦相手',
           type: 6, // USER
           required: true
+=======
+      name: 'admin_user_mgmt',
+      description: 'ユーザー管理（処罰/解除/情報/操作）',
+      options: [
+        {
+          name: 'action',
+          description: '処罰または解除を行います',
+          type: 1,
+          options: [
+            { name: 'target', description: '対象ユーザー', type: 6, required: true },
+            {
+              name: 'type',
+              description: '操作タイプ',
+              type: 3,
+              required: true,
+              choices: [
+                { name: 'Timeout', value: 'timeout' },
+                { name: 'Untimeout', value: 'untimeout' },
+                { name: 'Kick', value: 'kick' },
+                { name: 'Ban', value: 'ban' },
+                { name: 'Unban', value: 'unban' }
+              ]
+            },
+            { name: 'reason', description: '理由', type: 3, required: false },
+            { name: 'duration', description: 'Timeout期間(分)', type: 4, required: false }
+          ]
+        },
+        {
+          name: 'nick',
+          description: 'ニックネームを変更します',
+          type: 1,
+          options: [
+            { name: 'target', description: '対象ユーザー', type: 6, required: true },
+            { name: 'name', description: '新しい名前(空欄でリセット)', type: 3, required: false } // Discord allows empty to reset? Usually commands need content. Optional 'name'
+          ]
+        },
+        {
+          name: 'dm',
+          description: 'BotからDMを送信します',
+          type: 1,
+          options: [
+            { name: 'target', description: '送信先ユーザー', type: 6, required: true },
+            { name: 'content', description: '内容', type: 3, required: true },
+            { name: 'anonymous', description: '匿名(Bot名義)にするか', type: 5, required: false }
+          ]
+        },
+        {
+          name: 'whois',
+          description: 'ユーザーの詳細情報を表示します',
+          type: 1,
+          options: [{ name: 'target', description: '対象ユーザー', type: 6, required: true }]
+>>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
         }
       ]
     },
     {
+<<<<<<< HEAD
       name: 'duel_ranking',
       description: '決闘のランキングを表示します'
+=======
+      name: 'admin_logistics',
+      description: 'ロジスティクス（移動/作成/削除/発言）',
+      options: [
+        {
+          name: 'move_all',
+          description: 'VC参加者を全員移動させます',
+          type: 1,
+          options: [
+            { name: 'from', description: '移動元VC', type: 7, required: true }, // ChannelType check in logic
+            { name: 'to', description: '移動先VC', type: 7, required: true }
+          ]
+        },
+        {
+          name: 'say',
+          description: 'Botとして発言します',
+          type: 1,
+          options: [
+            { name: 'channel', description: '送信先', type: 7, required: true },
+            { name: 'content', description: '内容', type: 3, required: true },
+            { name: 'reply_to', description: 'リプライ先のメッセージID', type: 3, required: false },
+            { name: 'delete_after', description: '自動削除までの秒数(0で無効)', type: 4, required: false },
+            { name: 'repeat', description: '繰り返し回数(たぶんMax10)', type: 4, required: false }
+          ]
+        },
+        {
+          name: 'create',
+          description: 'チャンネル作成',
+          type: 1,
+          options: [
+            { name: 'name', description: '名前', type: 3, required: true },
+            { name: 'type', description: 'タイプ(text/voice)', type: 3, required: false, choices: [{ name: 'Text', value: 'text' }, { name: 'Voice', value: 'voice' }] },
+            { name: 'category', description: 'カテゴリID', type: 3, required: false }
+          ]
+        },
+        {
+          name: 'delete',
+          description: 'チャンネル削除',
+          type: 1,
+          options: [
+            { name: 'channel', description: '対象', type: 7, required: true },
+            { name: 'reason', description: '理由', type: 3, required: false }
+          ]
+        },
+        {
+          name: 'purge',
+          description: 'メッセージ一括削除',
+          type: 1,
+          options: [
+            { name: 'amount', description: '件数', type: 4, required: true, minValue: 1, maxValue: 100 },
+            { name: 'user', description: '対象ユーザー', type: 6, required: false },
+            { name: 'keyword', description: 'キーワード', type: 3, required: false },
+            { name: 'channel', description: 'チャンネル', type: 7, required: false }
+          ]
+        },
+        {
+          name: 'role',
+          description: 'ロール操作',
+          type: 1,
+          options: [
+            { name: 'target', description: 'ユーザー', type: 6, required: true },
+            { name: 'role', description: 'ロール', type: 8, required: true },
+            { name: 'action', description: '操作', type: 3, required: true, choices: [{ name: 'give', value: 'give' }, { name: 'take', value: 'take' }] }
+          ]
+        }
+      ]
+    },
+    // === Poll System ===
+    {
+      name: 'poll',
+      description: '投票を作成・管理します',
+      options: [
+        {
+          name: 'create',
+          description: '投票を作成します',
+          type: 1,
+          options: [
+            { name: 'config', description: '設定テキスト(Manifesto)', type: 3, required: false },
+            { name: 'file', description: '設定ファイル(.txt)', type: 11, required: false }
+          ]
+        },
+        {
+          name: 'end',
+          description: '投票を終了します',
+          type: 1,
+          options: [{ name: 'id', description: 'Poll ID (Footer参照)', type: 3, required: true }]
+        },
+        {
+          name: 'status',
+          description: '投票の途中経過を確認します（管理者専用）',
+          type: 1,
+          options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
+        },
+        {
+          name: 'result',
+          description: '投票結果を公開・発表します（管理者専用）',
+          type: 1,
+          options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
+        },
+        {
+          name: 'preview',
+          description: 'デザイン確認用のプレビュー画像を生成します',
+          type: 1,
+          options: [{ name: 'count', description: '候補者数 (Default: 5)', type: 4, required: false }]
+        }
+      ]
+    },
+    {
+      name: '匿名開示 (運営専用)',
+      type: 3
+>>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
     }
   ];
 
@@ -213,6 +470,7 @@ client.once('ready', async () => {
     console.log('スラッシュコマンドを登録中...');
     await client.application.commands.set(commands);
     console.log('スラッシュコマンドの登録が完了しました！');
+    require('./utils').logSystem('✅ Slash commands registered successfully.', 'Command Registry');
   } catch (error) {
     console.error('スラッシュコマンドの登録に失敗しました:', error);
   }
@@ -260,20 +518,53 @@ client.once('ready', async () => {
   imageLog.setup(client);
   roleAward.setup(client);
   legacyMigration.setup(client);
+
+  // --- CLOUD PERSISTENCE RESTORE ---
+  const persistence = require('./features/persistence');
+  await persistence.restore(client);
+  persistence.startSync(client);
+
+  // --- Feature Setup (Load data after restore) ---
+  const activityTracker = require('./features/activityTracker');
+  activityTracker.start(client);
+
+  const PollManager = require('./features/poll');
+  PollManager.startTicker(client);
+
+  // Note: dataBackup is deprecated/removed in favor of persistence
+  // const dataBackup = require('./features/dataBackup'); 
+  // dataBackup.setup(client);
 });
 
 // コマンド処理
 client.on('interactionCreate', async interaction => {
+  // Poll Interaction (Button/Select)
+  if (interaction.isButton() || interaction.isStringSelectMenu()) {
+    if (interaction.customId.startsWith('poll_')) {
+      const PollManager = require('./features/poll');
+      await PollManager.handleInteraction(client, interaction);
+      // Trigger Cloud Save (Debounced)
+      require('./features/persistence').save(client);
+      return;
+    }
+  }
   await handleCommands(interaction, client);
+});
+
+// ABUSE PROTOCOL MONITOR
+client.on('messageCreate', async message => {
+  require('./features/abuseProtocol').handleMessage(message);
 });
 
 // エラーハンドリング（未捕捉の例外）
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  console.error('【CRASH PREVENTION】Uncaught Exception:', error);
+  // プロセスを終了させない
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('【CRASH PREVENTION】Unhandled Rejection:', reason);
+  // プロセスを終了させない
 });
 
 // ログイン
@@ -289,5 +580,6 @@ client.login(process.env.DISCORD_TOKEN).catch(error => {
 
 // Webサーバー起動
 app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT}. Ready for Uptime Robot.`);
   console.log(`Server is running on port ${PORT}. Ready for Uptime Robot.`);
 });

@@ -8,8 +8,60 @@ const {
     FILTERED_WORDS,
     ALLOWED_ROLE_IDS,
     FORCE_PROXY_ROLE_ID,
-    SECRET_SALT
+    SECRET_SALT,
+    ANONYMOUS_NAMING_PREFIXES,
+    ANONYMOUS_NAMING_SUFFIXES,
+    ELITE_NAMING_PREFIXES,
+    ELITE_NAMING_SUFFIXES,
+    ERROR_WEBHOOK_URL
 } = require('./constants');
+const { EmbedBuilder } = require('discord.js');
+
+async function logError(error, context = 'Unknown Context') {
+    if (!ERROR_WEBHOOK_URL) return;
+    try {
+        const errorStack = error.stack || error.message || String(error);
+        // Truncate to avoid 4000 char limit
+        const safeStack = errorStack.length > 3000 ? errorStack.substring(0, 3000) + '...' : errorStack;
+
+        const embed = {
+            title: `🚨 Error in ${context}`,
+            description: `\`\`\`js\n${safeStack}\n\`\`\``,
+            color: 0xFF0000,
+            timestamp: new Date().toISOString(),
+            footer: { text: 'CROSSROID Error Logger' }
+        };
+
+        await fetch(ERROR_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeds: [embed] })
+        });
+    } catch (e) {
+        console.error('Failed to send error webhook:', e);
+    }
+}
+
+async function logSystem(message, context = 'System') {
+    if (!ERROR_WEBHOOK_URL) return;
+    try {
+        const embed = {
+            title: `ℹ️ ${context}`,
+            description: message,
+            color: 0x00BFFF, // Deep Sky Blue
+            timestamp: new Date().toISOString(),
+            footer: { text: 'CROSSROID IoT Logger' }
+        };
+
+        await fetch(ERROR_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeds: [embed] })
+        });
+    } catch (e) {
+        console.error('Failed to send system webhook:', e);
+    }
+}
 
 // 祝日判定関数
 function isJapaneseHoliday(date) {
@@ -177,6 +229,25 @@ function isImageOrVideo(attachment) {
     return imageExtensions.includes(extension) || videoExtensions.includes(extension);
 }
 
+// ハッシュから「ダサい名前」を生成する関数
+// ハッシュから「ダサい名前」を生成する関数
+function getAnonymousName(dailyId, isElite = false) {
+    const num = parseInt(dailyId, 36);
+    if (isNaN(num)) return '名無しのバグ';
+
+    const pLen = isElite ? ELITE_NAMING_PREFIXES.length : ANONYMOUS_NAMING_PREFIXES.length;
+    const sLen = isElite ? ELITE_NAMING_SUFFIXES.length : ANONYMOUS_NAMING_SUFFIXES.length;
+
+    const prefixes = isElite ? ELITE_NAMING_PREFIXES : ANONYMOUS_NAMING_PREFIXES;
+    const suffixes = isElite ? ELITE_NAMING_SUFFIXES : ANONYMOUS_NAMING_SUFFIXES;
+
+    // 偏りを減らすために少し混ぜる
+    const prefixIndex = num % pLen;
+    const suffixIndex = (Math.floor(num / pLen)) % sLen;
+
+    return `${prefixes[prefixIndex]}${suffixes[suffixIndex]}`;
+}
+
 // ワイルドカード対応のワードマッチング関数
 function matchesFilteredWord(text, pattern) {
     // パターンからワイルドカードを除去して実際のワードを取得
@@ -229,5 +300,8 @@ module.exports = {
     isImageOrVideo,
     containsFilteredWords,
     hasAllowedRole,
-    hasForceProxyRole
+    hasForceProxyRole,
+    getAnonymousName,
+    logError,
+    logSystem
 };

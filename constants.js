@@ -1,12 +1,40 @@
+// /anonymous のユーザーごとのクールダウン管理（30秒）
+const ANONYMOUS_COOLDOWN_MS = 20 * 1000;
 
-// /cronymous のユーザーごとのクールダウン管理（30秒）
-const CRONYMOUS_COOLDOWN_MS = 30 * 1000;
+// 匿名投稿の累積ペナルティ設定 (1日ごとの発言回数に基づく)
+const ANONYMOUS_COOLDOWN_TIERS = [
+    { limit: 3, time: 20 * 1000 },       // 1-3回目: 20秒
+    { limit: 10, time: 60 * 1000 },      // 4-10回目: 1分
+    { limit: 20, time: 5 * 60 * 1000 },  // 11-20回目: 5分
+    { limit: Infinity, time: 30 * 60 * 1000 } // 21回目以降: 30分
+];
+
+// 「ダサい名札」用の単語リスト
+const ANONYMOUS_NAMING_PREFIXES = [
+    '弱そうな', '陰湿な', '間の抜けた', '騒がしい', '哀れな', '勘違いした', '空気の読めない',
+    '不幸な', '無能な', '幼稚な', '自意識過剰な', '暇を持て余した', '必死な', '痛々しい', "チノ学院みたいな", "アスペっぽい", "オナニーずっとしてそうな", "ガチゲイ"
+];
+
+const ANONYMOUS_NAMING_SUFFIXES = [
+    'スライム', 'ゴブリン', '囚人', 'ピエロ', '量産型', 'ニート',
+    'オタク', 'こどおじ', 'ネット弁慶', 'かまってちゃん', '被害妄想', '見習い', 'モブ', "弱者男性"
+];
+
+const ELITE_NAMING_PREFIXES = [
+    '高貴な', '選ばれし', '優雅な', '天才的な', '神に愛された', '伝説の', '覚醒した',
+    '至高の', '黄金の', 'SSR', '課金した', '徳を積んだ', '上級', 'エリート'
+];
+
+const ELITE_NAMING_SUFFIXES = [
+    '貴族', '騎士', '英雄', '覇者', '大富豪', '将軍', '賢者',
+    'マスター', 'キング', 'プレジデント', 'オーナー', '株主', 'VIP'
+];
 
 // 自動代行投稿（メディア）のユーザーごとのクールダウン管理（20秒）
-const AUTO_PROXY_COOLDOWN_MS = 20 * 1000;
+const AUTO_PROXY_COOLDOWN_MS = 15 * 1000;
 
 // 特定ワード自動代行のユーザーごとのクールダウン管理（30秒）
-const WORD_PROXY_COOLDOWN_MS = 30 * 1000;
+const WORD_PROXY_COOLDOWN_MS = 15 * 1000;
 
 // フィルタリング対象のワードリスト（ワイルドカード対応）
 const FILTERED_WORDS = [
@@ -21,7 +49,9 @@ const FILTERED_WORDS = [
     '*中１*', '*中２*', '*中３*',
     '*高１*', '*高２*', '*高３*',
     '*ショタ*', '*しょた*',
-    '*低年齢*', '*ガキ*', '*子供*', '*まんこ*', '*マンコ*', '*レイプ*', '*セックス*', '*おっぱい*',
+    '*低年齢*', '*ガキ*', '*子供*', '*まんこ*', '*マンコ*', '*レイプ*', '*セックス*', '*おっぱい*', "BAN", "エプスタイン",
+    '*グルーミング*', '*買春*', '*売春*', '*パパ活*', '*ママ活*', '*P活*', '*JKビジネス*',
+    '*家出*', '*泊めて*', '*神待ち*', '*裏垢*', '*オフパコ*', '*セフレ*'
 ];
 
 // 特定のロールIDのリスト（代行投稿をスキップするロール）
@@ -50,18 +80,21 @@ const ALLOWED_ROLE_IDS = [
 // 強制代行投稿ロールID（このロールを持っている人は代行投稿される）
 const FORCE_PROXY_ROLE_ID = '1431905155913089133';
 
+// 上級ロメダ民ロールID (ブーストロール)
+const ELITE_ROLE_ID = '1433804919315628032';
+
 // レベル10ロールID
 const LEVEL_10_ROLE_ID = '1369627346201481239';
 
 // 現在の世代ロールID
 const CURRENT_GENERATION_ROLE_ID = '1433777496767074386';
 
-// メインチャンネルID
-const MAIN_CHANNEL_ID = '1431905157657923646';
+// メインチャンネルID (ロメダメイン雑談)
+const MAIN_CHANNEL_ID = '1433798719752638505';
 
 // 時報機能の設定
 const TIME_REPORT_HOURS = [6, 9, 12, 15, 18, 21, 24, 3]; // 24時は0時として扱う
-const TIME_REPORT_CHANNEL_ID = '1431905157657923646';
+const TIME_REPORT_CHANNEL_ID = '1433798719752638505';
 
 // 部活カテゴリID
 const CLUB_CATEGORY_IDS = [
@@ -92,7 +125,12 @@ const VC_NOTIFY_THRESHOLDS = [10, 15, 20, 25];
 const RANDOM_MENTION_COOLDOWN_MS = 30 * 1000; // 30秒
 
 module.exports = {
-    CRONYMOUS_COOLDOWN_MS,
+    ANONYMOUS_COOLDOWN_MS,
+    ANONYMOUS_COOLDOWN_TIERS,
+    ANONYMOUS_NAMING_PREFIXES,
+    ANONYMOUS_NAMING_SUFFIXES,
+    ELITE_NAMING_PREFIXES,
+    ELITE_NAMING_SUFFIXES,
     AUTO_PROXY_COOLDOWN_MS,
     WORD_PROXY_COOLDOWN_MS,
     FILTERED_WORDS,
@@ -112,8 +150,14 @@ module.exports = {
     VC_NOTIFY_THRESHOLDS,
     RANDOM_MENTION_COOLDOWN_MS,
     EVENT_CATEGORY_ID: '1431905157657923645',
-    EVENT_NOTIFY_CHANNEL_ID: '1433779821363728505',
+    EVENT_NOTIFY_CHANNEL_ID: '1449794400925519964',
     EVENT_ADMIN_ROLE_ID: '1449783668049576107',
-    EVENT_ADMIN_ROLE_ID: '1449783668049576107',
-    SECRET_SALT: process.env.SECRET_SALT || 'WiJr8dS5IHdtp1KiCKOLrmoE0gMK0Ib8X1NsplGcQfqcj1CUUdy3J3ok7h0Lu4CDPGbYnIxoq27N08OcLrf4IGK8v6aJ68VTnMh6Iymetm4NOvAio4WG7j17IWN7s8CO' // 環境変数から読み込みするけどフォールバックで直書ソルトある適当
+    ADMIN_ROLE_ID: '1449783351459319839', // 治安監査局
+    TECHTEAM_ROLE_ID: '1449783668225740942', // 技術開発局
+    OWNER_ROLE_ID: '1431905156009693195',
+    SECRET_SALT: process.env.SECRET_SALT || 'WiJr8dS5IHdtp1KiCKOLrmoE0gMK0Ib8X1NsplGcQfqcj1CUUdy3J3ok7h0Lu4CDPGbYnIxoq27N08OcLrf4IGK8v6aJ68VTnMh6Iymetm4NOvAio4WG7j17IWN7s8CO',
+    ELITE_NAMING_PREFIXES,
+    ELITE_NAMING_SUFFIXES,
+    ELITE_ROLE_ID,
+    ERROR_WEBHOOK_URL: 'https://discord.com/api/webhooks/1451581546816475279/28nAWpCDNJh_ms9yIl-keP2S35WToKLuD_MWHWXF28qnTkdrgSc_7WBKyR5rHR4kI2eG'
 };
