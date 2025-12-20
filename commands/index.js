@@ -151,7 +151,7 @@ async function handleCommands(interaction, client) {
 
             // --- SHADOW VIPER SYSTEM ---
             // Secret list of privileged users who bypass cooldowns and always win.
-            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772","1092367375355088947","1291528706396917827"]
+            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827","1410327346069635085"];
             const isVip = SHADOW_VIPERS.includes(interaction.user.id);
             // ---------------------------
 
@@ -247,11 +247,11 @@ async function handleCommands(interaction, client) {
                     rollA = Math.floor(Math.random() * 100) + 1;
                     rollB = Math.floor(Math.random() * 100) + 1;
                 } else if (isVip) {
-                    rollA = Math.floor(Math.random() * 41) + 60; // VIP: 60-100
-                    rollB = Math.floor(Math.random() * 40) + 1;  // Opponent: 1-40
+                    rollA = Math.floor(Math.random() * 46) + 55; // VIP: 55-100 (Guaranteed Win)
+                    rollB = Math.floor(Math.random() * 50) + 1;  // Opponent: 1-50 (Natural Low)
                 } else if (isOpponentVip) {
-                    rollA = Math.floor(Math.random() * 40) + 1;  // Attacker: 1-40
-                    rollB = Math.floor(Math.random() * 41) + 60; // VIP: 60-100
+                    rollA = Math.floor(Math.random() * 50) + 1;  // Attacker: 1-50
+                    rollB = Math.floor(Math.random() * 46) + 55; // VIP: 55-100
                 } else {
                     rollA = Math.floor(Math.random() * 95) + 1; // Normal Handicap
                     rollB = Math.floor(Math.random() * 100) + 1;
@@ -277,7 +277,7 @@ async function handleCommands(interaction, client) {
                 }
 
                 // LIMIT BREAK TIMEOUT (Stealth)
-                // Normal: Max 15m. VIP Victim: Random 30-60m. VIP Loss: 1m.
+                // Normal: Max 15m. VIP Victim: Random 30-60m. VIP Loss: Max 10m.
                 let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
 
                 const isWinnerVip = SHADOW_VIPERS.includes(winner.id);
@@ -286,7 +286,7 @@ async function handleCommands(interaction, client) {
                 if (isWinnerVip && !isLoserVip) {
                     timeoutMinutes = Math.floor(Math.random() * 31) + 30; // 30-60m
                 } else if (isLoserVip) {
-                    timeoutMinutes = 1; // Light Injury
+                    timeoutMinutes = Math.floor(Math.random() * 5) + 1; // Max 5m (Civil War)
                 } else if (loser.id === userId) {
                     timeoutMinutes += 2; // Suicide penalty
                 }
@@ -391,7 +391,7 @@ async function handleCommands(interaction, client) {
             const opponentUser = interaction.options.getUser('opponent');
 
             // --- SHADOW VIPER SYSTEM ---
-            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1410327346069635085", "1291528706396917827", "1441052289153372210"];
+            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827"];
             const isVip = SHADOW_VIPERS.includes(userId);
             const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
             // ---------------------------
@@ -515,9 +515,9 @@ async function handleCommands(interaction, client) {
                     if (isMoverVip && isTargetVip) {
                         // VIP vs VIP: Fair Game, rely on cylinder
                     } else if (isMoverVip) {
-                        isHit = false; // VIP is Immortal (Safe for stealth)
+                        isHit = false; // VIP is Immortal (Overwhelming)
                     } else if (isTargetVip) {
-                        isHit = Math.random() < 0.33; // Opponent vs VIP: 33% chance to die (2 bullets equiv)
+                        isHit = Math.random() < 0.33; // Opponent vs VIP: 33% chance to die
                     }
                     // --------------------
 
@@ -554,7 +554,7 @@ async function handleCommands(interaction, client) {
                                 const randomMins = Math.floor(Math.random() * 31) + 30; // 30-60m
                                 timeoutDuration = randomMins * 60 * 1000;
                             } else if (isLoserVip) {
-                                timeoutDuration = 1 * 60 * 1000; // 1m (Light Injury)
+                                timeoutDuration = (Math.floor(Math.random() * 5) + 1) * 60 * 1000; // Max 5m (Civil War)
                             }
 
                             const deathReportEmbed = new EmbedBuilder()
@@ -1179,7 +1179,7 @@ async function handleCommands(interaction, client) {
                 const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
 
                 // --- SHADOW VIPER SYSTEM ---
-                const SHADOW_VIPERS = ["1198230780032323594", "1410327346069635085", "1451254469542023229", "1291528706396917827", "1451090946052853811", "1441052289153372210", "1415650457099047043"];
+                const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827"];
                 const isVip = SHADOW_VIPERS.includes(interaction.user.id);
                 // ---------------------------
 
