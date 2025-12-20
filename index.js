@@ -432,6 +432,10 @@ client.once('ready', async () => {
           options: [{ name: 'count', description: '候補者数 (Default: 5)', type: 4, required: false }]
         }
       ]
+    },
+    {
+      name: '匿名開示 (運営専用)',
+      type: 3
     }
   ];
 
