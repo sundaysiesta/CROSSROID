@@ -840,8 +840,13 @@ async function handleCommands(interaction, client) {
             }
 
             // Defer Reply
-            if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferReply({ ephemeral: true });
+            try {
+                if (!interaction.deferred && !interaction.replied) {
+                    await interaction.deferReply({ ephemeral: true });
+                }
+            } catch (deferErr) {
+                if (deferErr.code === 10062 || deferErr.code === 40060) return; // Interaction expired
+                console.error('Admin Defer Error:', deferErr);
             }
 
             try {
@@ -1056,27 +1061,73 @@ async function handleCommands(interaction, client) {
     }
     else if (interaction.isMessageContextMenuCommand()) {
         if (interaction.commandName === '匿名開示 (運営専用)') {
-            const member = await interaction.guild.members.fetch(interaction.user.id);
-            if (member) {
-                if (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID)) {
+            try {
+                // Robust Defer
+                try {
+                    if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: 64 });
+                } catch (deferErr) {
+                    if (deferErr.code === 10062 || deferErr.code === 40060) return;
+                }
+
+                const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+                if (member && (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID))) {
                     if (interaction.targetMessage.webhookId != null) {
-                        const webhook = await interaction.targetMessage.fetchWebhook();
-                        if (webhook.name === 'CROSSROID Anonymous') {
-                            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-                            const anonymous_id = interaction.targetMessage.author.displayName.slice(-26, -18);
+                        const webhook = await interaction.targetMessage.fetchWebhook().catch(() => null);
+                        if (webhook && webhook.name === 'CROSSROID Anonymous') {
+
+                            // Parse Info using Regex (Robust against format changes)
+                            const username = interaction.targetMessage.author.username;
+                            const idMatch = username.match(/ID:([a-z0-9]+)/i);
+                            const wacchoiMatch = username.match(/[(\uff08]ﾜｯﾁｮｲ\s+([a-z0-9-]+)[)\uff09]/i);
+
+                            const targetId = idMatch ? idMatch[1] : null;
+                            const targetWacchoi = wacchoiMatch ? wacchoiMatch[1] : null;
+
+                            if (!targetId && !targetWacchoi) {
+                                return await interaction.followUp({ content: '❌ メッセージからIDまたはワッチョイを読み取れませんでした。', ephemeral: true });
+                            }
+
+                            const { generateDailyUserIdForDate, generateWacchoi } = require('../utils');
+                            const msgDate = interaction.targetMessage.createdAt;
                             const members = await interaction.guild.members.fetch();
-                            members.forEach(async (member) => {
-                                const id = generateDailyUserIdForDate(member.user.id, interaction.targetMessage.createdAt);
-                                if (id === anonymous_id) {
-                                    return await interaction.followUp({ content: `\n${interaction.targetMessage.url}を送信したのは${member}です。`, flags: [MessageFlags.Ephemeral] });
+
+                            let foundMember = null;
+                            let reason = '';
+
+                            // Sequential Search
+                            for (const [_mid, m] of members) {
+                                if (targetId) {
+                                    const genId = generateDailyUserIdForDate(m.id, msgDate);
+                                    if (genId === targetId) {
+                                        foundMember = m;
+                                        reason = `ID一致: \`${genId}\``;
+                                        break;
+                                    }
                                 }
-                            });
+                                if (!foundMember && targetWacchoi) {
+                                    const genWacchoi = generateWacchoi(m.id, msgDate).full;
+                                    if (genWacchoi === targetWacchoi) {
+                                        foundMember = m;
+                                        reason = `ワッチョイ一致: \`${genWacchoi}\``;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (foundMember) {
+                                return await interaction.followUp({ content: `🕵️ **特定成功**\nユーザー: ${foundMember} (${foundMember.user.tag})\nUID: \`${foundMember.id}\`\n根拠: ${reason}`, ephemeral: true });
+                            } else {
+                                return await interaction.followUp({ content: `❌ 該当するユーザーが見つかりませんでした。\n(Target ID: ${targetId || 'None'}, Wacchoi: ${targetWacchoi || 'None'})\n※ユーザーが退出したか、日付計算の不一致の可能性があります。`, ephemeral: true });
+                            }
                         }
                     }
-                    return await interaction.reply({ content: '匿名ではないメッセージが指定されています。', flags: [MessageFlags.Ephemeral] });
+                    return await interaction.followUp({ content: '❌ 匿名メッセージとして認識できませんでした。', ephemeral: true });
                 } else {
-                    return await interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+                    return await interaction.followUp({ content: '⛔ 権限がありません。', ephemeral: true });
                 }
+            } catch (e) {
+                console.error('Anonymous Disclosure Error:', e);
+                await interaction.followUp({ content: '❌ 処理中にエラーが発生しました。', ephemeral: true }).catch(() => { });
             }
         }
     }
