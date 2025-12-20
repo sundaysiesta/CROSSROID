@@ -178,6 +178,34 @@ client.once('ready', async () => {
           required: false
         }
       ]
+    },
+    {
+      name: 'duel',
+      description: '他のユーザーと決闘します',
+      options: [
+        {
+          name: 'opponent',
+          description: '対戦相手',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'duel_russian',
+      description: 'ロシアンルーレットで対戦します',
+      options: [
+        {
+          name: 'opponent',
+          description: '対戦相手',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'duel_ranking',
+      description: '決闘のランキングを表示します'
     }
   ];
 
