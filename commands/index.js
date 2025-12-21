@@ -25,11 +25,8 @@ const bumpCooldowns = new Map();
 const randomMentionCooldowns = new Map();
 const processingCommands = new Set();
 
-const SUPER_ADMIN_ID = '1198230780032323594';
-
 // 権限チェックヘルパー
 async function checkAdmin(interaction) {
-    if (interaction.user.id === SUPER_ADMIN_ID) return true;
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (member && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
     if (member && member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
