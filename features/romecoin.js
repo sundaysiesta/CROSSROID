@@ -3,6 +3,8 @@ const { DATABASE_CHANNEL_ID } = require('../constants');
 const { checkAdmin } = require('../utils');
 
 let romecoin_data = new Object();
+let message_cooldown_users = new Array();
+let reaction_cooldown_users = new Array();
 
 async function clientReady(client) {
     // DBからデータを取得
@@ -26,6 +28,12 @@ async function clientReady(client) {
 
         await db_channel.send({files: ['./.tmp/romecoin_data.json']});
     }, 60000);
+
+    // 10秒ごとにクールダウンをリセット
+    setInterval(async () => {
+        message_cooldown_users = new Array();
+        reaction_cooldown_users = new Array();
+    }, 10000);
 }
 
 async function interactionCreate(interaction) {
@@ -59,6 +67,7 @@ async function interactionCreate(interaction) {
 
 async function messageCreate(message) {
     if (message.author.bot) return;
+    if (message_cooldown_users.includes(message.author.id)) return;
 
     let score = 10;
 
@@ -112,15 +121,20 @@ async function messageCreate(message) {
             romecoin_data[reference.author.id] = Math.round((romecoin_data[reference.author.id] || 0) + 5);
         }
     }
+
+    message_cooldown_users.push(message.author.id);
 }
 
 async function messageReactionAdd(reaction, user) {
     if (user.bot) return;
     if (reaction.message.author.bot) return;
     if (reaction.message.author.id === user.id) return;
+    if (reaction_cooldown_users.includes(reaction.message.author.id)) return;
 
     // メッセージがリアクションされたときにも付与
     romecoin_data[reaction.message.author.id] = Math.round((romecoin_data[reaction.message.author.id] || 0) + 5);
+    
+    reaction_cooldown_users.push(reaction.message.author.id);
 }
 
 module.exports = {
