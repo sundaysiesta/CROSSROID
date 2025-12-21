@@ -1,15 +1,9 @@
 # 依存関係
+package-lock.json
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # 環境変数ファイル
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
 
 # ログファイル
 logs
@@ -27,7 +21,6 @@ coverage/
 
 # 一時ファイル
 .tmp/
-.temp/
 
 # OS生成ファイル
 .DS_Store
