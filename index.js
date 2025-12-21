@@ -234,7 +234,6 @@ client.once('ready', async () => {
       ]
     },
     {
-<<<<<<< HEAD
       name: 'duel',
       description: '他のユーザーと決闘します',
       options: [
@@ -243,48 +242,10 @@ client.once('ready', async () => {
           description: '対戦相手',
           type: 6, // USER
           required: true
-=======
-      name: 'activity_backfill',
-      description: 'アクティビティログを手動で再取得します（運営専用）'
-    },
-
-    // === Admin Suite ===
-    {
-      name: 'admin_control',
-      description: 'チャンネル管理（ロック/解除/低速/Wipe）',
-      options: [
-        {
-          name: 'lock',
-          description: 'チャンネルをロックします',
-          type: 1, // SUB_COMMAND
-          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: false }]
-        },
-        {
-          name: 'unlock',
-          description: 'チャンネルのロックを解除します',
-          type: 1,
-          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: false }]
-        },
-        {
-          name: 'slowmode',
-          description: '低速モードを設定します',
-          type: 1,
-          options: [
-            { name: 'seconds', description: '秒数(0解除)', type: 4, required: true },
-            { name: 'channel', description: '対象チャンネル', type: 7, required: false }
-          ]
-        },
-        {
-          name: 'wipe',
-          description: '【危険】チャンネルを再生成してログを消去します',
-          type: 1,
-          options: [{ name: 'channel', description: '対象チャンネル', type: 7, required: true }]
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
         }
       ]
     },
     {
-<<<<<<< HEAD
       name: 'duel_russian',
       description: 'ロシアンルーレットで対戦します',
       options: [
@@ -293,176 +254,12 @@ client.once('ready', async () => {
           description: '対戦相手',
           type: 6, // USER
           required: true
-=======
-      name: 'admin_user_mgmt',
-      description: 'ユーザー管理（処罰/解除/情報/操作）',
-      options: [
-        {
-          name: 'action',
-          description: '処罰または解除を行います',
-          type: 1,
-          options: [
-            { name: 'target', description: '対象ユーザー', type: 6, required: true },
-            {
-              name: 'type',
-              description: '操作タイプ',
-              type: 3,
-              required: true,
-              choices: [
-                { name: 'Timeout', value: 'timeout' },
-                { name: 'Untimeout', value: 'untimeout' },
-                { name: 'Kick', value: 'kick' },
-                { name: 'Ban', value: 'ban' },
-                { name: 'Unban', value: 'unban' }
-              ]
-            },
-            { name: 'reason', description: '理由', type: 3, required: false },
-            { name: 'duration', description: 'Timeout期間(分)', type: 4, required: false }
-          ]
-        },
-        {
-          name: 'nick',
-          description: 'ニックネームを変更します',
-          type: 1,
-          options: [
-            { name: 'target', description: '対象ユーザー', type: 6, required: true },
-            { name: 'name', description: '新しい名前(空欄でリセット)', type: 3, required: false } // Discord allows empty to reset? Usually commands need content. Optional 'name'
-          ]
-        },
-        {
-          name: 'dm',
-          description: 'BotからDMを送信します',
-          type: 1,
-          options: [
-            { name: 'target', description: '送信先ユーザー', type: 6, required: true },
-            { name: 'content', description: '内容', type: 3, required: true },
-            { name: 'anonymous', description: '匿名(Bot名義)にするか', type: 5, required: false }
-          ]
-        },
-        {
-          name: 'whois',
-          description: 'ユーザーの詳細情報を表示します',
-          type: 1,
-          options: [{ name: 'target', description: '対象ユーザー', type: 6, required: true }]
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
         }
       ]
     },
     {
-<<<<<<< HEAD
       name: 'duel_ranking',
       description: '決闘のランキングを表示します'
-=======
-      name: 'admin_logistics',
-      description: 'ロジスティクス（移動/作成/削除/発言）',
-      options: [
-        {
-          name: 'move_all',
-          description: 'VC参加者を全員移動させます',
-          type: 1,
-          options: [
-            { name: 'from', description: '移動元VC', type: 7, required: true }, // ChannelType check in logic
-            { name: 'to', description: '移動先VC', type: 7, required: true }
-          ]
-        },
-        {
-          name: 'say',
-          description: 'Botとして発言します',
-          type: 1,
-          options: [
-            { name: 'channel', description: '送信先', type: 7, required: true },
-            { name: 'content', description: '内容', type: 3, required: true },
-            { name: 'reply_to', description: 'リプライ先のメッセージID', type: 3, required: false },
-            { name: 'delete_after', description: '自動削除までの秒数(0で無効)', type: 4, required: false },
-            { name: 'repeat', description: '繰り返し回数(たぶんMax10)', type: 4, required: false }
-          ]
-        },
-        {
-          name: 'create',
-          description: 'チャンネル作成',
-          type: 1,
-          options: [
-            { name: 'name', description: '名前', type: 3, required: true },
-            { name: 'type', description: 'タイプ(text/voice)', type: 3, required: false, choices: [{ name: 'Text', value: 'text' }, { name: 'Voice', value: 'voice' }] },
-            { name: 'category', description: 'カテゴリID', type: 3, required: false }
-          ]
-        },
-        {
-          name: 'delete',
-          description: 'チャンネル削除',
-          type: 1,
-          options: [
-            { name: 'channel', description: '対象', type: 7, required: true },
-            { name: 'reason', description: '理由', type: 3, required: false }
-          ]
-        },
-        {
-          name: 'purge',
-          description: 'メッセージ一括削除',
-          type: 1,
-          options: [
-            { name: 'amount', description: '件数', type: 4, required: true, minValue: 1, maxValue: 100 },
-            { name: 'user', description: '対象ユーザー', type: 6, required: false },
-            { name: 'keyword', description: 'キーワード', type: 3, required: false },
-            { name: 'channel', description: 'チャンネル', type: 7, required: false }
-          ]
-        },
-        {
-          name: 'role',
-          description: 'ロール操作',
-          type: 1,
-          options: [
-            { name: 'target', description: 'ユーザー', type: 6, required: true },
-            { name: 'role', description: 'ロール', type: 8, required: true },
-            { name: 'action', description: '操作', type: 3, required: true, choices: [{ name: 'give', value: 'give' }, { name: 'take', value: 'take' }] }
-          ]
-        }
-      ]
-    },
-    // === Poll System ===
-    {
-      name: 'poll',
-      description: '投票を作成・管理します',
-      options: [
-        {
-          name: 'create',
-          description: '投票を作成します',
-          type: 1,
-          options: [
-            { name: 'config', description: '設定テキスト(Manifesto)', type: 3, required: false },
-            { name: 'file', description: '設定ファイル(.txt)', type: 11, required: false }
-          ]
-        },
-        {
-          name: 'end',
-          description: '投票を終了します',
-          type: 1,
-          options: [{ name: 'id', description: 'Poll ID (Footer参照)', type: 3, required: true }]
-        },
-        {
-          name: 'status',
-          description: '投票の途中経過を確認します（管理者専用）',
-          type: 1,
-          options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
-        },
-        {
-          name: 'result',
-          description: '投票結果を公開・発表します（管理者専用）',
-          type: 1,
-          options: [{ name: 'id', description: 'Poll ID', type: 3, required: true }]
-        },
-        {
-          name: 'preview',
-          description: 'デザイン確認用のプレビュー画像を生成します',
-          type: 1,
-          options: [{ name: 'count', description: '候補者数 (Default: 5)', type: 4, required: false }]
-        }
-      ]
-    },
-    {
-      name: '匿名開示 (運営専用)',
-      type: 3
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
     }
   ];
 

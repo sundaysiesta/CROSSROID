@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 const { EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName } = require('../utils');
-=======
-const { EmbedBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
-const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName, getAnonymousName } = require('../utils');
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
 const {
     ANONYMOUS_COOLDOWN_MS,
     ANONYMOUS_COOLDOWN_TIERS,
@@ -17,14 +12,7 @@ const {
     EVENT_CATEGORY_ID,
     EVENT_NOTIFY_CHANNEL_ID,
     EVENT_ADMIN_ROLE_ID,
-<<<<<<< HEAD
     HIGHLIGHT_CHANNEL_ID,
-=======
-    ELITE_ROLE_ID,
-    ADMIN_ROLE_ID,
-    TECHTEAM_ROLE_ID,
-    OWNER_ROLE_ID,
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
 } = require('../constants');
 const { generateTimeReportMessage } = require('../features/timeSignal');
 const fs = require('fs');
@@ -49,7 +37,6 @@ async function checkAdmin(interaction) {
 }
 
 async function handleCommands(interaction, client) {
-<<<<<<< HEAD
     // ボタンインタラクションの処理
     if (interaction.isButton()) {
         // 決闘ボタンの処理は既にcollector内で処理されるため、ここでは不要
@@ -57,14 +44,6 @@ async function handleCommands(interaction, client) {
     }
 
     if (!interaction.isChatInputCommand()) return;
-=======
-    if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'anonymous') {
-            // ... (Existing Anonymous Logic)
-            const commandKey = `anonymous_${interaction.user.id}_${interaction.id}`;
-            if (processingCommands.has(commandKey)) return interaction.reply({ content: '処理中です。', ephemeral: true });
-            processingCommands.add(commandKey);
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
 
             const now = Date.now();
             const dateObj = new Date();
@@ -1248,7 +1227,6 @@ async function handleCommands(interaction, client) {
             }
         }
     }
-<<<<<<< HEAD
 
     // duel コマンド
     if (interaction.commandName === 'duel') {
@@ -1795,8 +1773,6 @@ async function handleCommands(interaction, client) {
         }
         return;
     }
-=======
->>>>>>> 696768c82099fcea4813e153fd31260f778c17a1
 }
 
 // 30分ごとのクリーンアップ
