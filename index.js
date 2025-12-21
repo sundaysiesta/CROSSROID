@@ -236,7 +236,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
   await messageReactionAdd(reaction, user);
 });
 
-const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID);
+const errorlog_channel = client.channels.cache.get(ERRORLOG_CHANNEL_ID);
 client.on('error', async (error) => {
   await errorlog_channel.send({ content: error.message });
 });
