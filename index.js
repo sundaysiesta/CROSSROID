@@ -236,19 +236,18 @@ client.on('messageReactionAdd', async (reaction, user) => {
   await messageReactionAdd(reaction, user);
 });
 
-const errorlog_channel = client.channels.cache.get(ERRORLOG_CHANNEL_ID);
-client.on('error', async (error) => {
-  await errorlog_channel.send({ content: error.message });
-});
-
 // エラーハンドリング（未捕捉の例外）
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', async (error) => {
   console.error('【CRASH PREVENTION】Uncaught Exception:', error);
+  const errorlog_channel = await client.channels.fetch('1129965437514428498');
+  await errorlog_channel.send({ content: error.message });
   // プロセスを終了させない
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', async (reason, promise) => {
   console.error('【CRASH PREVENTION】Unhandled Rejection:', reason);
+  const errorlog_channel = await client.channels.fetch('1129965437514428498');
+  await errorlog_channel.send({ content: reason.toString() });
   // プロセスを終了させない
 });
 
