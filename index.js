@@ -1,5 +1,5 @@
 // 必要なモジュールをインポート
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ContextMenuCommandBuilder, ApplicationCommandType } = require('discord.js');
 const express = require('express');
 const { execSync } = require('child_process');
 
@@ -210,6 +210,10 @@ client.once('ready', async () => {
           required: false
         }
       ]
+    },
+    {
+      name: '匿名開示 (運営専用)',
+      type: 3
     }
   ];
 
