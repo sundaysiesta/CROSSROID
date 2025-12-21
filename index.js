@@ -159,23 +159,7 @@ client.once('ready', async () => {
     },
     {
       name: 'duel',
-      description: '【決闘】世代ロール持ちに決闘を申し込みます（敗者は即座にタイムアウト）',
-      options: [
-        {
-          name: 'opponent',
-          description: '決闘相手（世代ロール必須）',
-          type: 6, // USER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'duel_ranking',
-      description: '【決闘】決闘のランキングを表示します（勝利数 / 連勝数）'
-    },
-    {
-      name: 'duel_russian',
-      description: '【ロシアン】実弾1発のリボルバーを回して交互に撃ち合います（敗者は闇に葬られます）',
+      description: '他のユーザーと決闘します',
       options: [
         {
           name: 'opponent',
@@ -184,6 +168,22 @@ client.once('ready', async () => {
           required: true
         }
       ]
+    },
+    {
+      name: 'duel_russian',
+      description: 'ロシアンルーレットで対戦します',
+      options: [
+        {
+          name: 'opponent',
+          description: '対戦相手',
+          type: 6, // USER
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'duel_ranking',
+      description: '決闘のランキングを表示します'
     },
     {
       name: 'event_create',
@@ -232,34 +232,6 @@ client.once('ready', async () => {
           required: false
         }
       ]
-    },
-    {
-      name: 'duel',
-      description: '他のユーザーと決闘します',
-      options: [
-        {
-          name: 'opponent',
-          description: '対戦相手',
-          type: 6, // USER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'duel_russian',
-      description: 'ロシアンルーレットで対戦します',
-      options: [
-        {
-          name: 'opponent',
-          description: '対戦相手',
-          type: 6, // USER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'duel_ranking',
-      description: '決闘のランキングを表示します'
     }
   ];
 

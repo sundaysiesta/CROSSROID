@@ -37,14 +37,8 @@ async function checkAdmin(interaction) {
 }
 
 async function handleCommands(interaction, client) {
-    // ボタンインタラクションの処理
-    if (interaction.isButton()) {
-        // 決闘ボタンの処理は既にcollector内で処理されるため、ここでは不要
-        return;
-    }
-
-    if (!interaction.isChatInputCommand()) return;
-
+    if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === 'anonymous') {
             const now = Date.now();
             const dateObj = new Date();
             const todayKey = `${dateObj.getFullYear()}${String(dateObj.getMonth() + 1).padStart(2, '0')}${String(dateObj.getDate()).padStart(2, '0')}`;
