@@ -290,6 +290,13 @@ function hasForceProxyRole(member) {
     return member.roles.cache.has(FORCE_PROXY_ROLE_ID);
 }
 
+async function checkAdmin(user) {
+    const member = await interaction.guild.members.fetch(user).catch(() => null);
+    if (member && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
+    if (member && member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
+    return false;
+}
+
 module.exports = {
     isJapaneseHoliday,
     getHolidayName,
@@ -304,5 +311,6 @@ module.exports = {
     hasForceProxyRole,
     getAnonymousName,
     logError,
-    logSystem
+    logSystem,
+    checkAdmin
 };

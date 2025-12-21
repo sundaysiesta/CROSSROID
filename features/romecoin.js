@@ -1,5 +1,6 @@
 const fs = require('fs');
 const { DATABASE_CHANNEL_ID } = require('../constants');
+const { checkAdmin } = require('../utils');
 
 let romecoin_data = new Object();
 
@@ -17,7 +18,7 @@ async function clientReady(client) {
     });
 
     // 60秒ごとにデータを送信
-    setInterval(async () => {
+    setInterval(async (db_channel) => {
         fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
             if (err) {
                 throw err;
@@ -29,10 +30,23 @@ async function clientReady(client) {
 }
 
 async function interactionCreate(interaction) {
-    if (interaction.isChatInputCommand() && interaction.commandName === 'romecoin') {
+    if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'romecoin') {
         const user = interaction.options.getUser('user') ? interaction.options.getUser('user').id : interaction.user.id;
         const romecoin = romecoin_data[user] || 0;
         interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
+    }
+    else if (interaction.commandName === 'database_export') {
+        if ((await checkAdmin(interaction.user))) {
+            fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
+                if (err) {
+                    throw err;
+                }
+            });
+
+            await interaction.reply({files: ['./.tmp/romecoin_data.json'], ephemeral: true });
+        }
     }
 }
 

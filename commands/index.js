@@ -21,6 +21,7 @@ const {
 const { generateTimeReportMessage } = require('../features/timeSignal');
 const fs = require('fs');
 const path = require('path');
+const { checkAdmin } = require('../utils');
 
 // コマンドごとのクールダウン管理
 const anonymousCooldowns = new Map();
@@ -28,14 +29,6 @@ const anonymousUsageCounts = new Map();
 const bumpCooldowns = new Map();
 const randomMentionCooldowns = new Map();
 const processingCommands = new Set();
-
-// 権限チェックヘルパー
-async function checkAdmin(interaction) {
-    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-    if (member && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
-    if (member && member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
-    return false;
-}
 
 async function handleCommands(interaction, client) {
     if (interaction.isChatInputCommand()) {
@@ -735,7 +728,7 @@ async function handleCommands(interaction, client) {
         const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics', 'activity_backfill'];
         if (ADMIN_COMMANDS.includes(interaction.commandName)) {
             // Permission Check
-            if (!(await checkAdmin(interaction))) {
+            if (!(await checkAdmin(interaction.user))) {
                 return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
             }
 

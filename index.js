@@ -149,6 +149,7 @@ client.once('ready', async () => {
               option.setName('user')
               .setDescription('確認したいユーザー')
           ),
+      new SlashCommandBuilder().setName('database_export').setDescription('データベースをエクスポートします(運営専用)'),
       new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message)
   ].map(command => command.toJSON());
 
