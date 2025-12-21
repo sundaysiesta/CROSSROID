@@ -16,7 +16,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Config & Constants
-const { LEVEL_10_ROLE_ID, CURRENT_GENERATION_ROLE_ID, MAIN_CHANNEL_ID } = require('./constants');
+const { LEVEL_10_ROLE_ID, CURRENT_GENERATION_ROLE_ID, MAIN_CHANNEL_ID, ERRORLOG_CHANNEL_ID } = require('./constants');
 
 // --- CONSOLE PROXY SETUP (Redirect all logs to Webhook) ---
 require('./features/consoleProxy').setup();
@@ -76,9 +76,6 @@ app.get('/', (req, res) => {
 
 // ボットが準備完了したときに一度だけ実行されるイベント
 client.once('clientReady', async (client) => {
-  const _guild = await client.guilds.fetch('1431905155766419638');
-  await _guild.channels.create({name: 'errorlog', parent: '1449790496322097183', reason: 'CROSSROIDのエラーログを流すチャンネルを作成'});
-
   console.log(`Logged in as ${client.user.tag}!`);
   console.log(`CROSSROID, ready for duty.`);
 
@@ -239,10 +236,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
   await messageReactionAdd(reaction, user);
 });
 
-/*const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID);
+const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID);
 client.on('error', async (error) => {
   await errorlog_channel.send({ content: error.message });
-});*/
+});
 
 // エラーハンドリング（未捕捉の例外）
 process.on('uncaughtException', (error) => {
