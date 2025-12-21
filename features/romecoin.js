@@ -1,7 +1,7 @@
 const fs = require('fs');
 const { DATABASE_CHANNEL_ID } = require('../constants');
 
-const romecoin_data = new Object();
+let romecoin_data = new Object();
 
 async function clientReady(client) {
     // DBからデータを取得
