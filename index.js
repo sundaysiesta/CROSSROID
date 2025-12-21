@@ -29,7 +29,6 @@ const highlight = require('./features/highlight');
 const imageLog = require('./features/imageLog');
 const roleAward = require('./features/roleAward');
 const legacyMigration = require('./features/legacyMigration');
-// const githubWatcher = require('./features/githubWatcher'); // Disabled: commit notifications removed
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -89,9 +88,6 @@ client.once('ready', async () => {
     console.log(`現在の世代ロールID: ${CURRENT_GENERATION_ROLE_ID}`);
     console.log(`メインチャンネルID: ${MAIN_CHANNEL_ID}`);
   }
-
-  // GitHub Watcher disabled (commit notifications removed)
-  // githubWatcher.startWatcher(client);
 
   // スラッシュコマンドを登録
   const commands = [
