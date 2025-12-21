@@ -147,6 +147,7 @@ client.once('clientReady', async (client) => {
               option.setName('user')
               .setDescription('確認したいユーザー')
           ),
+      new SlashCommandBuilder().setName('romecoin_ranking').setDescription('ロメコインランキングを確認します'),
       new SlashCommandBuilder().setName('database_export').setDescription('データベースをエクスポートします(運営専用)'),
       new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message)
   ].map(command => command.toJSON());
