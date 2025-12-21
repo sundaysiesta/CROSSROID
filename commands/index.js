@@ -728,7 +728,7 @@ async function handleCommands(interaction, client) {
         const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics', 'activity_backfill'];
         if (ADMIN_COMMANDS.includes(interaction.commandName)) {
             // Permission Check
-            if (!(await checkAdmin(interaction.user))) {
+            if (!(await checkAdmin(interaction.member))) {
                 return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
             }
 

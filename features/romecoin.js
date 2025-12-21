@@ -38,7 +38,7 @@ async function interactionCreate(interaction) {
         interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
     }
     else if (interaction.commandName === 'database_export') {
-        if ((await checkAdmin(interaction.user))) {
+        if ((await checkAdmin(interaction.member))) {
             fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
                 if (err) {
                     throw err;

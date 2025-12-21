@@ -75,7 +75,7 @@ app.get('/', (req, res) => {
 });
 
 // ボットが準備完了したときに一度だけ実行されるイベント
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   console.log(`CROSSROID, ready for duty.`);
 
@@ -87,8 +87,6 @@ client.once('ready', async () => {
     console.log(`現在の世代ロールID: ${CURRENT_GENERATION_ROLE_ID}`);
     console.log(`メインチャンネルID: ${MAIN_CHANNEL_ID}`);
   }
-
-  await clientReady(client);
 
   // スラッシュコマンドを登録
   const commands = [
@@ -219,6 +217,7 @@ client.once('ready', async () => {
   // Note: dataBackup is deprecated/removed in favor of persistence
   // const dataBackup = require('./features/dataBackup'); 
   // dataBackup.setup(client);
+  await clientReady(client);
 });
 
 // コマンド処理

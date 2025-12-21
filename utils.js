@@ -13,7 +13,9 @@ const {
     ANONYMOUS_NAMING_SUFFIXES,
     ELITE_NAMING_PREFIXES,
     ELITE_NAMING_SUFFIXES,
-    ERROR_WEBHOOK_URL
+    ERROR_WEBHOOK_URL,
+    ADMIN_ROLE_ID,
+    TECHTEAM_ROLE_ID,
 } = require('./constants');
 const { EmbedBuilder } = require('discord.js');
 
@@ -290,10 +292,9 @@ function hasForceProxyRole(member) {
     return member.roles.cache.has(FORCE_PROXY_ROLE_ID);
 }
 
-async function checkAdmin(user) {
-    const member = await interaction.guild.members.fetch(user).catch(() => null);
-    if (member && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
-    if (member && member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
+async function checkAdmin(member) {
+    if (member.roles.cache.has(ADMIN_ROLE_ID)) return true;
+    if (member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
     return false;
 }
 
