@@ -1,13 +1,11 @@
 const fs = require('fs');
+const { DATABASE_CHANNEL_ID } = require('../constants');
 
 const romecoin_data = new Object();
 
 async function clientReady(client) {
-    const guild =  await client.guilds.fetch('1431905155766419638');
-    const database_channel = await guild.channels.create({name: 'database', parent: '1449790496322097183', reason: 'データを保存するチャンネルを作成'});
-
     // DBからデータを取得
-    /*const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+    const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
 
     message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
     message.attachments.forEach(async (attachment) => {
@@ -27,14 +25,14 @@ async function clientReady(client) {
         });
 
         await db_channel.send({files: ['./.tmp/romecoin_data.json']});
-    }, 30000);*/
+    }, 30000);
 }
 
 async function interactionCreate(interaction) {
     if (interaction.isCommand() && interaction.commandName === 'romecoin') {
         const user = interaction.optoions.getUser('user') ? interaction.options.getUser('user').id : interaction.user.id;
         const romecoin = romecoin_data[user] || 0;
-        interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}\nこの機能は現在テスト中です\n`, ephemeral: true });
+        interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
     }
 }
 
@@ -51,6 +49,7 @@ async function messageCreate(message) {
         '1431905155955294290', // 8
         '1431905155955294291', // 9
         '1431905155955294292', // 10
+        '1431905155955294294', // 12
         '1431905155955294296', // 14
         '1431905155955294297', // 15
         '1431905155955294298', // 16

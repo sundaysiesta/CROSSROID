@@ -92,131 +92,65 @@ client.once('ready', async () => {
 
   // スラッシュコマンドを登録
   const commands = [
-    {
-      name: 'anonymous',
-      description: '匿名でメッセージを送信します',
-      options: [
-        {
-          name: '内容',
-          description: '送信するメッセージ（256文字以下、改行禁止）',
-          type: 3, // STRING
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'anonymous_resolve',
-      description: '匿名IDから送信者を特定（運営専用）',
-      options: [
-        {
-          name: '匿名id',
-          description: '表示名に含まれる匿名ID（例: a1b2c3）',
-          type: 3,
-          required: true
-        },
-        {
-          name: '日付',
-          description: 'UTC日付 YYYY-MM-DD（省略時は当日）',
-          type: 3,
-          required: false
-        }
-      ]
-    },
-    {
-      name: 'bump',
-      description: '部活チャンネルを宣伝します（2時間に1回まで）'
-    },
-    {
-      name: 'test_generation',
-      description: '世代獲得通知のテスト（運営専用）',
-      options: [
-        {
-          name: 'ユーザー',
-          description: 'テスト対象のユーザー',
-          type: 6, // USER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'test_timereport',
-      description: '時報機能のテスト（運営専用）',
-      options: [
-        {
-          name: '時間',
-          description: 'テストする時間（0-23）',
-          type: 4, // INTEGER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'random_mention',
-      description: 'サーバーメンバーをランダムでメンションします'
-    },
-    {
-      name: 'duel',
-      description: '他のユーザーと決闘します',
-      options: [
-        {
-          name: 'opponent',
-          description: '対戦相手',
-          type: 6, // USER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'duel_russian',
-      description: 'ロシアンルーレットで対戦します',
-      options: [
-        {
-          name: 'opponent',
-          description: '対戦相手',
-          type: 6, // USER
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'duel_ranking',
-      description: '決闘のランキングを表示します'
-    },
-    {
-      name: 'event_create',
-      description: 'イベント用チャンネルを作成し、告知を行います',
-      options: [
-        {
-          name: 'イベント名',
-          description: 'イベントのタイトル（チャンネル名になります）',
-          type: 3, // STRING
-          required: true
-        },
-        {
-          name: '内容',
-          description: 'イベントの詳細内容',
-          type: 3, // STRING
-          required: true
-        },
-        {
-          name: '日時',
-          description: '開催日時（任意）',
-          type: 3, // STRING
-          required: false
-        },
-        {
-          name: '場所',
-          description: '開催場所（任意）',
-          type: 3, // STRING
-          required: false
-        }
-      ]
-    },
-    {
-      name: '匿名開示 (運営専用)',
-      type: 3
-    }
-  ];
+      new SlashCommandBuilder().setName('anonymous').setDescription('匿名でメッセージを送信します')
+          .addStringOption(option =>
+              option.setName('内容')
+                  .setDescription('送信するメッセージ（256文字以下、改行禁止）')
+                  .setRequired(true)
+          ),
+      new SlashCommandBuilder().setName('bump').setDescription('部活チャンネルを宣伝します（2時間に1回まで）'),
+      new SlashCommandBuilder().setName('test_generation').setDescription('世代獲得通知のテスト（運営専用）')
+          .addUserOption(option =>
+              option.setName('ユーザー')
+              .setDescription('テスト対象のユーザー')
+              .setRequired(true)
+          ),
+      new SlashCommandBuilder().setName('test_timereport').setDescription('時報機能のテスト（運営専用）')
+          .addIntegerOption(option =>
+              option.setName('時間')
+              .setDescription('テストする時間（0-23）')
+              .setRequired(true)
+          ),
+      new SlashCommandBuilder().setName('random_mention').setDescription('サーバーメンバーをランダムでメンションします'),
+      new SlashCommandBuilder().setName('duel').setDescription('他のユーザーと決闘します')
+          .addUserOption(option =>
+              option.setName('opponent')
+              .setDescription('対戦相手')
+              .setRequired(true)
+          ),
+      new SlashCommandBuilder().setName('duel_russian').setDescription('ロシアンルーレットで対戦します')
+          .addUserOption(option =>
+              option.setName('opponent')
+              .setDescription('対戦相手')
+              .setRequired(true)
+          ),
+      new SlashCommandBuilder().setName('duel_ranking').setDescription('決闘のランキングを表示します'),
+      new SlashCommandBuilder().setName('event_create').setDescription('イベント用チャンネルを作成し、告知を行います')
+          .addStringOption(option =>
+              option.setName('イベント名')
+              .setDescription('イベントのタイトル（チャンネル名になります）')
+              .setRequired(true)
+          )
+          .addStringOption(option =>
+              option.setName('内容')
+              .setDescription('イベントの詳細内容')
+              .setRequired(true)
+          )
+          .addStringOption(option =>
+              option.setName('日時')
+              .setDescription('開催日時（任意）')
+          )
+          .addStringOption(option =>
+              option.setName('場所')
+              .setDescription('開催場所')
+          ),
+      new SlashCommandBuilder().setName('romecoin').setDescription('ロメコインの所持数を確認します')
+          .addUserOption(option =>
+              option.setName('user')
+              .setDescription('確認したいユーザー')
+          ),
+      new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message)
+  ].map(command => command.toJSON());
 
   try {
     console.log('スラッシュコマンドを登録中...');
