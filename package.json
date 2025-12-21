@@ -7,7 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "&ROMEDA 技術開発局",
   "license": "ISC",
   "description": "",
   "dependencies": {
@@ -15,7 +15,9 @@
     "discord.js": "^14.22.1",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
-    "groq-sdk": "^0.32.0",
+    "groq-sdk": "^0.32.0"
+  },
+  "devDependencies": {
     "openai": "^4.28.0"
   }
 }
