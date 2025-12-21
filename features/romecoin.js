@@ -29,7 +29,7 @@ async function clientReady(client) {
 }
 
 async function interactionCreate(interaction) {
-    if (interaction.isCommand() && interaction.commandName === 'romecoin') {
+    if (interaction.isChatInputCommand() && interaction.commandName === 'romecoin') {
         const user = interaction.optoions.getUser('user') ? interaction.options.getUser('user').id : interaction.user.id;
         const romecoin = romecoin_data[user] || 0;
         interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
