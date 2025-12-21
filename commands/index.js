@@ -106,8 +106,7 @@ async function handleCommands(interaction, client) {
                 const wacchoi = generateWacchoi(interaction.user.id);
                 const dailyId = generateDailyUserId(interaction.user.id);
 
-                const isElite = interaction.member && interaction.member.roles.cache.has(ELITE_ROLE_ID);
-                const uglyName = getAnonymousName(wacchoi.daily, isElite);
+                const uglyName = getAnonymousName(wacchoi.daily);
                 const displayName = `${uglyName} ID:${dailyId} (ﾜｯﾁｮｲ ${wacchoi.full})`;
                 const avatarURL = client.user.displayAvatarURL();
 
@@ -211,7 +210,7 @@ async function handleCommands(interaction, client) {
                 .setDescription(`${opponentUser}！\n${interaction.user} から決闘を申し込まれました。`)
                 .addFields(
                     { name: 'ルール', value: '1d100のダイス勝負', inline: true },
-                    { name: 'ハンデ', value: '仕掛け人は最大95 & 引き分け敗北', inline: true },
+                    { name: 'ルール', value: '完全ランダム（1-100）& 引き分けは防御側の勝利', inline: true },
                     { name: 'ペナルティ', value: '敗者はタイムアウト (Max 24h)', inline: false },
                     { name: '注意', value: '受諾後のキャンセル不可', inline: false }
                 )
@@ -259,25 +258,9 @@ async function handleCommands(interaction, client) {
 
                 await new Promise(r => setTimeout(r, 2000));
 
-                // --- RIGGED ROLLS ---
-                let rollA, rollB;
-                const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
-
-                if (isVip && isOpponentVip) {
-                    // VIP Civil War: Fair Fight
-                    rollA = Math.floor(Math.random() * 100) + 1;
-                    rollB = Math.floor(Math.random() * 100) + 1;
-                } else if (isVip) {
-                    rollA = Math.floor(Math.random() * 46) + 55; // VIP: 55-100 (Guaranteed Win)
-                    rollB = Math.floor(Math.random() * 50) + 1;  // Opponent: 1-50 (Natural Low)
-                } else if (isOpponentVip) {
-                    rollA = Math.floor(Math.random() * 50) + 1;  // Attacker: 1-50
-                    rollB = Math.floor(Math.random() * 46) + 55; // VIP: 55-100
-                } else {
-                    rollA = Math.floor(Math.random() * 95) + 1; // Normal Handicap
-                    rollB = Math.floor(Math.random() * 100) + 1;
-                }
-                // --------------------
+                // 完全ランダム（1-100）
+                const rollA = Math.floor(Math.random() * 100) + 1;
+                const rollB = Math.floor(Math.random() * 100) + 1;
 
                 let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
                 let loser = null;
@@ -442,7 +425,7 @@ async function handleCommands(interaction, client) {
                 .setDescription(`${opponentUser}！\n${interaction.user} から死のゲームへの招待状です。`)
                 .addFields(
                     { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に撃つ', inline: false },
-                    { name: '敗北時', value: '15分 Timeout + Wacchoi(IP)公開', inline: false },
+                    { name: '敗北時', value: '15分 Timeout', inline: false },
                     { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true },
                     { name: 'VIP', value: '権力者は決して死なない', inline: true }
                 )
@@ -520,20 +503,8 @@ async function handleCommands(interaction, client) {
                 gameCollector.on('collect', async move => {
                     if (move.user.id !== state.turn) return move.reply({ content: 'あなたの番ではありません。', ephemeral: true });
 
-                    let isHit = cylinder[state.current] === 1;
-
-                    // --- RIGGED LOGIC ---
-                    const isMoverVip = SHADOW_VIPERS.includes(move.user.id);
-                    const isTargetVip = SHADOW_VIPERS.includes(state.turn === userId ? opponentUser.id : userId);
-
-                    if (isMoverVip && isTargetVip) {
-                        // VIP vs VIP: Fair Game, rely on cylinder
-                    } else if (isMoverVip) {
-                        isHit = false; // VIP is Immortal (Overwhelming)
-                    } else if (isTargetVip) {
-                        isHit = Math.random() < 0.33; // Opponent vs VIP: 33% chance to die
-                    }
-                    // --------------------
+                    // 完全ランダム（シリンダーの結果のみ）
+                    const isHit = cylinder[state.current] === 1;
 
                     if (isHit) {
                         const deathEmbed = new EmbedBuilder()
@@ -551,13 +522,8 @@ async function handleCommands(interaction, client) {
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
-                        // Penalty: Timeout + Wacchoi
+                        // Penalty: Timeout
                         if (loserMember) {
-                            const { generateWacchoi, getAnonymousName } = require('../utils');
-                            const isElite = loserMember.roles.cache.has(require('../constants').ELITE_ROLE_ID);
-                            const wacchoi = generateWacchoi(loserId);
-                            const anonName = getAnonymousName(wacchoi.daily, isElite);
-
                             // STANDARD TIMEOUT (15m Cap)
                             let timeoutDuration = 15 * 60 * 1000; // Default 15m
 
@@ -565,8 +531,6 @@ async function handleCommands(interaction, client) {
                                 .setTitle('⚰️ 死亡確認')
                                 .setColor(0x000000)
                                 .addFields(
-                                    { name: 'ID (Wacchoi)', value: `\`${wacchoi.full}\``, inline: true },
-                                    { name: '裏名', value: `**${anonName}**`, inline: true },
                                     { name: '処罰', value: `${timeoutDuration / 60000}分間のタイムアウト`, inline: false }
                                 )
                                 .setTimestamp();
@@ -1294,7 +1258,7 @@ async function handleCommands(interaction, client) {
                 .setDescription(`${opponentUser}\n${interaction.user} から決闘を申し込まれました。`)
                 .addFields(
                     { name: 'ルール', value: '1d100のダイス勝負', inline: true },
-                    { name: 'ハンデ', value: '仕掛け人は最大95 & 引き分けは敗北', inline: true },
+                    { name: 'ルール', value: '完全ランダム（1-100）& 引き分けは防御側の勝利', inline: true },
                     { name: 'ペナルティ', value: '敗者はタイムアウト（最大10分）', inline: false },
                     { name: '注意', value: '受諾後、キャンセル不可', inline: false }
                 )
@@ -1326,10 +1290,11 @@ async function handleCommands(interaction, client) {
 
                 await new Promise(r => setTimeout(r, 2000));
 
-                const rollA = Math.floor(Math.random() * 95) + 1; // ハンデ: 最大95
+                // 完全ランダム（1-100）
+                const rollA = Math.floor(Math.random() * 100) + 1;
                 const rollB = Math.floor(Math.random() * 100) + 1;
 
-                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}** (Handicap)\n${opponentUser}: **${rollB}**\n\n`;
+                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
                 let loser = null;
                 let winner = null;
                 let diff = 0;
@@ -1489,7 +1454,7 @@ async function handleCommands(interaction, client) {
                 .setDescription(`${opponentUser}\n${interaction.user} から死のゲームへの招待です。`)
                 .addFields(
                     { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に引き金を引く', inline: false },
-                    { name: '敗北時', value: '10分Timeout + Wacchoi(IP)公開', inline: true },
+                    { name: '敗北時', value: '10分Timeout', inline: true },
                     { name: '勝利時', value: 'ハイライトチャンネルに投稿', inline: true }
                 )
                 .setColor(0x000000)
@@ -1557,14 +1522,12 @@ async function handleCommands(interaction, client) {
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
-                        // ペナルティ: タイムアウト + Wacchoi公開
+                        // ペナルティ: タイムアウト
                         if (loserMember) {
-                            const wacchoi = generateWacchoi(loserId);
                             const deathReportEmbed = new EmbedBuilder()
                                 .setTitle('⚰️ 死亡確認')
                                 .setColor(0x000000)
                                 .addFields(
-                                    { name: 'ID (Wacchoi)', value: `\`${wacchoi.full}\``, inline: true },
                                     { name: '処罰', value: '10分のタイムアウト', inline: false }
                                 )
                                 .setTimestamp();

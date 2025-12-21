@@ -235,17 +235,18 @@ function getAnonymousName(dailyId, isElite = false) {
     const num = parseInt(dailyId, 36);
     if (isNaN(num)) return '名無しのバグ';
 
-    const pLen = isElite ? ELITE_NAMING_PREFIXES.length : ANONYMOUS_NAMING_PREFIXES.length;
-    const sLen = isElite ? ELITE_NAMING_SUFFIXES.length : ANONYMOUS_NAMING_SUFFIXES.length;
+    // すべてのプレフィックスとサフィックスを統合（エリートかどうかに関係なく完全ランダム）
+    const allPrefixes = [...ANONYMOUS_NAMING_PREFIXES, ...ELITE_NAMING_PREFIXES];
+    const allSuffixes = [...ANONYMOUS_NAMING_SUFFIXES, ...ELITE_NAMING_SUFFIXES];
 
-    const prefixes = isElite ? ELITE_NAMING_PREFIXES : ANONYMOUS_NAMING_PREFIXES;
-    const suffixes = isElite ? ELITE_NAMING_SUFFIXES : ANONYMOUS_NAMING_SUFFIXES;
+    const pLen = allPrefixes.length;
+    const sLen = allSuffixes.length;
 
     // 偏りを減らすために少し混ぜる
     const prefixIndex = num % pLen;
     const suffixIndex = (Math.floor(num / pLen)) % sLen;
 
-    return `${prefixes[prefixIndex]}${suffixes[suffixIndex]}`;
+    return `${allPrefixes[prefixIndex]}${allSuffixes[suffixIndex]}`;
 }
 
 // ワイルドカード対応のワードマッチング関数
