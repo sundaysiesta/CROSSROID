@@ -1,5 +1,5 @@
 // 必要なモジュールをインポート
-const { Client, GatewayIntentBits, EmbedBuilder, ContextMenuCommandBuilder, ApplicationCommandType } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, ContextMenuCommandBuilder, ApplicationCommandType } = require('discord.js');
 const express = require('express');
 const { execSync } = require('child_process');
 
