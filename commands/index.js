@@ -1,5 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName } = require('../utils');
+const { generateWacchoi, generateDailyUserId, generateDailyUserIdForDate, getHolidayName, getAnonymousName } = require('../utils');
 const {
     ANONYMOUS_COOLDOWN_MS,
     ANONYMOUS_COOLDOWN_TIERS,
@@ -142,9 +142,6 @@ async function handleCommands(interaction, client) {
 
 
         if (interaction.commandName === 'duel') {
-            const fs = require('fs');
-            const path = require('path');
-            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
             const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
 
             // --- SHADOW VIPER SYSTEM ---
@@ -307,8 +304,6 @@ async function handleCommands(interaction, client) {
         }
 
         if (interaction.commandName === 'duel_ranking') {
-            const fs = require('fs');
-            const path = require('path');
             const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
 
             if (!fs.existsSync(DATA_FILE)) {
@@ -375,8 +370,6 @@ async function handleCommands(interaction, client) {
             if (opponentUser.id === userId || opponentUser.bot) return interaction.reply({ content: '自分やBotとは対戦できません。', ephemeral: true });
 
             // Cooldown Check
-            const fs = require('fs');
-            const path = require('path');
             const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
             let cooldowns = {};
             if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
@@ -392,7 +385,6 @@ async function handleCommands(interaction, client) {
             }
 
             // UI
-            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('russian_accept').setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('🔫'),
                 new ButtonBuilder().setCustomId('russian_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary)
@@ -520,7 +512,6 @@ async function handleCommands(interaction, client) {
 
                         // Reward
                         if (winnerMember) {
-                            const { ELITE_ROLE_ID, HIGHLIGHT_CHANNEL_ID } = require('../constants');
                             try {
                                 await winnerMember.roles.add(ELITE_ROLE_ID);
                                 setTimeout(() => winnerMember.roles.remove(ELITE_ROLE_ID).catch(() => { }), 24 * 60 * 60 * 1000);
