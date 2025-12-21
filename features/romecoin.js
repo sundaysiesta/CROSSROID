@@ -7,7 +7,6 @@ let romecoin_data = new Object();
 async function clientReady(client) {
     // DBからデータを取得
     const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
-
     message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
     message.attachments.forEach(async (attachment) => {
         if (attachment.name === 'romecoin_data.json') {
@@ -19,6 +18,7 @@ async function clientReady(client) {
 
     // 60秒ごとにデータを送信
     setInterval(async (db_channel) => {
+        const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
         fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
             if (err) {
                 throw err;
