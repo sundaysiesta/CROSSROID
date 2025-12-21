@@ -40,6 +40,10 @@ async function checkAdmin(interaction) {
 async function handleCommands(interaction, client) {
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'anonymous') {
+            const commandKey = `anonymous_${interaction.user.id}_${interaction.id}`;
+            if (processingCommands.has(commandKey)) return interaction.reply({ content: '処理中です。', ephemeral: true });
+            processingCommands.add(commandKey);
+
             const now = Date.now();
             const dateObj = new Date();
             const todayKey = `${dateObj.getFullYear()}${String(dateObj.getMonth() + 1).padStart(2, '0')}${String(dateObj.getDate()).padStart(2, '0')}`;
