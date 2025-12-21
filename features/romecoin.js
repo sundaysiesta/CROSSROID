@@ -7,7 +7,7 @@ let romecoin_data = new Object();
 async function clientReady(client) {
     // DBからデータを取得
     const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
-    message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
+    const message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
     message.attachments.forEach(async (attachment) => {
         if (attachment.name === 'romecoin_data.json') {
             const response = await fetch(attachment.url);
@@ -17,7 +17,7 @@ async function clientReady(client) {
     });
 
     // 60秒ごとにデータを送信
-    setInterval(async (db_channel) => {
+    setInterval(async () => {
         fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
             if (err) {
                 throw err;
@@ -25,7 +25,7 @@ async function clientReady(client) {
         });
 
         await db_channel.send({files: ['./.tmp/romecoin_data.json']});
-    }, 30000);
+    }, 60000);
 }
 
 async function interactionCreate(interaction) {
@@ -55,20 +55,25 @@ async function messageCreate(message) {
     let score = 10;
 
     const generationRoles = [
-        '1431905155938258989', // 2
-        '1431905155938258992', // 5
-        '1431905155938258993', // 6
-        '1431905155938258994', // 7
-        '1431905155955294290', // 8
-        '1431905155955294291', // 9
-        '1431905155955294292', // 10
-        '1431905155955294294', // 12
-        '1431905155955294296', // 14
-        '1431905155955294297', // 15
-        '1431905155955294298', // 16
-        '1431905155955294299', // 17
-        '1431905155984392303', // 18
-        // '1433777496767074386', // 19
+        '1431905155938258988', // 第1世代
+        '1431905155938258989', // 第2世代
+        '1431905155938258990', // 第3世代
+        '1431905155938258991', // 第4世代
+        '1431905155938258992', // 第5世代
+        '1431905155938258993', // 第6世代
+        '1431905155938258994', // 第7世代
+        '1431905155955294290', // 第8世代
+        '1431905155955294291', // 第9世代
+        '1431905155955294292', // 第10世代
+        '1431905155955294293', // 第11世代
+        '1431905155955294294', // 第12世代
+        '1431905155955294295', // 第13世代
+        '1431905155955294296', // 第14世代
+        '1431905155955294297', // 第15世代
+        '1431905155955294298', // 第16世代
+        '1431905155955294299', // 第17世代
+        '1431905155984392303', // 第18世代
+        //'1433777496767074386' // 第19世代
     ]
 
     // 新規
