@@ -32,8 +32,7 @@ const legacyMigration = require('./features/legacyMigration');
 
 // Command Handler
 const { handleCommands } = require('./commands');
-
-
+const { clientReady, interactionCreate, messageCreate, messageReactionAdd } = require('./features/romecoin');
 
 // デバッグ用: 環境変数の確認
 console.log('=== 環境変数の確認 ===');
@@ -88,6 +87,8 @@ client.once('ready', async () => {
     console.log(`現在の世代ロールID: ${CURRENT_GENERATION_ROLE_ID}`);
     console.log(`メインチャンネルID: ${MAIN_CHANNEL_ID}`);
   }
+
+  await clientReady(client);
 
   // スラッシュコマンドを登録
   const commands = [
@@ -288,11 +289,17 @@ client.once('ready', async () => {
 // コマンド処理
 client.on('interactionCreate', async interaction => {
   await handleCommands(interaction, client);
+  await interactionCreate(interaction);
 });
 
 // ABUSE PROTOCOL MONITOR
 client.on('messageCreate', async message => {
   require('./features/abuseProtocol').handleMessage(message);
+  await messageCreate(message);
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+  await messageReactionAdd(reaction, user);
 });
 
 // エラーハンドリング（未捕捉の例外）
