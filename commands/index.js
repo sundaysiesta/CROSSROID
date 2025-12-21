@@ -13,6 +13,10 @@ const {
     EVENT_NOTIFY_CHANNEL_ID,
     EVENT_ADMIN_ROLE_ID,
     HIGHLIGHT_CHANNEL_ID,
+    ELITE_ROLE_ID,
+    ADMIN_ROLE_ID,
+    TECHTEAM_ROLE_ID,
+    OWNER_ROLE_ID,
 } = require('../constants');
 const { generateTimeReportMessage } = require('../features/timeSignal');
 const fs = require('fs');
@@ -730,55 +734,6 @@ async function handleCommands(interaction, client) {
                     content: `✅ イベントチャンネルを作成しました: ${newChannel}\n告知メッセージを送信しました。`
                 });
 
-                // 4. 自動投票イベントの開始
-                // 4. 自動投票イベントの開始
-                const isPoll = interaction.options.getBoolean('poll_mode');
-                if (isPoll) {
-                    const PollManager = require('../features/poll');
-                    let pollManifesto = interaction.options.getString('poll_manifesto');
-                    const pollFile = interaction.options.getAttachment('poll_manifesto_file');
-
-                    if (pollFile) {
-                        try {
-                            const response = await fetch(pollFile.url);
-                            if (response.ok) {
-                                pollManifesto = await response.text();
-                            } else {
-                                await interaction.followUp({ content: '⚠️ 添付ファイルの読み込みに失敗しました。', ephemeral: true });
-                            }
-                        } catch (e) {
-                            console.error('File fetch error:', e);
-                            await interaction.followUp({ content: '⚠️ 添付ファイルの取得エラーが発生しました。', ephemeral: true });
-                        }
-                    }
-
-                    pollManifesto = pollManifesto || eventContent;
-
-                    // Proxy Interaction object to redirect Poll to new channel
-                    // Proxy Interaction object to redirect Poll to new channel
-                    const proxyInteraction = {
-                        user: interaction.user,
-                        channel: newChannel,
-                        guild: interaction.guild,
-                        reply: async (payload) => { /* No-op for safety */ },
-                        editReply: async (payload) => {
-                            // Append success message to the original interaction
-                            const currentContent = (await interaction.fetchReply()).content;
-                            await interaction.editReply({ content: currentContent + '\n' + payload.content });
-                        },
-                        followUp: async (payload) => {
-                            // If ephemeral, use original interaction followUp
-                            if (payload.ephemeral) {
-                                return await interaction.followUp(payload);
-                            } else {
-                                // If public, send to the new channel
-                                return await newChannel.send(payload);
-                            }
-                        }
-                    };
-
-                    await PollManager.createPoll(proxyInteraction, pollManifesto);
-                }
 
             } catch (error) {
                 console.error('イベント作成エラー:', error);
@@ -802,79 +757,6 @@ async function handleCommands(interaction, client) {
             return;
         }
 
-        // === POLL COMMAND ===
-        if (interaction.commandName === 'poll') {
-            const subcommand = interaction.options.getSubcommand();
-
-            if (subcommand === 'create') {
-                // Check Admin/Elite? Let's restrict to Admin/Elite for now to prevent spam
-                if (!(await checkAdmin(interaction)) && !interaction.member.roles.cache.has(ELITE_ROLE_ID)) {
-                    return interaction.reply({ content: '⛔ 投票を作成する権限がありません。', ephemeral: true });
-                }
-
-                await interaction.deferReply({ ephemeral: true });
-                let configText = interaction.options.getString('config');
-                const file = interaction.options.getAttachment('file');
-
-                if (file) {
-                    // Fetch file content
-                    try {
-                        const response = await fetch(file.url);
-                        if (!response.ok) throw new Error('Failed to fetch file');
-                        configText = await response.text();
-                    } catch (e) {
-                        return interaction.editReply('❌ 設定ファイルの読み込みに失敗しました。');
-                    }
-                }
-
-                if (!configText) return interaction.editReply('❌ 設定テキストまたはファイルを指定してください。');
-
-                const PollManager = require('../features/poll');
-                await PollManager.createPoll(interaction, configText);
-            } else if (subcommand === 'end') {
-                if (!(await checkAdmin(interaction))) {
-                    return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
-                }
-                const pollId = interaction.options.getString('id');
-                const PollManager = require('../features/poll');
-                const poll = PollManager.polls.get(pollId);
-
-                if (!poll) return interaction.reply({ content: '❌ 指定された投票IDが見つかりません。', ephemeral: true });
-
-                poll.ended = true;
-                PollManager.save();
-
-                // Update Message
-                const channel = await client.channels.fetch(poll.channelId).catch(() => null);
-                if (channel) {
-                    const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
-                    if (msg) {
-                        await msg.edit({ embeds: [PollManager.generateEmbed(poll)], components: [] });
-                        await msg.reply('🛑 投票は終了しました。');
-                    }
-                }
-                await interaction.reply({ content: `✅ 投票(ID: ${pollId})を終了しました。`, ephemeral: true });
-            } else if (subcommand === 'status') {
-                if (!(await checkAdmin(interaction))) {
-                    return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
-                }
-                const pollId = interaction.options.getString('id');
-                const PollManager = require('../features/poll');
-                await PollManager.showStatus(interaction, pollId);
-            } else if (subcommand === 'result') {
-                if (!(await checkAdmin(interaction))) {
-                    return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
-                }
-                const pollId = interaction.options.getString('id');
-                const PollManager = require('../features/poll');
-                await PollManager.publishResult(interaction, pollId);
-            } else if (subcommand === 'preview') {
-                const count = interaction.options.getInteger('count') || 5;
-                const PollManager = require('../features/poll');
-                await PollManager.previewPoll(interaction, count);
-            }
-            return;
-        }
 
         // === ADMIN SUITE ===
         const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics', 'activity_backfill'];

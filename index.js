@@ -212,24 +212,6 @@ client.once('ready', async () => {
           description: '開催場所（任意）',
           type: 3, // STRING
           required: false
-        },
-        {
-          name: 'poll_mode',
-          description: '投票イベントとして作成する（自動投票開始）',
-          type: 5, // BOOLEAN
-          required: false
-        },
-        {
-          name: 'poll_manifesto',
-          description: '投票設定テキスト（またはファイルを添付）',
-          type: 3, // STRING
-          required: false
-        },
-        {
-          name: 'poll_manifesto_file',
-          description: '投票設定ファイル（.txt）',
-          type: 11, // ATTACHMENT
-          required: false
         }
       ]
     }
@@ -297,8 +279,6 @@ client.once('ready', async () => {
   const activityTracker = require('./features/activityTracker');
   activityTracker.start(client);
 
-  const PollManager = require('./features/poll');
-  PollManager.startTicker(client);
 
   // Note: dataBackup is deprecated/removed in favor of persistence
   // const dataBackup = require('./features/dataBackup'); 
@@ -307,16 +287,6 @@ client.once('ready', async () => {
 
 // コマンド処理
 client.on('interactionCreate', async interaction => {
-  // Poll Interaction (Button/Select)
-  if (interaction.isButton() || interaction.isStringSelectMenu()) {
-    if (interaction.customId.startsWith('poll_')) {
-      const PollManager = require('./features/poll');
-      await PollManager.handleInteraction(client, interaction);
-      // Trigger Cloud Save (Debounced)
-      require('./features/persistence').save(client);
-      return;
-    }
-  }
   await handleCommands(interaction, client);
 });
 

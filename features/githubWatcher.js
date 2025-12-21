@@ -1,10 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { EmbedBuilder } = require('discord.js');
 
 const REPO_OWNER = 'sundaysiesta';
 const REPO_NAME = 'CROSSROID';
-const TARGET_CHANNEL_ID = '1449926885160259677';
 const STATE_FILE = path.join(__dirname, '..', 'github_last_sha.json');
 const INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes (Safe for 60 req/hr limit)
 
@@ -49,33 +47,11 @@ async function checkCommits(client) {
             return; // No new commits
         }
 
-        // New commit detected
+        // New commit detected (only update state, no notification)
         console.log(`[GitHubWatcher] New commit detected: ${currentSha}`);
-
-        const message = latestCommit.commit.message;
-        const authorName = latestCommit.commit.author.name;
-        const authorUrl = latestCommit.author ? latestCommit.author.html_url : null;
-        const commitUrl = latestCommit.html_url;
-        const timestamp = latestCommit.commit.author.date;
 
         lastKnownSha = currentSha;
         saveState(currentSha);
-
-        const channel = client.channels.cache.get(TARGET_CHANNEL_ID);
-        if (channel) {
-            const embed = new EmbedBuilder()
-                .setTitle(`🔨 New Commit to ${REPO_NAME}`)
-                .setURL(commitUrl)
-                .setAuthor({ name: authorName, url: authorUrl || undefined, iconURL: latestCommit.author ? latestCommit.author.avatar_url : undefined })
-                .setDescription(`\`\`\`\n${message}\n\`\`\``)
-                .setColor(0x2b2d31) // GitHub Dark
-                .setFooter({ text: `SHA: ${currentSha.substring(0, 7)}` })
-                .setTimestamp(new Date(timestamp));
-
-            await channel.send({ embeds: [embed] });
-        } else {
-            console.warn('[GitHubWatcher] Target channel not found.');
-        }
 
     } catch (error) {
         console.error('[GitHubWatcher] Fetch error:', error);
