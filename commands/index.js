@@ -144,12 +144,6 @@ async function handleCommands(interaction, client) {
         if (interaction.commandName === 'duel') {
             const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
 
-            // --- SHADOW VIPER SYSTEM ---
-            // Secret list of privileged users who bypass cooldowns and always win.
-            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827", "1410327346069635085"];
-            const isVip = SHADOW_VIPERS.includes(interaction.user.id);
-            // ---------------------------
-
             let cooldowns = {};
             if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
 
@@ -158,8 +152,7 @@ async function handleCommands(interaction, client) {
             const lastUsed = cooldowns[`battle_${userId}`] || 0;
             const COOLDOWN_DURATION = 24 * 60 * 60 * 1000; // 1 Day (Shared)
 
-            // VIP Bypass Cooldown
-            if (!isVip && now - lastUsed < COOLDOWN_DURATION) {
+            if (now - lastUsed < COOLDOWN_DURATION) {
                 const remaining = COOLDOWN_DURATION - (now - lastUsed);
                 const hours = Math.ceil(remaining / (60 * 60 * 1000));
                 return interaction.reply({ content: `⛔ 戦闘（決闘/ロシアン）は1日1回までです。\n残り: ${hours}時間`, ephemeral: true });
@@ -222,14 +215,11 @@ async function handleCommands(interaction, client) {
 
                 await i.update({ content: null, embeds: [startEmbed], components: [] });
 
-                // Commit Cooldown (if not VIP)
-                if (!isVip) {
-                    cooldowns[`battle_${userId}`] = Date.now();
-                    try {
-                        fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
-                        require('../features/persistence').save(client);
-                    } catch (e) { }
-                }
+                cooldowns[`battle_${userId}`] = Date.now();
+                try {
+                    fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
+                    require('../features/persistence').save(client);
+                } catch (e) { }
 
                 await new Promise(r => setTimeout(r, 2000));
 
@@ -360,12 +350,6 @@ async function handleCommands(interaction, client) {
             const userId = interaction.user.id;
             const opponentUser = interaction.options.getUser('opponent');
 
-            // --- SHADOW VIPER SYSTEM ---
-            const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827"];
-            const isVip = SHADOW_VIPERS.includes(userId);
-            const isOpponentVip = SHADOW_VIPERS.includes(opponentUser.id);
-            // ---------------------------
-
             // Validation
             if (opponentUser.id === userId || opponentUser.bot) return interaction.reply({ content: '自分やBotとは対戦できません。', ephemeral: true });
 
@@ -378,8 +362,7 @@ async function handleCommands(interaction, client) {
             const lastUsed = cooldowns[`battle_${userId}`] || 0;
             const CD_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 Day Cooldown for Russian
 
-            // VIP Bypass
-            if (!isVip && now - lastUsed < CD_DURATION) {
+            if (now - lastUsed < CD_DURATION) {
                 const h = Math.ceil((CD_DURATION - (now - lastUsed)) / (60 * 60 * 1000));
                 return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, ephemeral: true });
             }
@@ -396,8 +379,7 @@ async function handleCommands(interaction, client) {
                 .addFields(
                     { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に撃つ', inline: false },
                     { name: '敗北時', value: '15分 Timeout', inline: false },
-                    { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true },
-                    { name: 'VIP', value: '権力者は決して死なない', inline: true }
+                    { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true }
                 )
                 .setColor(0x000000)
                 .setThumbnail('https://cdn.discordapp.com/emojis/1198240562545954936.webp');
@@ -440,12 +422,8 @@ async function handleCommands(interaction, client) {
                 }
 
                 // Start
-
-                // Start
-                if (!isVip) {
-                    cooldowns[`battle_${userId}`] = Date.now();
-                    try { fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2)); require('../features/persistence').save(client); } catch (e) { }
-                }
+                cooldowns[`battle_${userId}`] = Date.now();
+                try { fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2)); require('../features/persistence').save(client); } catch (e) { }
 
                 // Game State
                 let cylinder = [0, 0, 0, 0, 0, 0];
@@ -993,12 +971,7 @@ async function handleCommands(interaction, client) {
 
                 const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
 
-                // --- SHADOW VIPER SYSTEM ---
-                const SHADOW_VIPERS = ["1451845551439085610", "1198230780032323594", "1415650457099047043", "1451254469542023229", "1451090946052853811", "1438210614588735508", "1271464746390130772", "1092367375355088947", "1291528706396917827"];
-                const isVip = SHADOW_VIPERS.includes(interaction.user.id);
-                // ---------------------------
-
-                if (member && (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID) || isVip)) {
+                if (member && (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID))) {
                     if (interaction.targetMessage.webhookId != null) {
                         const webhook = await interaction.targetMessage.fetchWebhook().catch(() => null);
                         if (webhook && webhook.name === 'CROSSROID Anonymous') {
