@@ -126,15 +126,14 @@ async function messageCreate(message) {
 }
 
 async function messageReactionAdd(reaction, user) {
-    if (user.bot) return;
-    if (reaction.message.author.bot) return;
+    if (user.bot || reaction.message.author.bot) return;
     if (reaction.message.author.id === user.id) return;
-    if (reaction_cooldown_users.includes(reaction.message.author.id)) return;
+    if (reaction_cooldown_users.includes(user.id)) return;
 
     // メッセージがリアクションされたときにも付与
     romecoin_data[reaction.message.author.id] = Math.round((romecoin_data[reaction.message.author.id] || 0) + 5);
     
-    reaction_cooldown_users.push(reaction.message.author.id);
+    reaction_cooldown_users.push(user.id);
 }
 
 module.exports = {
