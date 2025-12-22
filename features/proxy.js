@@ -15,6 +15,7 @@ const wordProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const processingMessages = new Set();
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
 const sentWebhookMessages = new Set(); // 送信済みの元メッセージIDを追跡（重複防止）
+const sendingWebhooks = new Set(); // webhook.send()実行中のメッセージIDを追跡（送信中のロック）
 
 // イベントリスナーの重複登録を防ぐフラグ
 let isSetupComplete = false;
@@ -215,7 +216,8 @@ function setup(client) {
                 fileCount: files.length,
                 contentLength: sanitizedContent.length,
                 sentWebhookMessagesSize: sentWebhookMessages.size,
-                hasMark: sentWebhookMessages.has(messageId)
+                hasMark: sentWebhookMessages.has(messageId),
+                sendingWebhooksSize: sendingWebhooks.size
             });
             
             // webhook.send()の直前に再度チェック（最後の防御線）
@@ -229,13 +231,16 @@ function setup(client) {
                 return;
             }
             
-            // 念のため、もう一度チェック（二重チェック）
-            if (sentWebhookMessages.has(messageId) && Array.from(sentWebhookMessages).filter(id => id === messageId).length > 1) {
-                logWebhookAction('ERROR-DUPLICATE-MARK', messageId, { 
-                    reason: 'Duplicate mark detected - aborting send'
+            // webhook.send()実行中のロックをチェック
+            if (sendingWebhooks.has(messageId)) {
+                logWebhookAction('SKIP-SENDING-IN-PROGRESS', messageId, { 
+                    reason: 'Webhook send already in progress for this message'
                 });
                 return;
             }
+            
+            // 送信ロックを取得
+            sendingWebhooks.add(messageId);
             
             // Webhook送信を非同期で開始（完了を待たない）
             const webhookSendPromise = webhook.send({
@@ -246,6 +251,9 @@ function setup(client) {
                 components: [actionRow],
                 allowedMentions: { parse: [] }
             }).then((webhookMessage) => {
+                // 送信ロックを解除
+                sendingWebhooks.delete(messageId);
+                
                 logWebhookAction('SEND-SUCCESS', messageId, { 
                     webhookMessageId: webhookMessage.id,
                     webhookId: webhook.id 
@@ -263,8 +271,9 @@ function setup(client) {
 
                 return webhookMessage;
             }).catch((sendError) => {
-                // 送信エラー時はマークを解除
+                // 送信エラー時はマークとロックを解除
                 sentWebhookMessages.delete(messageId);
+                sendingWebhooks.delete(messageId);
                 logWebhookAction('SEND-ERROR', messageId, { 
                     error: sendError.message,
                     code: sendError.code 
