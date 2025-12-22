@@ -4,6 +4,7 @@ const { checkAdmin } = require('../utils');
 const { getData, updateData, migrateData } = require('./dataAccess');
 const notionManager = require('./notion');
 const { MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const crypto = require('crypto');
 
 // ロメコインデータ
 let romecoin_data = new Object();
@@ -255,8 +256,8 @@ async function interactionCreate(interaction) {
                     await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - 100));
                 } else {
                     result = `${progress.opponent}の勝利！\n${progress.opponent}は100ロメコインを獲得し、${progress.user}は100ロメコインを失いました`;
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - 100));
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + 100));
+                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - 100));
+                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + 100));
                 }
                 await interaction.channel.send({ content: `# 対戦結果\n${progress.user}の手: ${progress.user_hand}\n${progress.opponent}の手: ${progress.opponent_hand}\n${result}`, components: [] });
                 delete janken_progress_data[progress_id];
