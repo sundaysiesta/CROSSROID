@@ -1,6 +1,8 @@
 const fs = require('fs');
 const { DATABASE_CHANNEL_ID } = require('../constants');
 const { checkAdmin } = require('../utils');
+const { getData, updateData, migrateData } = require('./dataAccess');
+const notionManager = require('./notion');
 
 let romecoin_data = new Object();
 let message_cooldown_users = new Array();
@@ -41,14 +43,30 @@ async function interactionCreate(interaction) {
 
     if (interaction.commandName === 'romecoin') {
         const user = interaction.options.getUser('user') ? interaction.options.getUser('user').id : interaction.user.id;
-        const romecoin = romecoin_data[user] || 0;
+        const romecoin = await getData(user, romecoin_data, 0);
         interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
     }
     else if (interaction.commandName === 'romecoin_ranking') {
-        const sortedData = Object.entries(romecoin_data).sort((a, b) => b[1] - a[1]);
+        // データを配列に変換（Notion名の場合はDiscord IDを取得）
+        const sortedData = await Promise.all(Object.entries(romecoin_data).map(async ([key, value]) => {
+            const isNotionName = !/^\d+$/.test(key);
+            let discordId = key;
+            
+            if (isNotionName) {
+                discordId = await notionManager.getDiscordId(key) || key;
+            }
+            
+            return { key, discordId, displayName: isNotionName ? key : null, value };
+        }));
+        
+        sortedData.sort((a, b) => b.value - a.value);
+        
         let content = '# ROMECOINランキング\n';
         for (let i = 0; i < Math.min(10, sortedData.length); i++) {
-            content += `${i + 1}位: <@${sortedData[i][0]}> - ${sortedData[i][1]}\n`;
+            const display = sortedData[i].displayName 
+                ? `${sortedData[i].displayName} (<@${sortedData[i].discordId}>)` 
+                : `<@${sortedData[i].discordId}>`;
+            content += `${i + 1}位: ${display} - ${sortedData[i].value}\n`;
         }
         await interaction.reply({ content: content, ephemeral: true });
     }
@@ -62,6 +80,60 @@ async function interactionCreate(interaction) {
 
             await interaction.reply({files: ['./.tmp/romecoin_data.json'], ephemeral: true });
         }
+    }
+    else if (interaction.commandName === 'data_migrate') {
+        if (!(await checkAdmin(interaction.member))) {
+            return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+        }
+        
+        const targetUser = interaction.options.getUser('user');
+        if (!targetUser) {
+            return interaction.reply({ content: '❌ ユーザーを指定してください。', ephemeral: true });
+        }
+        
+        const fs = require('fs');
+        const path = require('path');
+        const { migrateData } = require('./dataAccess');
+        const persistence = require('./persistence');
+        
+        let migratedCount = 0;
+        const results = [];
+        
+        // 各データファイルを引き継ぎ
+        const files = [
+            { file: 'duel_data.json', name: '決闘データ' },
+            { file: 'romecoin_data.json', name: 'ロメコインデータ' },
+            { file: 'activity_data.json', name: 'アクティビティデータ' },
+            { file: 'custom_cooldowns.json', name: 'クールダウンデータ', prefix: 'battle_' }
+        ];
+        
+        for (const { file, name, prefix = '' } of files) {
+            const filePath = path.join(__dirname, '..', file);
+            if (fs.existsSync(filePath)) {
+                try {
+                    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                    const migrated = await migrateData(targetUser.id, data, prefix);
+                    if (migrated) {
+                        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+                        migratedCount++;
+                        results.push(`✅ ${name}`);
+                    } else {
+                        results.push(`⏭️ ${name} (引き継ぎ不要)`);
+                    }
+                } catch (e) {
+                    results.push(`❌ ${name} (エラー: ${e.message})`);
+                }
+            }
+        }
+        
+        // Memory storeに保存
+        await persistence.save(interaction.client).catch(() => {});
+        
+        const resultText = results.join('\n');
+        await interaction.reply({ 
+            content: `📊 **データ引き継ぎ結果**\n対象: <@${targetUser.id}>\n\n${resultText}\n\n引き継ぎ完了: ${migratedCount}件`, 
+            ephemeral: true 
+        });
     }
 }
 
@@ -112,13 +184,25 @@ async function messageCreate(message) {
         score *= 1.5;
     }
 
-    romecoin_data[message.author.id] = Math.round((romecoin_data[message.author.id] || 0) + score);
+    // データ引き継ぎ（ID → Notion名）
+    await migrateData(message.author.id, romecoin_data);
+    
+    // ロメコインを更新
+    await updateData(message.author.id, romecoin_data, (current) => {
+        return Math.round((current || 0) + score);
+    });
 
     // 返信先のユーザーにも付与
     if (message.reference) {
         const reference = await message.fetchReference();
         if (reference.guild.id === message.guild.id && !reference.author.bot && reference.author.id !== message.author.id) {
-            romecoin_data[reference.author.id] = Math.round((romecoin_data[reference.author.id] || 0) + 5);
+            // データ引き継ぎ（ID → Notion名）
+            await migrateData(reference.author.id, romecoin_data);
+            
+            // ロメコインを更新
+            await updateData(reference.author.id, romecoin_data, (current) => {
+                return Math.round((current || 0) + 5);
+            });
         }
     }
 
@@ -130,8 +214,13 @@ async function messageReactionAdd(reaction, user) {
     if (reaction.message.author.id === user.id) return;
     if (reaction_cooldown_users.includes(user.id)) return;
 
+    // データ引き継ぎ（ID → Notion名）
+    await migrateData(reaction.message.author.id, romecoin_data);
+    
     // メッセージがリアクションされたときにも付与
-    romecoin_data[reaction.message.author.id] = Math.round((romecoin_data[reaction.message.author.id] || 0) + 5);
+    await updateData(reaction.message.author.id, romecoin_data, (current) => {
+        return Math.round((current || 0) + 5);
+    });
     
     reaction_cooldown_users.push(user.id);
 }

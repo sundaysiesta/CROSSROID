@@ -23,6 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const { checkAdmin } = require('../utils');
 const persistence = require('../features/persistence');
+const { getData, updateData, migrateData, getDataWithPrefix, setDataWithPrefix } = require('../features/dataAccess');
 
 // コマンドごとのクールダウン管理
 const anonymousCooldowns = new Map();
@@ -138,6 +139,7 @@ async function handleCommands(interaction, client) {
 
         if (interaction.commandName === 'duel_ranking') {
             const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
+            const notionManager = require('../features/notion');
 
             if (!fs.existsSync(DATA_FILE)) {
                 return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📊 ランキング').setDescription('データがまだありません。').setColor(0x2F3136)], ephemeral: true });
@@ -152,13 +154,29 @@ async function handleCommands(interaction, client) {
             }
 
             // Convert object to array & Sanitize
-            const players = Object.entries(duelData).map(([id, data]) => ({
-                id,
-                wins: Number(data.wins) || 0,
-                streak: Number(data.streak) || 0,
-                losses: Number(data.losses) || 0,
-                maxStreak: Number(data.maxStreak) || 0
-            }));
+            const players = (await Promise.all(Object.entries(duelData).map(async ([key, data]) => {
+                // データが無効な場合はスキップ
+                if (!data || typeof data !== 'object') return null;
+                
+                // キーがNotion名かDiscord IDかを判定（数字のみならID、そうでなければNotion名）
+                const isNotionName = !/^\d+$/.test(key);
+                let discordId = key;
+                
+                if (isNotionName) {
+                    // Notion名からDiscord IDを取得
+                    discordId = await notionManager.getDiscordId(key) || key;
+                }
+                
+                return {
+                    key,
+                    discordId,
+                    displayName: isNotionName ? key : null,
+                    wins: Number(data.wins) || 0,
+                    streak: Number(data.streak) || 0,
+                    losses: Number(data.losses) || 0,
+                    maxStreak: Number(data.maxStreak) || 0
+                };
+            }))).filter(p => p !== null); // nullを除外
 
             // Top Wins
             const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
@@ -168,10 +186,12 @@ async function handleCommands(interaction, client) {
             const buildLeaderboard = (list, type) => {
                 if (list.length === 0) return 'なし';
                 return list.map((p, i) => {
+                    if (!p || !p.discordId) return ''; // nullチェック
                     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
                     const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
-                    return `${medal} <@${p.id}> (**${val}**)`;
-                }).join('\n');
+                    const display = p.displayName ? `${p.displayName} (<@${p.discordId}>)` : `<@${p.discordId}>`;
+                    return `${medal} ${display} (**${val}**)`;
+                }).filter(line => line !== '').join('\n'); // 空行を除外
             };
 
             const embed = new EmbedBuilder()
@@ -191,18 +211,26 @@ async function handleCommands(interaction, client) {
 
         if (interaction.commandName === 'duel_russian') {
             const userId = interaction.user.id;
-            const opponentUser = interaction.options.getUser('opponent');
+            const opponentUser = interaction.options.getUser('対戦相手');
+            const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
-            // Validation
-            if (opponentUser.id === userId || opponentUser.bot) return interaction.reply({ content: '自分やBotとは対戦できません。', ephemeral: true });
+            // 相手が指定されている場合のバリデーション
+            if (opponentUser) {
+                if (opponentUser.id === userId || opponentUser.bot) {
+                    return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+                }
+            }
 
             // Cooldown Check
             const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
             let cooldowns = {};
             if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
 
+            // データ引き継ぎ（ID → Notion名）
+            await migrateData(userId, cooldowns, 'battle_');
+
             const now = Date.now();
-            const lastUsed = cooldowns[`battle_${userId}`] || 0;
+            const lastUsed = await getDataWithPrefix(userId, cooldowns, 'battle_', 0);
             const CD_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 Day Cooldown for Russian
 
             if (now - lastUsed < CD_DURATION) {
@@ -265,7 +293,7 @@ async function handleCommands(interaction, client) {
                 }
 
                 // Start
-                cooldowns[`battle_${userId}`] = Date.now();
+                await setDataWithPrefix(userId, cooldowns, 'battle_', Date.now());
                 try { fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2)); require('../features/persistence').save(client); } catch (e) { }
 
                 // Game State
@@ -1025,21 +1053,28 @@ async function handleCommands(interaction, client) {
                     }
                 }
 
-                if (!duelData[winner.user.id]) {
-                    duelData[winner.user.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-                }
-                if (!duelData[loser.user.id]) {
-                    duelData[loser.user.id] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-                }
+                // データ引き継ぎ（ID → Notion名）
+                await migrateData(winner.user.id, duelData);
+                await migrateData(loser.user.id, duelData);
 
-                duelData[winner.user.id].wins++;
-                duelData[winner.user.id].streak++;
-                if (duelData[winner.user.id].streak > duelData[winner.user.id].maxStreak) {
-                    duelData[winner.user.id].maxStreak = duelData[winner.user.id].streak;
-                }
+                // 勝者のデータを更新
+                await updateData(winner.user.id, duelData, (current) => {
+                    const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+                    data.wins++;
+                    data.streak++;
+                    if (data.streak > data.maxStreak) {
+                        data.maxStreak = data.streak;
+                    }
+                    return data;
+                });
 
-                duelData[loser.user.id].losses++;
-                duelData[loser.user.id].streak = 0;
+                // 敗者のデータを更新
+                await updateData(loser.user.id, duelData, (current) => {
+                    const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+                    data.losses++;
+                    data.streak = 0;
+                    return data;
+                });
 
                 try {
                     fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2));
@@ -1049,13 +1084,15 @@ async function handleCommands(interaction, client) {
                     console.error('決闘データ書き込みエラー:', e);
                 }
 
-                resultMsg += `\n📊 **Stats:** ${winner} (${duelData[winner.user.id].streak}連勝中) vs ${loser}`;
+                // 表示用にデータを取得
+                const winnerData = await getData(winner.user.id, duelData, { wins: 0, losses: 0, streak: 0, maxStreak: 0 });
+                resultMsg += `\n📊 **Stats:** ${winner} (${winnerData.streak}連勝中) vs ${loser}`;
 
                 // 3連勝以上で通知
-                if (duelData[winner.user.id].streak >= 3) {
+                if (winnerData.streak >= 3) {
                     const mainCh = client.channels.cache.get(MAIN_CHANNEL_ID);
                     if (mainCh) {
-                        mainCh.send(`🔥 **NEWS:** ${winner} が決闘で **${duelData[winner.user.id].streak}連勝** を達成しました！`);
+                        mainCh.send(`🔥 **NEWS:** ${winner} が決闘で **${winnerData.streak}連勝** を達成しました！`);
                     }
                     try {
                         if (loser.moderatable) {
@@ -1275,14 +1312,19 @@ async function handleCommands(interaction, client) {
                                 }
                             }
 
-                            if (!duelData[winnerId]) {
-                                duelData[winnerId] = { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-                            }
-                            duelData[winnerId].wins++;
-                            duelData[winnerId].streak++;
-                            if (duelData[winnerId].streak > duelData[winnerId].maxStreak) {
-                                duelData[winnerId].maxStreak = duelData[winnerId].streak;
-                            }
+                            // データ引き継ぎ（ID → Notion名）
+                            await migrateData(winnerId, duelData);
+
+                            // 勝者のデータを更新
+                            await updateData(winnerId, duelData, (current) => {
+                                const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+                                data.wins++;
+                                data.streak++;
+                                if (data.streak > data.maxStreak) {
+                                    data.maxStreak = data.streak;
+                                }
+                                return data;
+                            });
 
                             try {
                                 fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2));
@@ -1292,7 +1334,9 @@ async function handleCommands(interaction, client) {
                                 console.error('決闘データ書き込みエラー:', e);
                             }
 
-                            interaction.channel.send(`✨ **勝利者** <@${winnerId}> は死地を潜り抜けました！ (現在 ${duelData[winnerId].streak}連勝)`);
+                            // 表示用にデータを取得
+                            const winnerData = await getData(winnerId, duelData, { wins: 0, losses: 0, streak: 0, maxStreak: 0 });
+                            interaction.channel.send(`✨ **勝利者** <@${winnerId}> は死地を潜り抜けました！ (現在 ${winnerData.streak}連勝)`);
                         }
 
                         return;

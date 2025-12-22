@@ -149,6 +149,12 @@ client.once('clientReady', async (client) => {
           ),
       new SlashCommandBuilder().setName('romecoin_ranking').setDescription('ロメコインランキングを確認します'),
       new SlashCommandBuilder().setName('database_export').setDescription('データベースをエクスポートします(運営専用)'),
+      new SlashCommandBuilder().setName('data_migrate').setDescription('Discord IDベースのデータをNotion名ベースに引き継ぎます(運営専用)')
+          .addUserOption(option =>
+              option.setName('user')
+              .setDescription('引き継ぎ対象のユーザー')
+              .setRequired(true)
+          ),
       new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message)
   ].map(command => command.toJSON());
 

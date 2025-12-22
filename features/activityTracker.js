@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { MAIN_CHANNEL_ID } = require('../constants');
+const { getDataKey, updateData, migrateData } = require('./dataAccess');
 
 const DATA_FILE = path.join(__dirname, '../activity_data.json');
 
@@ -36,12 +37,19 @@ function getTodayKey() {
     return `${y}-${m}-${d}`;
 }
 
-function trackMessage(message) {
+async function trackMessage(message) {
     const dateKey = getTodayKey();
-    if (!activityCache[message.author.id]) activityCache[message.author.id] = {};
-    if (!activityCache[message.author.id][dateKey]) activityCache[message.author.id][dateKey] = 0;
+    
+    // データ引き継ぎ（ID → Notion名）
+    await migrateData(message.author.id, activityCache);
+    
+    // データキーを取得
+    const dataKey = await getDataKey(message.author.id);
+    
+    if (!activityCache[dataKey]) activityCache[dataKey] = {};
+    if (!activityCache[dataKey][dateKey]) activityCache[dataKey][dateKey] = 0;
 
-    activityCache[message.author.id][dateKey]++;
+    activityCache[dataKey][dateKey]++;
 }
 
 async function backfill(client) {
@@ -130,9 +138,15 @@ async function backfill(client) {
                 const d = String(msgJst.getDate()).padStart(2, '0');
                 const dateKey = `${y}-${m}-${d}`;
 
-                if (!activityCache[msg.author.id]) activityCache[msg.author.id] = {};
-                if (!activityCache[msg.author.id][dateKey]) activityCache[msg.author.id][dateKey] = 0;
-                activityCache[msg.author.id][dateKey]++;
+                // データ引き継ぎ（ID → Notion名）
+                await migrateData(msg.author.id, activityCache);
+                
+                // データキーを取得
+                const dataKey = await getDataKey(msg.author.id);
+                
+                if (!activityCache[dataKey]) activityCache[dataKey] = {};
+                if (!activityCache[dataKey][dateKey]) activityCache[dataKey][dateKey] = 0;
+                activityCache[dataKey][dateKey]++;
 
                 lastId = msg.id;
             }
@@ -180,7 +194,7 @@ function start(client) {
     loadData();
 
     // --- EVENT LISTENER ---
-    client.on('messageCreate', (message) => {
+    client.on('messageCreate', async (message) => {
         if (message.author.bot) {
             // Track bot messages too for total count debug
             activityCache._meta = activityCache._meta || {};
@@ -189,7 +203,7 @@ function start(client) {
         }
         if (message.channel.id !== MAIN_CHANNEL_ID) return;
 
-        trackMessage(message);
+        await trackMessage(message);
     });
 
     // Auto-save periodically

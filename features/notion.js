@@ -5,7 +5,8 @@ const NOTION_DATABASE_ID = "15499b1436df801e8ef0cc98d897bc80"
 
 class NotionManager {
     constructor() {
-        this.cache = new Map();
+        this.cache = new Map(); // Discord ID -> Notion名
+        this.reverseCache = new Map(); // Notion名 -> Discord ID
         this.lastFetch = 0;
         this.CACHE_TTL = 10 * 60 * 1000; // 10 minutes
     }
@@ -22,7 +23,8 @@ class NotionManager {
         }
 
         console.log('[NotionManager] Fetching data from Notion...');
-        const map = new Map();
+        const map = new Map(); // Discord ID -> Notion名
+        const reverseMap = new Map(); // Notion名 -> Discord ID
         let cursor = undefined;
 
         try {
@@ -79,6 +81,7 @@ class NotionManager {
                         discordId = discordId.replace(/\D/g, '');
                         if (discordId.length > 10) { // Basic validity check
                             map.set(discordId, name);
+                            reverseMap.set(name, discordId);
                         }
                     }
                 }
@@ -89,6 +92,7 @@ class NotionManager {
 
             console.log(`[NotionManager] Fetched ${map.size} users.`);
             this.cache = map;
+            this.reverseCache = reverseMap;
             this.lastFetch = Date.now();
             return map;
 
@@ -96,6 +100,55 @@ class NotionManager {
             console.error('[NotionManager] Failed to fetch:', e);
             return new Map();
         }
+    }
+
+    /**
+     * Discord IDからNotion名を取得
+     * @param {string} discordId - DiscordユーザーID
+     * @returns {Promise<string|null>} Notion名、存在しない場合はnull
+     */
+    async getNotionName(discordId) {
+        const map = await this.getNameMap();
+        return map.get(discordId) || null;
+    }
+
+    /**
+     * Notion名からDiscord IDを取得
+     * @param {string} notionName - Notion名
+     * @returns {Promise<string|null>} Discord ID、存在しない場合はnull
+     */
+    async getDiscordId(notionName) {
+        await this.getNameMap();
+        return this.reverseCache.get(notionName) || null;
+    }
+
+    /**
+     * データ保存用のキーを取得（Notion名があればNotion名、なければDiscord ID）
+     * @param {string} discordId - DiscordユーザーID
+     * @returns {Promise<string>} 保存用キー（Notion名またはDiscord ID）
+     */
+    async getDataKey(discordId) {
+        const notionName = await this.getNotionName(discordId);
+        return notionName || discordId;
+    }
+
+    /**
+     * データ読み込み用のキーを取得（Notion名とDiscord IDの両方をチェック）
+     * @param {string} discordId - DiscordユーザーID
+     * @param {Object} data - データオブジェクト
+     * @returns {Promise<string|null>} 見つかったキー、存在しない場合はnull
+     */
+    async findDataKey(discordId, data) {
+        // まずNotion名で検索
+        const notionName = await this.getNotionName(discordId);
+        if (notionName && data[notionName]) {
+            return notionName;
+        }
+        // Notion名が見つからない、またはデータが存在しない場合はDiscord IDで検索
+        if (data[discordId]) {
+            return discordId;
+        }
+        return null;
     }
 }
 
