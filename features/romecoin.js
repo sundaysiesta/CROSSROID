@@ -8,11 +8,19 @@ const crypto = require('crypto');
 
 // ロメコインデータ
 let romecoin_data = new Object();
+romecoin_data['1003186903102791781'] = 10000;
+romecoin_data['220418694549995520'] = 10000;
 // クールダウン用配列
 let message_cooldown_users = new Array();
 let reaction_cooldown_users = new Array();
 // じゃんけん進行データ
 let janken_progress_data = new Object();
+
+const RSPEnum = Object.freeze({
+    rock: 'グー',
+    scissors: 'チョキ',
+    paper: 'パー'
+})
 
 async function clientReady(client) {
     // DBからデータを取得
@@ -237,12 +245,12 @@ async function interactionCreate(interaction) {
             // ユーザーの手選択処理
             if (interaction.user.id === progress.user.id) {
                 progress.user_hand = interaction.customId.split('_')[1];
-                await interaction.reply({ content: `あなたの手は${progress.user_hand}に決定しました。対戦相手の手を待っています...`, flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: `あなたの手は${RSPEnum[progress.user_hand]}に決定しました。対戦相手の手を待っています...`, flags: [MessageFlags.Ephemeral] });
             }
             // 対戦相手の手選択処理
             else if (interaction.user.id === progress.opponent.id) {
                 progress.opponent_hand = interaction.customId.split('_')[1];
-                await interaction.reply({ content: `あなたの手は${progress.opponent_hand}に決定しました。対戦相手の手を待っています...`, flags: [MessageFlags.Ephemeral] });
+                await interaction.reply({ content: `あなたの手は${RSPEnum[progress.opponent_hand]}に決定しました。対戦相手の手を待っています...`, flags: [MessageFlags.Ephemeral] });
             }
             // 勝敗判定
             if (progress.user_hand && progress.opponent_hand) {
@@ -259,7 +267,7 @@ async function interactionCreate(interaction) {
                     await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - 100));
                     await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + 100));
                 }
-                await interaction.channel.send({ content: `# 対戦結果\n${progress.user}の手: ${progress.user_hand}\n${progress.opponent}の手: ${progress.opponent_hand}\n${result}`, components: [] });
+                await interaction.channel.send({ content: `# 対戦結果\n${progress.user}の手: ${RSPEnum[progress.user_hand]}\n${progress.opponent}の手: ${RSPEnum[progress.opponent_hand]}\n${result}`, components: [] });
                 delete janken_progress_data[progress_id];
             }
         }
