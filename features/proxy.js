@@ -43,9 +43,11 @@ function setup(client) {
 
     // 画像自動代行投稿機能のハンドラー
     imageProxyHandler = async message => {
+        // BotやWebhookのメッセージは除外
         if (message.author.bot || message.webhookId || message.system) return;
         // 自身のWebhookによる投稿を念のため除外
         if (message.author.username === 'CROSSROID Proxy') return;
+        // 添付ファイルがない場合はスキップ
         if (!message.attachments || message.attachments.size === 0) return;
 
         // 画像・動画ファイルがあるかチェック
@@ -54,60 +56,16 @@ function setup(client) {
 
         const messageId = message.id;
         
-        // ロック機構: 既に処理中の場合は即座にreturn（競合状態を防ぐ）
+        // 重複処理を防ぐ
         if (processingMessages.has(messageId)) {
-            logWebhookAction('SKIP-DUPLICATE', messageId, { reason: 'Already processing' });
             return;
         }
         
-        // 送信済みチェックを早期に実行（処理開始前にチェック）
-        if (sentWebhookMessages.has(messageId)) {
-            logWebhookAction('SKIP-ALREADY-SENT-EARLY', messageId, { 
-                reason: 'Already sent webhook (early check)' 
-            });
-            return;
-        }
-        
-        // ロックを取得（先にaddすることで、他の処理が開始されないようにする）
         processingMessages.add(messageId);
-        logWebhookAction('START', messageId, { 
-            author: message.author.id, 
-            channel: message.channel.id,
-            attachmentCount: message.attachments.size,
-            processingMessagesSize: processingMessages.size,
-            sentWebhookMessagesSize: sentWebhookMessages.size
-        });
 
-        let shouldProcess = true;
         try {
-            const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-            if (!member) {
-                logWebhookAction('SKIP', messageId, { reason: 'Member not found' });
-                shouldProcess = false;
-                return;
-            }
-
-            // クールダウンチェック（強制代行ロール保持者は無視）
-            const hasForceProxy = hasForceProxyRole(member);
-            if (!hasForceProxy) {
-                const userId = message.author.id;
-                const lastAutoProxyAt = autoProxyCooldowns.get(userId) || 0;
-                const timeSinceLastProxy = Date.now() - lastAutoProxyAt;
-
-                // 上級ロメダ民特典: クールダウン5秒に短縮 (通常15秒)
-                const isElite = member.roles.cache.has(ELITE_ROLE_ID);
-                const cooldown = isElite ? 5000 : AUTO_PROXY_COOLDOWN_MS;
-
-                if (timeSinceLastProxy < cooldown) {
-                    logWebhookAction('SKIP', messageId, { reason: 'Cooldown', remaining: cooldown - timeSinceLastProxy });
-                    shouldProcess = false;
-                    return;
-                }
-            }
-
+            // 権限チェック
             if (!message.guild.members.me.permissions.has('ManageMessages')) {
-                logWebhookAction('SKIP', messageId, { reason: 'Missing ManageMessages permission' });
-                shouldProcess = false;
                 return;
             }
 
@@ -115,240 +73,60 @@ function setup(client) {
             const originalContent = message.content || '';
             const originalAttachments = Array.from(message.attachments.values());
             const originalAuthor = message.author;
-            // 上級ロメダ民は王冠付き
-            let displayName = member?.nickname || originalAuthor.displayName;
-            if (member.roles.cache.has(ELITE_ROLE_ID)) {
-                displayName = `👑 ${displayName} 👑`;
-            }
+            const displayName = message.member?.nickname || originalAuthor.displayName;
 
             // Webhookを取得または作成
             let webhook;
             try {
-                logWebhookAction('FETCH-WEBHOOK', messageId, { channel: message.channel.id });
                 const webhooks = await message.channel.fetchWebhooks();
                 webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
 
                 if (!webhook) {
-                    logWebhookAction('CREATE-WEBHOOK', messageId, { channel: message.channel.id });
                     webhook = await message.channel.createWebhook({
                         name: 'CROSSROID Proxy',
                         avatar: originalAuthor.displayAvatarURL()
                     });
-                    logWebhookAction('WEBHOOK-CREATED', messageId, { webhookId: webhook.id });
-                } else {
-                    logWebhookAction('WEBHOOK-FOUND', messageId, { webhookId: webhook.id });
                 }
             } catch (webhookError) {
-                logWebhookAction('ERROR', messageId, { 
-                    stage: 'webhook-fetch-create', 
-                    error: webhookError.message 
-                });
                 console.error(`[画像代行] Webhook取得/作成エラー:`, webhookError);
-                throw webhookError;
+                return;
             }
 
+            // ファイルを準備
             const files = originalAttachments.map(attachment => ({
                 attachment: attachment.url,
                 name: attachment.name
             }));
 
-            const deleteButton = {
-                type: 2, // BUTTON
-                style: 4, // DANGER
-                label: '削除',
-                custom_id: `delete_${originalAuthor.id}_${Date.now()}`,
-                emoji: '🗑️'
-            };
-
-            const actionRow = {
-                type: 1, // ACTION_ROW
-                components: [deleteButton]
-            };
-
+            // コンテンツをサニタイズ
             const sanitizedContent = originalContent
                 .replace(/@everyone/g, '@\u200beveryone')
                 .replace(/@here/g, '@\u200bhere')
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
-            // Webhookでメッセージを送信（重複防止の最終チェック）
-            // 送信直前に再度チェック：既に送信済みまたは処理中の場合はスキップ
-            if (sentWebhookMessages.has(messageId)) {
-                logWebhookAction('SKIP-ALREADY-SENT', messageId, { 
-                    reason: 'Already sent webhook for this message' 
-                });
-                return;
-            }
-            
-            // メッセージがまだ存在するか確認（削除済みの場合はスキップ）
-            try {
-                await message.fetch();
-            } catch (fetchError) {
-                if (fetchError.code === 10008) { // Unknown Message
-                    logWebhookAction('SKIP-MESSAGE-DELETED', messageId, { 
-                        reason: 'Original message already deleted' 
-                    });
-                    return;
-                }
-                // その他のエラーは続行
-            }
-            
-            // 送信前に最終チェック：既に送信済みの場合はスキップ
-            if (sentWebhookMessages.has(messageId)) {
-                logWebhookAction('SKIP-ALREADY-SENT-FINAL', messageId, { 
-                    reason: 'Already sent webhook (final check before send)' 
-                });
-                return;
-            }
-            
-            // 送信前にマーク（重複送信を防ぐ）- アトミック操作として実行
-            // チェックと追加をアトミックに行う（ログ出力の前に実行）
-            if (sentWebhookMessages.has(messageId)) {
-                logWebhookAction('SKIP-RACE-CONDITION', messageId, { 
-                    reason: 'Race condition detected - another process already sent' 
-                });
-                return;
-            }
-            // マークを先に追加（ログ出力より前に実行）
-            sentWebhookMessages.add(messageId);
-            
-            // webhook.send()実行中のロックをチェック（ログ出力より前に実行）
-            if (sendingWebhooks.has(messageId)) {
-                logWebhookAction('SKIP-SENDING-IN-PROGRESS', messageId, { 
-                    reason: 'Webhook send already in progress for this message',
-                    sendingWebhooksSize: sendingWebhooks.size
-                });
-                // マークを削除（送信しないため）
-                sentWebhookMessages.delete(messageId);
-                return;
-            }
-            
-            // 送信ロックを取得（ログ出力より前に実行）
-            sendingWebhooks.add(messageId);
-            
-            logWebhookAction('SEND-START', messageId, { 
-                webhookId: webhook.id, 
-                fileCount: files.length,
-                contentLength: sanitizedContent.length,
-                sentWebhookMessagesSize: sentWebhookMessages.size,
-                hasMark: sentWebhookMessages.has(messageId),
-                sendingWebhooksSize: sendingWebhooks.size,
-                hasSendingLock: sendingWebhooks.has(messageId)
-            });
-            
-            // webhook.send()の直前に再度チェック（最後の防御線）
-            // この時点でマークがなければ、他のプロセスが既に送信済みの可能性がある
-            if (!sentWebhookMessages.has(messageId)) {
-                logWebhookAction('ERROR-MARK-LOST', messageId, { 
-                    reason: 'Mark was lost between add and send - aborting send',
-                    sentWebhookMessagesSize: sentWebhookMessages.size
-                });
-                // ロックも解除
-                sendingWebhooks.delete(messageId);
-                return;
-            }
-            
-            // 送信ロックが失われていないか確認
-            if (!sendingWebhooks.has(messageId)) {
-                logWebhookAction('ERROR-SENDING-LOCK-LOST', messageId, { 
-                    reason: 'Sending lock was lost between add and send - aborting send',
-                    sendingWebhooksSize: sendingWebhooks.size
-                });
-                // マークも削除
-                sentWebhookMessages.delete(messageId);
-                return;
-            }
-            
-            // Webhook送信を非同期で開始（完了を待たない）
-            const webhookSendPromise = webhook.send({
+            // Webhookでメッセージを送信
+            await webhook.send({
                 content: sanitizedContent,
                 username: displayName,
                 avatarURL: originalAuthor.displayAvatarURL(),
                 files: files,
-                components: [actionRow],
                 allowedMentions: { parse: [] }
-            }).then((webhookMessage) => {
-                // 送信ロックを解除
-                sendingWebhooks.delete(messageId);
-                
-                logWebhookAction('SEND-SUCCESS', messageId, { 
-                    webhookMessageId: webhookMessage.id,
-                    webhookId: webhook.id 
-                });
-
-                // 削除情報を保存（webhook送信成功時のみ）
-                deletedMessageInfo.set(webhookMessage.id, {
-                    content: originalContent,
-                    author: originalAuthor,
-                    attachments: originalAttachments,
-                    channel: message.channel,
-                    originalMessageId: message.id,
-                    timestamp: Date.now()
-                });
-
-                return webhookMessage;
-            }).catch((sendError) => {
-                // 送信エラー時はマークとロックを解除
-                sentWebhookMessages.delete(messageId);
-                sendingWebhooks.delete(messageId);
-                logWebhookAction('SEND-ERROR', messageId, { 
-                    error: sendError.message,
-                    code: sendError.code 
-                });
-                console.error(`[画像代行] Webhook送信エラー:`, sendError);
-                throw sendError;
             });
 
-            // 元のメッセージを削除（優先処理：webhook送信の完了を待たない）
-            let deleteSuccess = false;
+            // 元のメッセージを削除
             try {
                 await message.delete();
-                deleteSuccess = true;
-                logWebhookAction('DELETE-ORIGINAL', messageId, { success: true });
             } catch (deleteError) {
                 // Unknown Message (10008) は無視
                 if (deleteError.code !== 10008) {
-                    logWebhookAction('DELETE-ERROR', messageId, { 
-                        error: deleteError.message,
-                        code: deleteError.code 
-                    });
                     console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
-                } else {
-                    logWebhookAction('DELETE-SKIP', messageId, { reason: 'Message already deleted (10008)' });
-                    deleteSuccess = true; // 既に削除済みなので成功とみなす
                 }
             }
 
-            // クールダウンを更新（削除成功時のみ）
-            if (deleteSuccess) {
-                autoProxyCooldowns.set(message.author.id, Date.now());
-            }
-
-            // 削除完了時点でCOMPLETEログを出力（webhook送信の完了を待たない）
-            logWebhookAction('COMPLETE', messageId, { 
-                deleteSuccess: deleteSuccess,
-                note: 'Webhook send may still be in progress'
-            });
-
-            // Webhook送信の完了を待つ（バックグラウンド処理）
-            // エラーが発生しても処理は続行（既に削除は完了しているため）
-            webhookSendPromise.catch(() => {
-                // エラーは既にログ出力済み
-            });
-
         } catch (error) {
-            logWebhookAction('ERROR', messageId, { 
-                error: error.message,
-                stack: error.stack?.split('\n')[0] 
-            });
             console.error(`[画像代行] エラー:`, error);
         } finally {
-            // 確実にロックを解除（早期リターン時も含む）
-            if (processingMessages.has(messageId)) {
-                processingMessages.delete(messageId);
-                logWebhookAction('UNLOCK', messageId, { 
-                    processed: shouldProcess !== false 
-                });
-            }
+            processingMessages.delete(messageId);
         }
     };
     
