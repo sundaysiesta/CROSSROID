@@ -16,6 +16,11 @@ const processingMessages = new Set();
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
 const sentWebhookMessages = new Set(); // 送信済みの元メッセージIDを追跡（重複防止）
 
+// イベントリスナーの重複登録を防ぐフラグ
+let isSetupComplete = false;
+let imageProxyHandler = null;
+let wordProxyHandler = null;
+
 // ログ用ヘルパー関数
 function logWebhookAction(action, messageId, details = {}) {
     const timestamp = new Date().toISOString();
@@ -26,8 +31,17 @@ function logWebhookAction(action, messageId, details = {}) {
 }
 
 function setup(client) {
-    // 画像自動代行投稿機能
-    client.on('messageCreate', async message => {
+    // 既にセットアップ済みの場合はスキップ（重複登録を防ぐ）
+    if (isSetupComplete) {
+        console.warn('[PROXY] setup()が既に呼ばれています。重複登録をスキップします。');
+        return;
+    }
+    
+    isSetupComplete = true;
+    console.log('[PROXY] イベントリスナーを登録します。');
+
+    // 画像自動代行投稿機能のハンドラー
+    imageProxyHandler = async message => {
         if (message.author.bot || message.webhookId || message.system) return;
         // 自身のWebhookによる投稿を念のため除外
         if (message.author.username === 'CROSSROID Proxy') return;
@@ -167,13 +181,27 @@ function setup(client) {
                 // その他のエラーは続行
             }
             
+            // 送信前に最終チェック：既に送信済みの場合はスキップ
+            if (sentWebhookMessages.has(messageId)) {
+                logWebhookAction('SKIP-ALREADY-SENT-FINAL', messageId, { 
+                    reason: 'Already sent webhook (final check before send)' 
+                });
+                return;
+            }
+            
             logWebhookAction('SEND-START', messageId, { 
                 webhookId: webhook.id, 
                 fileCount: files.length,
                 contentLength: sanitizedContent.length 
             });
             
-            // 送信前にマーク（重複送信を防ぐ）
+            // 送信前にマーク（重複送信を防ぐ）- アトミック操作として実行
+            if (sentWebhookMessages.has(messageId)) {
+                logWebhookAction('SKIP-RACE-CONDITION', messageId, { 
+                    reason: 'Race condition detected - another process already sent' 
+                });
+                return;
+            }
             sentWebhookMessages.add(messageId);
             
             // Webhook送信を非同期で開始（完了を待たない）
@@ -264,10 +292,13 @@ function setup(client) {
                 });
             }
         }
-    });
+    };
+    
+    // 画像自動代行投稿機能のイベントリスナーを登録
+    client.on('messageCreate', imageProxyHandler);
 
-    // 特定ワード自動代行機能
-    client.on('messageCreate', async message => {
+    // 特定ワード自動代行機能のハンドラー
+    wordProxyHandler = async message => {
         if (message.author.bot || message.webhookId || message.system) return;
         if (message.author.username === 'CROSSROID Word Filter') return;
         if (!message.content || message.content.trim() === '') return;
@@ -416,7 +447,10 @@ function setup(client) {
                 });
             }
         }
-    });
+    };
+    
+    // 特定ワード自動代行機能のイベントリスナーを登録
+    client.on('messageCreate', wordProxyHandler);
 
     // 定期的なクリーンアップ
     setInterval(() => {
