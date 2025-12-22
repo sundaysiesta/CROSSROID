@@ -392,22 +392,32 @@ function setup(client) {
                 contentLength: sanitizedContent.length 
             });
 
-            await webhook.send({
+            // Webhook送信を非同期で開始（完了を待たない）
+            const webhookSendPromise = webhook.send({
                 content: sanitizedContent,
                 username: displayName,
                 avatarURL: originalAuthor.displayAvatarURL(),
                 allowedMentions: { parse: [] }
+            }).then(() => {
+                logWebhookAction('SEND-SUCCESS', messageId, { 
+                    type: 'word-filter',
+                    webhookId: webhook.id 
+                });
+            }).catch((sendError) => {
+                logWebhookAction('SEND-ERROR', messageId, { 
+                    type: 'word-filter',
+                    error: sendError.message,
+                    code: sendError.code 
+                });
+                console.error('特定ワード自動代行: Webhook送信エラー:', sendError);
+                throw sendError;
             });
 
-            logWebhookAction('SEND-SUCCESS', messageId, { 
-                type: 'word-filter',
-                webhookId: webhook.id 
-            });
-
-            wordProxyCooldowns.set(userId, Date.now());
-
+            // 元のメッセージを削除（優先処理：webhook送信の完了を待たない）
+            let deleteSuccess = false;
             try {
                 await message.delete();
+                deleteSuccess = true;
                 logWebhookAction('DELETE-ORIGINAL', messageId, { 
                     type: 'word-filter',
                     success: true 
@@ -425,8 +435,27 @@ function setup(client) {
                         type: 'word-filter',
                         reason: 'Message already deleted (10008)' 
                     });
+                    deleteSuccess = true; // 既に削除済みなので成功とみなす
                 }
             }
+
+            // クールダウンを更新（削除成功時のみ）
+            if (deleteSuccess) {
+                wordProxyCooldowns.set(userId, Date.now());
+            }
+
+            // 削除完了時点でCOMPLETEログを出力（webhook送信の完了を待たない）
+            logWebhookAction('COMPLETE', messageId, { 
+                type: 'word-filter',
+                deleteSuccess: deleteSuccess,
+                note: 'Webhook send may still be in progress'
+            });
+
+            // Webhook送信の完了を待つ（バックグラウンド処理）
+            // エラーが発生しても処理は続行（既に削除は完了しているため）
+            webhookSendPromise.catch(() => {
+                // エラーは既にログ出力済み
+            });
 
             logWebhookAction('COMPLETE', messageId, { type: 'word-filter' });
 
