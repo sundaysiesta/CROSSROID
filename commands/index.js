@@ -1031,43 +1031,52 @@ async function handleCommands(interaction, client) {
         try {
             const userId = interaction.user.id;
             const opponentUser = interaction.options.getUser('opponent');
-
-            // バリデーション
-            if (opponentUser.id === userId) {
-                return interaction.reply({ content: '自分自身と決闘することはできません。', ephemeral: true });
-            }
-            if (opponentUser.bot) {
-                return interaction.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
-            }
+            const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
             const member = interaction.member;
-            const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
 
-            if (!opponentMember) {
-                return interaction.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
-            }
-
-            // ロールチェック（世代ロール必須）
+            // ロールチェック（世代ロール必須）- 挑戦者のみ
             const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
             const isChallengerEligible = member.roles.cache.some(r => romanRegex.test(r.name)) || member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
-            const isOpponentEligible = opponentMember.roles.cache.some(r => romanRegex.test(r.name)) || opponentMember.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
 
             if (!isChallengerEligible) {
                 return interaction.reply({ content: 'あなたは決闘に参加するための世代ロールを持っていません。', ephemeral: true });
             }
-            if (!isOpponentEligible) {
-                return interaction.reply({ content: '対戦相手は決闘に参加するための世代ロールを持っていません。', ephemeral: true });
+
+            // 相手が指定されている場合のバリデーション
+            if (opponentUser) {
+                if (opponentUser.id === userId) {
+                    return interaction.reply({ content: '自分自身と決闘することはできません。', ephemeral: true });
+                }
+                if (opponentUser.bot) {
+                    return interaction.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
+                }
+
+                const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                if (!opponentMember) {
+                    return interaction.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+                }
+
+                const isOpponentEligible = opponentMember.roles.cache.some(r => romanRegex.test(r.name)) || opponentMember.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
+                if (!isOpponentEligible) {
+                    return interaction.reply({ content: '対戦相手は決闘に参加するための世代ロールを持っていません。', ephemeral: true });
+                }
             }
 
             // 決闘状UI
+            const buttonCustomId = isOpenChallenge 
+                ? `duel_accept_${userId}` 
+                : `duel_accept_${userId}_${opponentUser.id}`;
+            
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`duel_accept_${userId}_${opponentUser.id}`).setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
-                new ButtonBuilder().setCustomId(`duel_deny_${userId}_${opponentUser.id}`).setLabel('拒否').setStyle(ButtonStyle.Secondary).setEmoji('🏳️')
+                new ButtonBuilder().setCustomId(buttonCustomId).setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('⚔️')
             );
 
             const embed = new EmbedBuilder()
                 .setTitle('⚔️ 決闘状')
-                .setDescription(`${opponentUser}\n${interaction.user} から決闘を申し込まれました。`)
+                .setDescription(isOpenChallenge 
+                    ? `${interaction.user} が誰でも挑戦可能な決闘を開始しました。\n\n**誰でも「受けて立つ」ボタンを押して挑戦できます！**`
+                    : `${opponentUser}\n${interaction.user} から決闘を申し込まれました。`)
                 .addFields(
                     { name: 'ルール', value: '1d100のダイス勝負', inline: true },
                     { name: 'ルール', value: '完全ランダム（1-100）& 引き分けは防御側の勝利', inline: true },
@@ -1078,24 +1087,52 @@ async function handleCommands(interaction, client) {
                 .setThumbnail(interaction.user.displayAvatarURL());
 
             await interaction.reply({
-                content: `${opponentUser}`,
+                content: isOpenChallenge ? null : `${opponentUser}`,
                 embeds: [embed],
                 components: [row]
             });
 
-            const filter = i => i.user.id === opponentUser.id && (i.customId.startsWith('duel_accept_') || i.customId.startsWith('duel_deny_'));
+            // フィルター: 相手が指定されている場合はその人のみ、指定されていない場合は挑戦者以外なら誰でも
+            const filter = isOpenChallenge
+                ? i => i.user.id !== userId && i.customId === buttonCustomId
+                : i => i.user.id === opponentUser.id && (i.customId.startsWith('duel_accept_') || i.customId.startsWith('duel_deny_'));
             const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
 
             collector.on('collect', async i => {
-                if (i.customId.startsWith('duel_deny_')) {
-                    await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [], embeds: [] });
-                    return;
+                // 受諾したユーザーを取得（open challengeの場合）
+                let actualOpponentUser = opponentUser;
+                let actualOpponentMember = null;
+
+                if (isOpenChallenge) {
+                    actualOpponentUser = i.user;
+                    actualOpponentMember = await interaction.guild.members.fetch(actualOpponentUser.id).catch(() => null);
+                    
+                    if (!actualOpponentMember) {
+                        return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
+                    }
+
+                    // 受諾者のロールチェック
+                    const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+                    const isOpponentEligible = actualOpponentMember.roles.cache.some(r => romanRegex.test(r.name)) || actualOpponentMember.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
+                    
+                    if (!isOpponentEligible) {
+                        return i.reply({ content: 'あなたは決闘に参加するための世代ロールを持っていません。', ephemeral: true });
+                    }
+
+                    if (actualOpponentUser.bot) {
+                        return i.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
+                    }
+                } else {
+                    actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                    if (!actualOpponentMember) {
+                        return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+                    }
                 }
 
                 // 受諾
                 const startEmbed = new EmbedBuilder()
                     .setTitle('⚔️ 決闘開始')
-                    .setDescription(`${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`)
+                    .setDescription(`${interaction.user} vs ${actualOpponentUser}\n\nダイスロール中... 🎲`)
                     .setColor(0xFFA500);
 
                 await i.update({ content: null, embeds: [startEmbed], components: [] });
@@ -1106,24 +1143,24 @@ async function handleCommands(interaction, client) {
                 const rollA = Math.floor(Math.random() * 100) + 1;
                 const rollB = Math.floor(Math.random() * 100) + 1;
 
-                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
+                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${actualOpponentUser}: **${rollB}**\n\n`;
                 let loser = null;
                 let winner = null;
                 let diff = 0;
 
                 if (rollA > rollB) {
                     diff = rollA - rollB;
-                    loser = opponentMember;
+                    loser = actualOpponentMember;
                     winner = member;
-                    resultMsg += `🏆 **勝利者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
+                    resultMsg += `🏆 **勝利者: ${interaction.user}**\n💀 **敗者: ${actualOpponentUser}**`;
                 } else {
                     diff = Math.abs(rollB - rollA);
                     loser = member;
-                    winner = opponentMember;
+                    winner = actualOpponentMember;
                     if (rollA === rollB) {
                         resultMsg += `⚖️ **引き分け (防御側の勝利)**\n💀 **敗者: ${interaction.user}**`;
                     } else {
-                        resultMsg += `🏆 **勝利者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
+                        resultMsg += `🏆 **勝利者: ${actualOpponentUser}**\n💀 **敗者: ${interaction.user}**`;
                     }
                 }
 
@@ -1188,7 +1225,7 @@ async function handleCommands(interaction, client) {
                 let timeoutSuccess = false;
                 if (loser && loser.moderatable) {
                     try {
-                        await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.user.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(() => { });
+                        await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.user.id === userId ? actualOpponentUser.tag : interaction.user.tag)}`).catch(() => { });
                         timeoutSuccess = true;
                     } catch (e) {
                         console.error('タイムアウト適用エラー:', e);
@@ -1199,10 +1236,10 @@ async function handleCommands(interaction, client) {
                 const resultEmbed = new EmbedBuilder()
                     .setTitle(rollA === rollB ? '⚖️ 引き分け' : '🏆 決闘決着')
                     .setColor(rollA === rollB ? 0x99AAB5 : 0xFFD700)
-                    .setDescription(`${interaction.user} vs ${opponentUser}`)
+                    .setDescription(`${interaction.user} vs ${actualOpponentUser}`)
                     .addFields(
                         { name: `${interaction.user.username} (攻)`, value: `🎲 **${rollA}**`, inline: true },
-                        { name: `${opponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
+                        { name: `${actualOpponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
                         { name: '差', value: `${diff}`, inline: true }
                     );
 
@@ -1212,7 +1249,11 @@ async function handleCommands(interaction, client) {
                     );
                 }
 
-                await interaction.editReply({ embeds: [resultEmbed], components: [] });
+                await interaction.editReply({ 
+                    content: timeoutSuccess ? `⚰️ ${loser} は闇に葬られました...` : null,
+                    embeds: [resultEmbed], 
+                    components: [] 
+                });
             });
 
             // タイムアウトハンドラー
