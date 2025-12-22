@@ -134,157 +134,6 @@ async function handleCommands(interaction, client) {
 
 
 
-        if (interaction.commandName === 'duel') {
-            const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
-
-            let cooldowns = {};
-            if (fs.existsSync(COOLDOWN_FILE)) { try { cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')); } catch (e) { } }
-
-            const userId = interaction.user.id;
-            const now = Date.now();
-            const lastUsed = cooldowns[`battle_${userId}`] || 0;
-            const COOLDOWN_DURATION = 24 * 60 * 60 * 1000; // 1 Day (Shared)
-
-            if (now - lastUsed < COOLDOWN_DURATION) {
-                const remaining = COOLDOWN_DURATION - (now - lastUsed);
-                const hours = Math.ceil(remaining / (60 * 60 * 1000));
-                return interaction.reply({ content: `⛔ 戦闘（決闘/ロシアン）は1日1回までです。\n残り: ${hours}時間`, ephemeral: true });
-            }
-
-            const opponentUser = interaction.options.getUser('opponent');
-            if (opponentUser.id === userId) return interaction.reply({ content: '自分自身と決闘することはできません（それはただの自害です）。', ephemeral: true });
-            if (opponentUser.bot) return interaction.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
-
-            const member = interaction.member;
-            const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
-
-            if (!opponentMember) return interaction.reply({ content: '対戦相手の情報を取得できませんでした。', ephemeral: true });
-
-            // Challenge UI
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('duel_accept').setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('⚔️'),
-                new ButtonBuilder().setCustomId('duel_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary).setEmoji('🏳️')
-            );
-
-            const embed = new EmbedBuilder()
-                .setTitle('⚔️ 決闘状')
-                .setDescription(`${opponentUser}！\n${interaction.user} から決闘を申し込まれました。`)
-                .addFields(
-                    { name: 'ルール', value: '1d100のダイス勝負', inline: true },
-                    { name: 'ルール', value: '完全ランダム（1-100）& 引き分けは防御側の勝利', inline: true },
-                    { name: 'ペナルティ', value: '敗者はタイムアウト (Max 24h)', inline: false },
-                    { name: '注意', value: '受諾後のキャンセル不可', inline: false }
-                )
-                .setColor(0xFF0000)
-                .setThumbnail(interaction.user.displayAvatarURL());
-
-            await interaction.reply({
-                content: `${opponentUser}`,
-                embeds: [embed],
-                components: [row]
-            });
-
-            const filter = i => i.user.id === opponentUser.id && (i.customId === 'duel_accept' || i.customId === 'duel_deny');
-            const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
-
-            collector.on('collect', async i => {
-                if (i.customId === 'duel_deny') {
-                    await i.update({ content: `🏳️ ${opponentUser} は決闘を拒否しました。`, components: [] });
-                    // Penalty for cowardice: 5 min timeout
-                    /*if (opponentMember && opponentMember.moderatable) {
-                        try {
-                            await opponentMember.timeout(5 * 60 * 1000, 'Duel Cowardice');
-                            await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
-                        } catch (e) { }
-                    }*/
-                    return;
-                }
-
-                // Accepted - Start Duel
-                const startEmbed = new EmbedBuilder()
-                    .setTitle('⚔️ 決闘開始')
-                    .setDescription(`${interaction.user} vs ${opponentUser}\n\nダイスロール中... 🎲`)
-                    .setColor(0xFFA500);
-
-                await i.update({ content: null, embeds: [startEmbed], components: [] });
-
-                cooldowns[`battle_${userId}`] = Date.now();
-                try {
-                    fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(cooldowns, null, 2));
-                    require('../features/persistence').save(client);
-                } catch (e) { }
-
-                await new Promise(r => setTimeout(r, 2000));
-
-                // 完全ランダム（1-100）
-                const rollA = Math.floor(Math.random() * 100) + 1;
-                const rollB = Math.floor(Math.random() * 100) + 1;
-
-                let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${opponentUser}: **${rollB}**\n\n`;
-                let loser = null;
-                let winner = null;
-                let diff = 0;
-
-                if (rollA > rollB) {
-                    diff = rollA - rollB;
-                    loser = opponentMember;
-                    winner = member;
-                    resultMsg += `🏆 **勝者: ${interaction.user}**\n💀 **敗者: ${opponentUser}**`;
-                } else {
-                    diff = Math.abs(rollB - rollA);
-                    loser = member;
-                    winner = opponentMember;
-                    if (rollA === rollB) resultMsg += `⚖️ **引き分け (防御側の勝利)**\n💀 **敗者: ${interaction.user}**`;
-                    else resultMsg += `🏆 **勝者: ${opponentUser}**\n💀 **敗者: ${interaction.user}**`;
-                }
-
-                // LIMIT BREAK TIMEOUT (Standard Cap)
-                // Max 15m for everyone.
-                let timeoutMinutes = Math.min(15, Math.ceil(diff / 4));
-
-                if (loser.id === userId) {
-                    timeoutMinutes += 2; // Suicide penalty
-                }
-
-                const timeoutMs = timeoutMinutes * 60 * 1000;
-
-                const resultEmbed = new EmbedBuilder()
-                    .setTitle('🏆 決闘決着')
-                    .setColor(winner.id === interaction.user.id || winner.id === opponentUser.id ? 0xFFD700 : 0x99AAB5)
-                    .setDescription(`**勝者:** ${winner}\n**敗者:** ${loser}`)
-                    .addFields(
-                        { name: `${interaction.user.username}`, value: `🎲 **${rollA}**`, inline: true },
-                        { name: `${opponentUser.username}`, value: `🎲 **${rollB}**`, inline: true },
-                        { name: '差分', value: `${diff}`, inline: true },
-                        { name: '処罰', value: `🚨 ${timeoutMinutes}分 タイムアウト`, inline: false }
-                    )
-                    .setThumbnail(winner.user.displayAvatarURL());
-
-                await interaction.followUp({ embeds: [resultEmbed] });
-
-                if (loser && loser.moderatable) {
-                    try {
-                        await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(e => { });
-                        await interaction.channel.send(`⚰️ ${loser} は闇に葬られました (${timeoutMinutes}分)...`);
-                    } catch (e) { }
-                }
-            });
-
-            // Timeout Handler
-            collector.on('end', async collected => {
-                if (collected.size === 0) {
-                    await interaction.editReply({ content: '⌛ 時間切れで決闘はキャンセルされました。', components: [] });
-                    // Penalty for Ignoring
-                    // if (opponentMember && opponentMember.moderatable) {
-                    //     try {
-                    //         await opponentMember.timeout(5 * 60 * 1000, 'Duel Ignored');
-                    //         await interaction.channel.send(`💤 ${opponentUser} は無視を決め込んだ罪で5分間拘束されました。`);
-                    //     } catch (e) { }
-                    // }
-                }
-            });
-            return;
-        }
 
         if (interaction.commandName === 'duel_ranking') {
             const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
@@ -1277,43 +1126,71 @@ async function handleCommands(interaction, client) {
     if (interaction.commandName === 'duel_russian') {
         try {
             const userId = interaction.user.id;
-            const opponentUser = interaction.options.getUser('opponent');
+            const opponentUser = interaction.options.getUser('対戦相手');
+            const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
-            // バリデーション
-            if (opponentUser.id === userId || opponentUser.bot) {
-                return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+            // 相手が指定されている場合のバリデーション
+            if (opponentUser) {
+                if (opponentUser.id === userId || opponentUser.bot) {
+                    return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+                }
             }
 
             // UI
+            const buttonCustomId = isOpenChallenge 
+                ? `russian_accept_${userId}` 
+                : `russian_accept_${userId}_${opponentUser.id}`;
+            
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`russian_accept_${userId}_${opponentUser.id}`).setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('🔫'),
-                new ButtonBuilder().setCustomId(`russian_deny_${userId}_${opponentUser.id}`).setLabel('拒否').setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId(buttonCustomId).setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('🔫')
             );
 
             const embed = new EmbedBuilder()
                 .setTitle('☠️ ロシアン・ルーレット')
-                .setDescription(`${opponentUser}\n${interaction.user} から死のゲームへの招待です。`)
+                .setDescription(isOpenChallenge 
+                    ? `${interaction.user} が誰でも挑戦可能なロシアンルーレットを開始しました。\n\n**誰でも「受けて立つ」ボタンを押して挑戦できます！**`
+                    : `${opponentUser}\n${interaction.user} から死のゲームへの招待です。`)
                 .addFields(
                     { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に引き金を引く', inline: false },
                     { name: '敗北時', value: '10分Timeout', inline: true },
-                    { name: '勝利時', value: 'ハイライトチャンネルに投稿', inline: true }
+                    { name: '勝利時', value: '戦績に記録', inline: true }
                 )
                 .setColor(0x000000)
                 .setThumbnail('https://cdn.discordapp.com/emojis/1198240562545954936.webp');
 
             await interaction.reply({
-                content: `${opponentUser}`,
+                content: isOpenChallenge ? null : `${opponentUser}`,
                 embeds: [embed],
                 components: [row]
             });
 
-            const filter = i => i.user.id === opponentUser.id && (i.customId.startsWith('russian_accept_') || i.customId.startsWith('russian_deny_'));
+            // フィルター: 相手が指定されている場合はその人のみ、指定されていない場合は挑戦者以外なら誰でも
+            const filter = isOpenChallenge
+                ? i => i.user.id !== userId && i.customId === buttonCustomId
+                : i => i.user.id === opponentUser.id && (i.customId.startsWith('russian_accept_') || i.customId.startsWith('russian_deny_'));
             const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
 
             collector.on('collect', async i => {
-                if (i.customId.startsWith('russian_deny_')) {
-                    await i.update({ content: `🏳️ ${opponentUser} はロシアンルーレットを拒否しました。`, components: [], embeds: [] });
-                    return;
+                // 受諾したユーザーを取得（open challengeの場合）
+                let actualOpponentUser = opponentUser;
+                let actualOpponentMember = null;
+
+                if (isOpenChallenge) {
+                    actualOpponentUser = i.user;
+                    actualOpponentMember = await interaction.guild.members.fetch(actualOpponentUser.id).catch(() => null);
+                    
+                    if (!actualOpponentMember) {
+                        return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
+                    }
+
+                    if (actualOpponentUser.bot) {
+                        return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
+                    }
+                } else {
+                    actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                    if (!actualOpponentMember) {
+                        return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+                    }
                 }
 
                 // ゲーム開始
@@ -1326,18 +1203,22 @@ async function handleCommands(interaction, client) {
                     turn: userId
                 };
 
+                const triggerCustomId = isOpenChallenge
+                    ? `russian_trigger_${userId}_${actualOpponentUser.id}`
+                    : `russian_trigger_${userId}_${opponentUser.id}`;
+
                 const triggerRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`russian_trigger_${userId}_${opponentUser.id}`).setLabel('引き金を引く').setStyle(ButtonStyle.Danger).setEmoji('🔫')
+                    new ButtonBuilder().setCustomId(triggerCustomId).setLabel('引き金を引く').setStyle(ButtonStyle.Danger).setEmoji('🔫')
                 );
 
                 const startEmbed = new EmbedBuilder()
                     .setTitle('🔫 ロシアンルーレット開始')
-                    .setDescription(`${interaction.user} vs ${opponentUser}\n\n最初のターン: <@${state.turn}>`)
+                    .setDescription(`${interaction.user} vs ${actualOpponentUser}\n\n最初のターン: <@${state.turn}>`)
                     .setColor(0xFF0000);
 
                 await i.update({ content: null, embeds: [startEmbed], components: [triggerRow] });
 
-                const gameFilter = m => m.user.id === state.turn && m.customId === `russian_trigger_${userId}_${opponentUser.id}`;
+                const gameFilter = m => m.user.id === state.turn && m.customId === triggerCustomId;
                 const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
 
                 gameCollector.on('collect', async move => {
@@ -1350,7 +1231,7 @@ async function handleCommands(interaction, client) {
                     if (isHit) {
                         const deathEmbed = new EmbedBuilder()
                             .setTitle('💥 BANG!!!')
-                            .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝利者** ${move.user.id === userId ? opponentUser : interaction.user}`)
+                            .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝利者** ${move.user.id === userId ? actualOpponentUser : interaction.user}`)
                             .setColor(0x880000)
                             .setImage('https://media1.tenor.com/m/X215c2D-i_0AAAAC/gun-gunshot.gif');
 
@@ -1359,7 +1240,7 @@ async function handleCommands(interaction, client) {
 
                         // 死亡処理
                         const loserId = move.user.id;
-                        const winnerId = loserId === userId ? opponentUser.id : userId;
+                        const winnerId = loserId === userId ? actualOpponentUser.id : userId;
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
@@ -1379,9 +1260,8 @@ async function handleCommands(interaction, client) {
                             }
                         }
 
-                        // 報酬: ハイライトチャンネルに投稿
+                        // 戦績記録
                         if (winnerMember) {
-                            // 戦績記録
                             const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
                             let duelData = {};
                             if (fs.existsSync(DATA_FILE)) {
@@ -1407,18 +1287,14 @@ async function handleCommands(interaction, client) {
                                 console.error('決闘データ書き込みエラー:', e);
                             }
 
-                            // ハイライト
-                            const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
-                            if (highlightChannel) {
-                                interaction.channel.send(`✨ **勝利者** <@${winnerId}> は死地を潜り抜けました！ (現在 ${duelData[winnerId].streak}連勝)`);
-                            }
+                            interaction.channel.send(`✨ **勝利者** <@${winnerId}> は死地を潜り抜けました！ (現在 ${duelData[winnerId].streak}連勝)`);
                         }
 
                         return;
                     } else {
                         // ミス - 次のターン
                         state.current++;
-                        state.turn = state.turn === userId ? opponentUser.id : userId;
+                        state.turn = state.turn === userId ? actualOpponentUser.id : userId;
                         const nextEmbed = new EmbedBuilder()
                             .setTitle('💨 Click...')
                             .setDescription('セーフです。')
