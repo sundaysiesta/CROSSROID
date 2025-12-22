@@ -22,6 +22,7 @@ const { generateTimeReportMessage } = require('../features/timeSignal');
 const fs = require('fs');
 const path = require('path');
 const { checkAdmin } = require('../utils');
+const persistence = require('../features/persistence');
 
 // コマンドごとのクールダウン管理
 const anonymousCooldowns = new Map();
@@ -1042,6 +1043,8 @@ async function handleCommands(interaction, client) {
 
                 try {
                     fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2));
+                    // Memory storeに保存
+                    persistence.save(client).catch(err => console.error('Memory store保存エラー:', err));
                 } catch (e) {
                     console.error('決闘データ書き込みエラー:', e);
                 }
@@ -1283,6 +1286,8 @@ async function handleCommands(interaction, client) {
 
                             try {
                                 fs.writeFileSync(DATA_FILE, JSON.stringify(duelData, null, 2));
+                                // Memory storeに保存
+                                persistence.save(client).catch(err => console.error('Memory store保存エラー:', err));
                             } catch (e) {
                                 console.error('決闘データ書き込みエラー:', e);
                             }
