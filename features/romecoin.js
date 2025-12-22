@@ -8,8 +8,6 @@ const crypto = require('crypto');
 
 // ロメコインデータ
 let romecoin_data = new Object();
-romecoin_data['1003186903102791781'] = 10000;
-romecoin_data['220418694549995520'] = 10000;
 // クールダウン用配列
 let message_cooldown_users = new Array();
 let reaction_cooldown_users = new Array();
@@ -86,9 +84,10 @@ async function interactionCreate(interaction) {
         }
 
         else if (interaction.commandName === 'janken') {
+            const bet = 100;
             if (!Object.values(janken_progress_data).some(data => (data.user && data.user.id === interaction.user.id) || (data.opponent && data.opponent.id === interaction.user.id))) {
                 const opponent = interaction.options.getUser('opponent');
-                if (await getData(interaction.user.id, romecoin_data, 0) >= 100) {
+                if (await getData(interaction.user.id, romecoin_data, 0) >= bet) {
                     const progress_id =  crypto.randomUUID();
                     if (opponent) {
                         // クロスロイドと対戦
@@ -105,7 +104,7 @@ async function interactionCreate(interaction) {
                         }
                         // 他ユーザーと対戦
                         else if (opponent.id !== interaction.user.id && !opponent.bot) {
-                            if (await getData(opponent.id, romecoin_data, 0) >= 100) {
+                            if (await getData(opponent.id, romecoin_data, 0) >= bet) {
                                 // 対戦相手の手選択ボタンを表示
                                 const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
                                 const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
@@ -121,7 +120,7 @@ async function interactionCreate(interaction) {
                                 }, 60000);
                                 janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'selecting_hands'};
                             } else {
-                                await interaction.reply({ content: `対戦相手のロメコインが不足しています\n${opponent}の現在の所持ロメコイン: ${await getData(opponent.id, romecoin_data, 0)}\n必要なロメコイン: 100`, flags: [MessageFlags.Ephemeral] });
+                                await interaction.reply({ content: `対戦相手のロメコインが不足しています\n${opponent}の現在の所持ロメコイン: ${await getData(opponent.id, romecoin_data, 0)}\n必要なロメコイン: ${bet}`, flags: [MessageFlags.Ephemeral] });
                             }
                         } else {
                             await interaction.reply({ content: '自分自身やクロスロイド以外のBotと対戦することはできません', flags: [MessageFlags.Ephemeral] });
@@ -139,7 +138,7 @@ async function interactionCreate(interaction) {
                         janken_progress_data[progress_id] = {user: interaction.user, opponent: null, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'waiting_for_opponent'};
                     }
                 } else {
-                    await interaction.reply({ content: `ロメコインが不足しています\n現在の所持ロメコイン: ${await getData(interaction.user.id, romecoin_data, 0)}\n必要なロメコイン: 100`, flags: [MessageFlags.Ephemeral] });
+                    await interaction.reply({ content: `ロメコインが不足しています\n現在の所持ロメコイン: ${await getData(interaction.user.id, romecoin_data, 0)}\n必要なロメコイン: ${bet}`, flags: [MessageFlags.Ephemeral] });
                 }
             } else {
                 await interaction.reply({ content: 'あなたは現在対戦中のため新規の対戦を開始できません', flags: [MessageFlags.Ephemeral] });
@@ -215,7 +214,7 @@ async function interactionCreate(interaction) {
         // jankenボタンインタラクション処理(対戦承諾)
         if (interaction.customId.startsWith('janken_accept_')) {
             const progress_id = interaction.customId.split('_')[2];
-            if (interaction.user.id !== janken_progress_data[progress_id].user.id && await getData(interaction.user.id, romecoin_data, 0) >= 100) {
+            if (interaction.user.id !== janken_progress_data[progress_id].user.id && await getData(interaction.user.id, romecoin_data, 0) >= bet) {
                 if (!Object.values(janken_progress_data).some(data => (data.user && data.user.id === interaction.user.id) || (data.opponent && data.opponent.id === interaction.user.id))) {
                     clearTimeout(janken_progress_data[progress_id].timeout_id);
                     const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
@@ -259,13 +258,13 @@ async function interactionCreate(interaction) {
                 if (progress.user_hand === progress.opponent_hand) {
                     result = '引き分け';
                 } else if ((progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') || (progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') || (progress.user_hand === 'paper' && progress.opponent_hand === 'rock')) {
-                    result = `${progress.user}の勝利！\n${progress.user}は100ロメコインを獲得し、${progress.opponent}は100ロメコインを失いました`;
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + 100));
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - 100));
+                    result = `${progress.user}の勝利！\n${progress.user}は${bet}ロメコインを獲得し、${progress.opponent}は${bet}ロメコインを失いました`;
+                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + bet));
+                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - bet));
                 } else {
-                    result = `${progress.opponent}の勝利！\n${progress.opponent}は100ロメコインを獲得し、${progress.user}は100ロメコインを失いました`;
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - 100));
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + 100));
+                    result = `${progress.opponent}の勝利！\n${progress.opponent}は${bet}ロメコインを獲得し、${progress.user}は${bet}ロメコインを失いました`;
+                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - bet));
+                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + bet));
                 }
                 await interaction.channel.send({ content: `# 対戦結果\n${progress.user}の手: ${RSPEnum[progress.user_hand]}\n${progress.opponent}の手: ${RSPEnum[progress.opponent_hand]}\n${result}`, components: [] });
                 delete janken_progress_data[progress_id];
