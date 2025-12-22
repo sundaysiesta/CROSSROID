@@ -26,9 +26,21 @@ class NotionManager {
         const map = new Map(); // Discord ID -> Notion名
         const reverseMap = new Map(); // Notion名 -> Discord ID
         let cursor = undefined;
+        let pageCount = 0;
+        let totalFetched = 0;
 
         try {
             do {
+                // DiscordユーザーIDが入力されているデータのみを取得するフィルター
+                // フィールド名を動的に検出するため、まずはフィルターなしで取得し、後でフィルタリング
+                const requestBody = {
+                    page_size: 100,
+                };
+                
+                if (cursor) {
+                    requestBody.start_cursor = cursor;
+                }
+
                 const response = await fetch(`https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query`, {
                     method: 'POST',
                     headers: {
@@ -36,18 +48,25 @@ class NotionManager {
                         'Notion-Version': '2022-06-28',
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        start_cursor: cursor,
-                        page_size: 100,
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (!response.ok) {
                     const errText = await response.text();
+                    // レート制限エラーの場合
+                    if (response.status === 429) {
+                        const retryAfter = response.headers.get('retry-after') || '3';
+                        console.log(`[NotionManager] Rate limit reached. Waiting ${retryAfter} seconds...`);
+                        await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
+                        continue; // リトライ
+                    }
                     throw new Error(`Notion API Error: ${response.status} ${errText}`);
                 }
 
                 const data = await response.json();
+                pageCount++;
+                totalFetched += data.results.length;
+                console.log(`[NotionManager] Fetched page ${pageCount}: ${data.results.length} items (Total: ${totalFetched})`);
 
                 for (const page of data.results) {
                     const props = page.properties;
@@ -76,6 +95,7 @@ class NotionManager {
                         }
                     }
 
+                    // Discord IDが入力されているデータのみを処理
                     if (name && discordId) {
                         // Normalize ID (remove spaces/dashes just in case)
                         discordId = discordId.replace(/\D/g, '');
@@ -87,10 +107,22 @@ class NotionManager {
                 }
 
                 cursor = data.next_cursor;
+                
+                // レート制限を回避するため、リクエスト間に少し待機
+                if (cursor) {
+                    await new Promise(resolve => setTimeout(resolve, 200)); // 200ms待機
+                }
+
+                // デバッグ用: next_cursorの状態をログ出力
+                if (cursor) {
+                    console.log(`[NotionManager] Next cursor exists, continuing pagination...`);
+                } else {
+                    console.log(`[NotionManager] No more pages (next_cursor is null/undefined)`);
+                }
 
             } while (cursor);
 
-            console.log(`[NotionManager] Fetched ${map.size} users.`);
+            console.log(`[NotionManager] ✅ Fetch complete: ${map.size} valid users from ${pageCount} pages (Total items fetched: ${totalFetched}, Filtered: ${totalFetched - map.size} items without Discord ID)`);
             this.cache = map;
             this.reverseCache = reverseMap;
             this.lastFetch = Date.now();
