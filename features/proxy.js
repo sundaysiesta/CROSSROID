@@ -211,13 +211,28 @@ function setup(client) {
             // マークを先に追加（ログ出力より前に実行）
             sentWebhookMessages.add(messageId);
             
+            // webhook.send()実行中のロックをチェック（ログ出力より前に実行）
+            if (sendingWebhooks.has(messageId)) {
+                logWebhookAction('SKIP-SENDING-IN-PROGRESS', messageId, { 
+                    reason: 'Webhook send already in progress for this message',
+                    sendingWebhooksSize: sendingWebhooks.size
+                });
+                // マークを削除（送信しないため）
+                sentWebhookMessages.delete(messageId);
+                return;
+            }
+            
+            // 送信ロックを取得（ログ出力より前に実行）
+            sendingWebhooks.add(messageId);
+            
             logWebhookAction('SEND-START', messageId, { 
                 webhookId: webhook.id, 
                 fileCount: files.length,
                 contentLength: sanitizedContent.length,
                 sentWebhookMessagesSize: sentWebhookMessages.size,
                 hasMark: sentWebhookMessages.has(messageId),
-                sendingWebhooksSize: sendingWebhooks.size
+                sendingWebhooksSize: sendingWebhooks.size,
+                hasSendingLock: sendingWebhooks.has(messageId)
             });
             
             // webhook.send()の直前に再度チェック（最後の防御線）
@@ -227,20 +242,21 @@ function setup(client) {
                     reason: 'Mark was lost between add and send - aborting send',
                     sentWebhookMessagesSize: sentWebhookMessages.size
                 });
-                // マークが失われている場合は送信を中止
+                // ロックも解除
+                sendingWebhooks.delete(messageId);
                 return;
             }
             
-            // webhook.send()実行中のロックをチェック
-            if (sendingWebhooks.has(messageId)) {
-                logWebhookAction('SKIP-SENDING-IN-PROGRESS', messageId, { 
-                    reason: 'Webhook send already in progress for this message'
+            // 送信ロックが失われていないか確認
+            if (!sendingWebhooks.has(messageId)) {
+                logWebhookAction('ERROR-SENDING-LOCK-LOST', messageId, { 
+                    reason: 'Sending lock was lost between add and send - aborting send',
+                    sendingWebhooksSize: sendingWebhooks.size
                 });
+                // マークも削除
+                sentWebhookMessages.delete(messageId);
                 return;
             }
-            
-            // 送信ロックを取得
-            sendingWebhooks.add(messageId);
             
             // Webhook送信を非同期で開始（完了を待たない）
             const webhookSendPromise = webhook.send({
