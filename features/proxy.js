@@ -15,6 +15,15 @@ const wordProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const processingMessages = new Set();
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
 
+// ログ用ヘルパー関数
+function logWebhookAction(action, messageId, details = {}) {
+    const timestamp = new Date().toISOString();
+    const detailStr = Object.keys(details).length > 0 
+        ? ` | ${JSON.stringify(details)}` 
+        : '';
+    console.log(`[WEBHOOK-${action}] ${timestamp} | MessageID: ${messageId}${detailStr}`);
+}
+
 function setup(client) {
     // 画像自動代行投稿機能
     client.on('messageCreate', async message => {
@@ -28,14 +37,29 @@ function setup(client) {
         if (!hasMedia) return;
 
         const messageId = message.id;
-        if (processingMessages.has(messageId)) return;
-
+        
+        // ロック機構: 既に処理中の場合は即座にreturn（競合状態を防ぐ）
+        if (processingMessages.has(messageId)) {
+            logWebhookAction('SKIP-DUPLICATE', messageId, { reason: 'Already processing' });
+            return;
+        }
+        
+        // ロックを取得（先にaddすることで、他の処理が開始されないようにする）
         processingMessages.add(messageId);
-        console.log(`[画像代行] メッセージ ${messageId} の処理を開始`);
+        logWebhookAction('START', messageId, { 
+            author: message.author.id, 
+            channel: message.channel.id,
+            attachmentCount: message.attachments.size 
+        });
 
+        let shouldProcess = true;
         try {
             const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-            if (!member) return;
+            if (!member) {
+                logWebhookAction('SKIP', messageId, { reason: 'Member not found' });
+                shouldProcess = false;
+                return;
+            }
 
             // クールダウンチェック（強制代行ロール保持者は無視）
             const hasForceProxy = hasForceProxyRole(member);
@@ -49,11 +73,17 @@ function setup(client) {
                 const cooldown = isElite ? 5000 : AUTO_PROXY_COOLDOWN_MS;
 
                 if (timeSinceLastProxy < cooldown) {
+                    logWebhookAction('SKIP', messageId, { reason: 'Cooldown', remaining: cooldown - timeSinceLastProxy });
+                    shouldProcess = false;
                     return;
                 }
             }
 
-            if (!message.guild.members.me.permissions.has('ManageMessages')) return;
+            if (!message.guild.members.me.permissions.has('ManageMessages')) {
+                logWebhookAction('SKIP', messageId, { reason: 'Missing ManageMessages permission' });
+                shouldProcess = false;
+                return;
+            }
 
             // 元のメッセージ情報を保存
             const originalContent = message.content || '';
@@ -68,16 +98,25 @@ function setup(client) {
             // Webhookを取得または作成
             let webhook;
             try {
+                logWebhookAction('FETCH-WEBHOOK', messageId, { channel: message.channel.id });
                 const webhooks = await message.channel.fetchWebhooks();
                 webhook = webhooks.find(wh => wh.name === 'CROSSROID Proxy');
 
                 if (!webhook) {
+                    logWebhookAction('CREATE-WEBHOOK', messageId, { channel: message.channel.id });
                     webhook = await message.channel.createWebhook({
                         name: 'CROSSROID Proxy',
                         avatar: originalAuthor.displayAvatarURL()
                     });
+                    logWebhookAction('WEBHOOK-CREATED', messageId, { webhookId: webhook.id });
+                } else {
+                    logWebhookAction('WEBHOOK-FOUND', messageId, { webhookId: webhook.id });
                 }
             } catch (webhookError) {
+                logWebhookAction('ERROR', messageId, { 
+                    stage: 'webhook-fetch-create', 
+                    error: webhookError.message 
+                });
                 console.error(`[画像代行] Webhook取得/作成エラー:`, webhookError);
                 throw webhookError;
             }
@@ -105,7 +144,14 @@ function setup(client) {
                 .replace(/@here/g, '@\u200bhere')
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
-            // Webhookでメッセージを送信
+            // Webhookでメッセージを送信（重複防止の最終チェック）
+            // 念のため、送信直前に再度チェック（他の処理が完了した可能性があるため）
+            logWebhookAction('SEND-START', messageId, { 
+                webhookId: webhook.id, 
+                fileCount: files.length,
+                contentLength: sanitizedContent.length 
+            });
+            
             const webhookMessage = await webhook.send({
                 content: sanitizedContent,
                 username: displayName,
@@ -113,6 +159,11 @@ function setup(client) {
                 files: files,
                 components: [actionRow],
                 allowedMentions: { parse: [] }
+            });
+
+            logWebhookAction('SEND-SUCCESS', messageId, { 
+                webhookMessageId: webhookMessage.id,
+                webhookId: webhook.id 
             });
 
             // 削除情報を保存
@@ -130,17 +181,38 @@ function setup(client) {
             // 元のメッセージを削除
             try {
                 await message.delete();
+                logWebhookAction('DELETE-ORIGINAL', messageId, { success: true });
             } catch (deleteError) {
                 // Unknown Message (10008) は無視
                 if (deleteError.code !== 10008) {
+                    logWebhookAction('DELETE-ERROR', messageId, { 
+                        error: deleteError.message,
+                        code: deleteError.code 
+                    });
                     console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
+                } else {
+                    logWebhookAction('DELETE-SKIP', messageId, { reason: 'Message already deleted (10008)' });
                 }
             }
 
+            logWebhookAction('COMPLETE', messageId, { 
+                webhookMessageId: webhookMessage.id 
+            });
+
         } catch (error) {
+            logWebhookAction('ERROR', messageId, { 
+                error: error.message,
+                stack: error.stack?.split('\n')[0] 
+            });
             console.error(`[画像代行] エラー:`, error);
         } finally {
-            processingMessages.delete(messageId);
+            // 確実にロックを解除（早期リターン時も含む）
+            if (processingMessages.has(messageId)) {
+                processingMessages.delete(messageId);
+                logWebhookAction('UNLOCK', messageId, { 
+                    processed: shouldProcess !== false 
+                });
+            }
         }
     });
 
@@ -152,18 +224,40 @@ function setup(client) {
 
         if (!containsFilteredWords(message.content)) return;
 
+        const messageId = message.id;
         const userId = message.author.id;
         const lastWordProxyAt = wordProxyCooldowns.get(userId) || 0;
         if (Date.now() - lastWordProxyAt < WORD_PROXY_COOLDOWN_MS) return;
 
-        if (processingMessages.has(message.id)) return;
+        // ロック機構: 既に処理中の場合は即座にreturn
+        if (processingMessages.has(messageId)) {
+            logWebhookAction('SKIP-DUPLICATE', messageId, { 
+                type: 'word-filter',
+                reason: 'Already processing' 
+            });
+            return;
+        }
 
-        const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-        if (!message.guild.members.me.permissions.has('ManageMessages')) return;
+        // ロックを取得
+        processingMessages.add(messageId);
+        logWebhookAction('START', messageId, { 
+            type: 'word-filter',
+            author: userId,
+            channel: message.channel.id 
+        });
 
-        processingMessages.add(message.id);
-
+        let shouldProcess = true;
         try {
+            const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+            if (!message.guild.members.me.permissions.has('ManageMessages')) {
+                logWebhookAction('SKIP', messageId, { 
+                    type: 'word-filter',
+                    reason: 'Missing ManageMessages permission' 
+                });
+                shouldProcess = false;
+                return;
+            }
+
             const originalContent = message.content;
             const originalAuthor = message.author;
             const displayName = member?.nickname || originalAuthor.displayName;
@@ -171,16 +265,38 @@ function setup(client) {
             // Webhookを取得または作成
             let webhook;
             try {
+                logWebhookAction('FETCH-WEBHOOK', messageId, { 
+                    type: 'word-filter',
+                    channel: message.channel.id 
+                });
                 const webhooks = await message.channel.fetchWebhooks();
                 webhook = webhooks.find(wh => wh.name === 'CROSSROID Word Filter');
 
                 if (!webhook) {
+                    logWebhookAction('CREATE-WEBHOOK', messageId, { 
+                        type: 'word-filter',
+                        channel: message.channel.id 
+                    });
                     webhook = await message.channel.createWebhook({
                         name: 'CROSSROID Word Filter',
                         avatar: originalAuthor.displayAvatarURL()
                     });
+                    logWebhookAction('WEBHOOK-CREATED', messageId, { 
+                        type: 'word-filter',
+                        webhookId: webhook.id 
+                    });
+                } else {
+                    logWebhookAction('WEBHOOK-FOUND', messageId, { 
+                        type: 'word-filter',
+                        webhookId: webhook.id 
+                    });
                 }
             } catch (webhookError) {
+                logWebhookAction('ERROR', messageId, { 
+                    type: 'word-filter',
+                    stage: 'webhook-fetch-create',
+                    error: webhookError.message 
+                });
                 throw webhookError;
             }
 
@@ -189,6 +305,12 @@ function setup(client) {
                 .replace(/@here/g, '@\u200bhere')
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
+            logWebhookAction('SEND-START', messageId, { 
+                type: 'word-filter',
+                webhookId: webhook.id,
+                contentLength: sanitizedContent.length 
+            });
+
             await webhook.send({
                 content: sanitizedContent,
                 username: displayName,
@@ -196,18 +318,53 @@ function setup(client) {
                 allowedMentions: { parse: [] }
             });
 
+            logWebhookAction('SEND-SUCCESS', messageId, { 
+                type: 'word-filter',
+                webhookId: webhook.id 
+            });
+
             wordProxyCooldowns.set(userId, Date.now());
 
             try {
                 await message.delete();
+                logWebhookAction('DELETE-ORIGINAL', messageId, { 
+                    type: 'word-filter',
+                    success: true 
+                });
             } catch (deleteError) {
-                console.error('元のメッセージの削除に失敗しました:', deleteError);
+                if (deleteError.code !== 10008) {
+                    logWebhookAction('DELETE-ERROR', messageId, { 
+                        type: 'word-filter',
+                        error: deleteError.message,
+                        code: deleteError.code 
+                    });
+                    console.error('元のメッセージの削除に失敗しました:', deleteError);
+                } else {
+                    logWebhookAction('DELETE-SKIP', messageId, { 
+                        type: 'word-filter',
+                        reason: 'Message already deleted (10008)' 
+                    });
+                }
             }
 
+            logWebhookAction('COMPLETE', messageId, { type: 'word-filter' });
+
         } catch (error) {
+            logWebhookAction('ERROR', messageId, { 
+                type: 'word-filter',
+                error: error.message,
+                stack: error.stack?.split('\n')[0] 
+            });
             console.error('特定ワード自動代行でエラーが発生しました:', error.message);
         } finally {
-            processingMessages.delete(message.id);
+            // 確実にロックを解除（早期リターン時も含む）
+            if (processingMessages.has(messageId)) {
+                processingMessages.delete(messageId);
+                logWebhookAction('UNLOCK', messageId, { 
+                    type: 'word-filter',
+                    processed: shouldProcess !== false 
+                });
+            }
         }
     });
 
