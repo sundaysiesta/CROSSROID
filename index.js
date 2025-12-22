@@ -148,6 +148,11 @@ client.once('clientReady', async (client) => {
               .setDescription('確認したいユーザー')
           ),
       new SlashCommandBuilder().setName('romecoin_ranking').setDescription('ロメコインランキングを確認します'),
+      new SlashCommandBuilder().setName('janken').setDescription('じゃんけんを開始します')
+          .addUserOption(option =>
+              option.setName('opponent')
+              .setDescription('対戦相手を選択(クロスロイドを指定するとボット対戦 空白だと対戦募集します)')
+          ),
       new SlashCommandBuilder().setName('database_export').setDescription('データベースをエクスポートします(運営専用)'),
       new SlashCommandBuilder().setName('data_migrate').setDescription('Discord IDベースのデータをNotion名ベースに引き継ぎます(運営専用)')
           .addUserOption(option =>
