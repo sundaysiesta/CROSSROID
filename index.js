@@ -152,6 +152,10 @@ client.once('clientReady', async (client) => {
           .addUserOption(option =>
               option.setName('opponent')
               .setDescription('対戦相手を選択(クロスロイドを指定するとボット対戦 空白だと対戦募集します)')
+          )
+          .addIntegerOption(option =>
+              option.setName('bet')
+              .setDescription('賭けるロメコインの量(100以上の整数で指定 指定されていない場合は100)')
           ),
       new SlashCommandBuilder().setName('database_export').setDescription('データベースをエクスポートします(運営専用)'),
       new SlashCommandBuilder().setName('data_migrate').setDescription('Discord IDベースのデータをNotion名ベースに引き継ぎます(運営専用)')

@@ -84,7 +84,8 @@ async function interactionCreate(interaction) {
         }
 
         else if (interaction.commandName === 'janken') {
-            const bet = 100;
+            const bet = interaction.options.getInteger('bet') ? interaction.options.getInteger('bet') : 100;
+            if (bet < 100) return interaction.reply({ content: 'ベットは100以上の整数で指定してください', flags: [MessageFlags.Ephemeral] });
             if (!Object.values(janken_progress_data).some(data => (data.user && data.user.id === interaction.user.id) || (data.opponent && data.opponent.id === interaction.user.id))) {
                 const opponent = interaction.options.getUser('opponent');
                 if (await getData(interaction.user.id, romecoin_data, 0) >= bet) {
@@ -99,8 +100,8 @@ async function interactionCreate(interaction) {
                             const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
                             const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
                             const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                            await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\n出す手を選択してください`, components: [row]});
-                            janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, timeout_id: null, user_hand: null, opponent_hand: opponentHand, status: 'selecting_hands'};
+                            await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\nベット: ${bet}\n出す手を選択してください`, components: [row]});
+                            janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, bet: bet, timeout_id: null, user_hand: null, opponent_hand: opponentHand, status: 'selecting_hands'};
                         }
                         // 他ユーザーと対戦
                         else if (opponent.id !== interaction.user.id && !opponent.bot) {
@@ -110,7 +111,7 @@ async function interactionCreate(interaction) {
                                 const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
                                 const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
                                 const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                                const select_message = await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\n出す手を選択してください`, components: [row]});
+                                const select_message = await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\nベット: ${bet}\n出す手を選択してください`, components: [row]});
                                 
                                 // 60秒たっても選択されなかったら勝負破棄
                                 const timeout_id = setTimeout(async () => {
@@ -118,7 +119,7 @@ async function interactionCreate(interaction) {
                                     await interaction.followUp({ content: '時間切れとなったため、勝負は破棄されました', flags: [MessageFlags.Ephemeral] });
                                     delete janken_progress_data[progress_id];
                                 }, 60000);
-                                janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'selecting_hands'};
+                                janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, bet:bet, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'selecting_hands'};
                             } else {
                                 await interaction.reply({ content: `対戦相手のロメコインが不足しています\n${opponent}の現在の所持ロメコイン: ${await getData(opponent.id, romecoin_data, 0)}\n必要なロメコイン: ${bet}`, flags: [MessageFlags.Ephemeral] });
                             }
@@ -135,7 +136,7 @@ async function interactionCreate(interaction) {
                             await interaction.editReply({ content: '時間切れとなったため、対戦募集は終了しました', components: []});
                             delete janken_progress_data[progress_id];
                         }, 60000);
-                        janken_progress_data[progress_id] = {user: interaction.user, opponent: null, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'waiting_for_opponent'};
+                        janken_progress_data[progress_id] = {user: interaction.user, opponent: null, bet:bet, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'waiting_for_opponent'};
                     }
                 } else {
                     await interaction.reply({ content: `ロメコインが不足しています\n現在の所持ロメコイン: ${await getData(interaction.user.id, romecoin_data, 0)}\n必要なロメコイン: ${bet}`, flags: [MessageFlags.Ephemeral] });
@@ -214,7 +215,7 @@ async function interactionCreate(interaction) {
         // jankenボタンインタラクション処理(対戦承諾)
         if (interaction.customId.startsWith('janken_accept_')) {
             const progress_id = interaction.customId.split('_')[2];
-            if (interaction.user.id !== janken_progress_data[progress_id].user.id && await getData(interaction.user.id, romecoin_data, 0) >= bet) {
+            if (interaction.user.id !== janken_progress_data[progress_id].user.id && await getData(interaction.user.id, romecoin_data, 0) >= janken_progress_data[progress_id].bet) {
                 if (!Object.values(janken_progress_data).some(data => (data.user && data.user.id === interaction.user.id) || (data.opponent && data.opponent.id === interaction.user.id))) {
                     clearTimeout(janken_progress_data[progress_id].timeout_id);
                     const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
@@ -222,7 +223,7 @@ async function interactionCreate(interaction) {
                     const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
                     const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
                     await interaction.message.delete();
-                    const select_message = await interaction.channel.send({ content: `${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です\n出す手を選択してください`, components: [row]});
+                    const select_message = await interaction.channel.send({ content: `${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です\nこの勝負のベット: ${janken_progress_data[progress_id].bet}\n出す手を選択してください`, components: [row]});
                     janken_progress_data[progress_id].opponent = interaction.user;
                     janken_progress_data[progress_id].status = 'selecting_hands';
                     const timeout_id = setTimeout(async () => {
@@ -258,13 +259,13 @@ async function interactionCreate(interaction) {
                 if (progress.user_hand === progress.opponent_hand) {
                     result = '引き分け';
                 } else if ((progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') || (progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') || (progress.user_hand === 'paper' && progress.opponent_hand === 'rock')) {
-                    result = `${progress.user}の勝利！\n${progress.user}は${bet}ロメコインを獲得し、${progress.opponent}は${bet}ロメコインを失いました`;
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + bet));
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - bet));
+                    result = `${progress.user}の勝利！\n${progress.user}は${progress.bet}ロメコインを獲得し、${progress.opponent}は${progress.bet}ロメコインを失いました`;
+                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
+                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
                 } else {
-                    result = `${progress.opponent}の勝利！\n${progress.opponent}は${bet}ロメコインを獲得し、${progress.user}は${bet}ロメコインを失いました`;
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - bet));
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + bet));
+                    result = `${progress.opponent}の勝利！\n${progress.opponent}は${progress.bet}ロメコインを獲得し、${progress.user}は${progress.bet}ロメコインを失いました`;
+                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
+                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
                 }
                 await interaction.channel.send({ content: `# 対戦結果\n${progress.user}の手: ${RSPEnum[progress.user_hand]}\n${progress.opponent}の手: ${RSPEnum[progress.opponent_hand]}\n${result}`, components: [] });
                 delete janken_progress_data[progress_id];
