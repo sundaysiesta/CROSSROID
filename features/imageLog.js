@@ -88,12 +88,23 @@ function setup(client) {
         const authorId = customIdParts[0];
 
         if (interaction.user.id !== authorId) {
-            return interaction.reply({ content: 'このメッセージは投稿者本人のみが削除できます。', ephemeral: true });
+            return interaction.reply({ content: 'このメッセージは投稿者本人のみが削除できます。', flags: 64 }); // 64 = MessageFlags.Ephemeral
         }
 
         try {
             const messageInfo = deletedMessageInfo.get(interaction.message.id);
-            await interaction.message.delete();
+            
+            // メッセージを削除（既に削除されている場合は無視）
+            try {
+                await interaction.message.delete();
+            } catch (deleteError) {
+                // Unknown Message (10008) は無視（既に削除済み）
+                if (deleteError.code !== 10008) {
+                    throw deleteError; // その他のエラーは再スロー
+                }
+                // 10008の場合は既に削除済みなので処理を続行
+            }
+            
             deletedMessageInfo.delete(interaction.message.id);
 
             // ログ出力処理
@@ -150,11 +161,16 @@ function setup(client) {
                 }
             }
 
-            await interaction.reply({ content: 'メッセージを削除しました。', ephemeral: true }).catch(() => { });
+            await interaction.reply({ content: 'メッセージを削除しました。', flags: 64 }).catch(() => { }); // 64 = MessageFlags.Ephemeral
 
         } catch (error) {
+            // Unknown Message (10008) は既に削除済みなので、エラーとして扱わない
+            if (error.code === 10008) {
+                await interaction.reply({ content: 'メッセージは既に削除されています。', flags: 64 }).catch(() => { }); // 64 = MessageFlags.Ephemeral
+                return;
+            }
             console.error('メッセージ削除でエラー:', error);
-            await interaction.reply({ content: 'メッセージの削除に失敗しました。', ephemeral: true }).catch(() => { });
+            await interaction.reply({ content: 'メッセージの削除に失敗しました。', flags: 64 }).catch(() => { }); // 64 = MessageFlags.Ephemeral
         }
     });
 }
