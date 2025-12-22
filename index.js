@@ -240,15 +240,33 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // エラーハンドリング（未捕捉の例外）
 process.on('uncaughtException', async (error) => {
   console.error('【CRASH PREVENTION】Uncaught Exception:', error);
-  const errorlog_channel = await client.channels.fetch('1129965437514428498');
-  await errorlog_channel.send({ content: error.message });
+  try {
+    const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
+    if (errorlog_channel) {
+      await errorlog_channel.send({ content: error.message }).catch(() => {
+        // エラーログ送信に失敗しても無視（無限ループを防ぐ）
+      });
+    }
+  } catch (e) {
+    // エラーハンドリング内でエラーが発生しても無視（無限ループを防ぐ）
+    console.error('エラーログ送信に失敗:', e);
+  }
   // プロセスを終了させない
 });
 
 process.on('unhandledRejection', async (reason, promise) => {
   console.error('【CRASH PREVENTION】Unhandled Rejection:', reason);
-  const errorlog_channel = await client.channels.fetch('1129965437514428498');
-  await errorlog_channel.send({ content: reason.toString() });
+  try {
+    const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
+    if (errorlog_channel) {
+      await errorlog_channel.send({ content: reason.toString() }).catch(() => {
+        // エラーログ送信に失敗しても無視（無限ループを防ぐ）
+      });
+    }
+  } catch (e) {
+    // エラーハンドリング内でエラーが発生しても無視（無限ループを防ぐ）
+    console.error('エラーログ送信に失敗:', e);
+  }
   // プロセスを終了させない
 });
 
