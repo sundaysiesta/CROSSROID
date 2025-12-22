@@ -176,39 +176,47 @@ function setup(client) {
             // 送信前にマーク（重複送信を防ぐ）
             sentWebhookMessages.add(messageId);
             
-            const webhookMessage = await webhook.send({
+            // Webhook送信を非同期で開始（完了を待たない）
+            const webhookSendPromise = webhook.send({
                 content: sanitizedContent,
                 username: displayName,
                 avatarURL: originalAuthor.displayAvatarURL(),
                 files: files,
                 components: [actionRow],
                 allowedMentions: { parse: [] }
-            }).catch(async (sendError) => {
+            }).then((webhookMessage) => {
+                logWebhookAction('SEND-SUCCESS', messageId, { 
+                    webhookMessageId: webhookMessage.id,
+                    webhookId: webhook.id 
+                });
+
+                // 削除情報を保存（webhook送信成功時のみ）
+                deletedMessageInfo.set(webhookMessage.id, {
+                    content: originalContent,
+                    author: originalAuthor,
+                    attachments: originalAttachments,
+                    channel: message.channel,
+                    originalMessageId: message.id,
+                    timestamp: Date.now()
+                });
+
+                return webhookMessage;
+            }).catch((sendError) => {
                 // 送信エラー時はマークを解除
                 sentWebhookMessages.delete(messageId);
+                logWebhookAction('SEND-ERROR', messageId, { 
+                    error: sendError.message,
+                    code: sendError.code 
+                });
+                console.error(`[画像代行] Webhook送信エラー:`, sendError);
                 throw sendError;
             });
 
-            logWebhookAction('SEND-SUCCESS', messageId, { 
-                webhookMessageId: webhookMessage.id,
-                webhookId: webhook.id 
-            });
-
-            // 削除情報を保存
-            deletedMessageInfo.set(webhookMessage.id, {
-                content: originalContent,
-                author: originalAuthor,
-                attachments: originalAttachments,
-                channel: message.channel,
-                originalMessageId: message.id,
-                timestamp: Date.now()
-            });
-
-            autoProxyCooldowns.set(message.author.id, Date.now());
-
-            // 元のメッセージを削除
+            // 元のメッセージを削除（優先処理：webhook送信の完了を待たない）
+            let deleteSuccess = false;
             try {
                 await message.delete();
+                deleteSuccess = true;
                 logWebhookAction('DELETE-ORIGINAL', messageId, { success: true });
             } catch (deleteError) {
                 // Unknown Message (10008) は無視
@@ -220,11 +228,25 @@ function setup(client) {
                     console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
                 } else {
                     logWebhookAction('DELETE-SKIP', messageId, { reason: 'Message already deleted (10008)' });
+                    deleteSuccess = true; // 既に削除済みなので成功とみなす
                 }
             }
 
+            // クールダウンを更新（削除成功時のみ）
+            if (deleteSuccess) {
+                autoProxyCooldowns.set(message.author.id, Date.now());
+            }
+
+            // 削除完了時点でCOMPLETEログを出力（webhook送信の完了を待たない）
             logWebhookAction('COMPLETE', messageId, { 
-                webhookMessageId: webhookMessage.id 
+                deleteSuccess: deleteSuccess,
+                note: 'Webhook send may still be in progress'
+            });
+
+            // Webhook送信の完了を待つ（バックグラウンド処理）
+            // エラーが発生しても処理は続行（既に削除は完了しているため）
+            webhookSendPromise.catch(() => {
+                // エラーは既にログ出力済み
             });
 
         } catch (error) {
@@ -425,3 +447,4 @@ module.exports = {
     setup,
     deletedMessageInfo // for imageLog to access
 };
+
