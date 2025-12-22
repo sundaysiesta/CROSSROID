@@ -44,7 +44,7 @@ async function interactionCreate(interaction) {
         const romecoin = romecoin_data[user] || 0;
         interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
     }
-    else if (interaction.commandName = 'romecoin_ranking') {
+    else if (interaction.commandName === 'romecoin_ranking') {
         const sortedData = Object.entries(romecoin_data).sort((a, b) => b[1] - a[1]);
         let content = '# ROMECOINランキング\n';
         for (let i = 0; i < Math.min(10, sortedData.length); i++) {

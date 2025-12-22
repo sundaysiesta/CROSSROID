@@ -1177,54 +1177,42 @@ async function handleCommands(interaction, client) {
                 }
 
                 // タイムアウト計算（最大10分）
-                let timeoutMinutes = Math.min(10, Math.ceil(diff / 4));
-                let penaltyMsg = '';
+                let timeoutMinutes = Math.ceil(diff / 4);
                 if (loser.user.id === userId) {
-                    timeoutMinutes = Math.min(10, timeoutMinutes + 2);
-                    penaltyMsg = ' (自害+2分)';
+                    timeoutMinutes += 2; // 自害+2分
                 }
+                timeoutMinutes = Math.min(10, timeoutMinutes); // 計算後に最大10分に制限
                 const timeoutMs = timeoutMinutes * 60 * 1000;
 
-                const resultEmbed = new EmbedBuilder()
-                    .setTitle(rollA === rollB ? '⚖️ 引き分け' : '🏆 決闘決着')
-                    .setColor(rollA === rollB ? 0x99AAB5 : 0xFFD700)
-                    .setDescription(`**勝利者** ${winner}\n**敗者** ${loser}`)
-                    .addFields(
-                        { name: `${interaction.user.username} (攻)`, value: `🎲 **${rollA}**`, inline: true },
-                        { name: `${opponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
-                        { name: '差', value: `${diff}`, inline: true },
-                        { name: '処罰', value: `🚨 ${timeoutMinutes}分のタイムアウト${penaltyMsg}`, inline: false },
-                        { name: '戦績', value: `${winner}: ${duelData[winner.user.id].streak}連勝中`, inline: false }
-                    )
-                    .setThumbnail(winner.user.displayAvatarURL());
-
-                await interaction.followUp({ embeds: [resultEmbed] });
-
                 // タイムアウト適用
+                let timeoutSuccess = false;
                 if (loser && loser.moderatable) {
                     try {
                         await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.user.id === userId ? opponentUser.tag : interaction.user.tag)}`).catch(() => { });
-                        await interaction.channel.send(`⚰️ ${loser} は埋葬されました...`);
+                        timeoutSuccess = true;
                     } catch (e) {
                         console.error('タイムアウト適用エラー:', e);
                     }
                 }
 
-                // ハイライトチャンネルに投稿
-                try {
-                    const highlightChannel = client.channels.cache.get(HIGHLIGHT_CHANNEL_ID);
-                    if (highlightChannel) {
-                        const highlightEmbed = new EmbedBuilder()
-                            .setTitle('⚔️ 決闘勝利者誕生 ⚔️')
-                            .setDescription(`${winner} が ${loser} との死闘を制しました！`)
-                            .setColor(0xFFD700)
-                            .setThumbnail(winner.user.displayAvatarURL())
-                            .setTimestamp();
-                        await highlightChannel.send({ embeds: [highlightEmbed] });
-                    }
-                } catch (e) {
-                    console.error('ハイライト投稿エラー:', e);
+                // 挑戦状のembedを編集して結果を表示
+                const resultEmbed = new EmbedBuilder()
+                    .setTitle(rollA === rollB ? '⚖️ 引き分け' : '🏆 決闘決着')
+                    .setColor(rollA === rollB ? 0x99AAB5 : 0xFFD700)
+                    .setDescription(`${interaction.user} vs ${opponentUser}`)
+                    .addFields(
+                        { name: `${interaction.user.username} (攻)`, value: `🎲 **${rollA}**`, inline: true },
+                        { name: `${opponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
+                        { name: '差', value: `${diff}`, inline: true }
+                    );
+
+                if (timeoutSuccess) {
+                    resultEmbed.addFields(
+                        { name: '処罰', value: `⚰️ ${loser} は ${timeoutMinutes}分間タイムアウトされました。`, inline: false }
+                    );
                 }
+
+                await interaction.editReply({ embeds: [resultEmbed], components: [] });
             });
 
             // タイムアウトハンドラー
