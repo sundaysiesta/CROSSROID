@@ -21,6 +21,11 @@ const sendingWebhooks = new Set(); // webhook.send()実行中のメッセージI
 // これにより、短期間に同じメッセージIDに対して処理が走るのを防ぎます
 const processedMessages = new Set();
 
+// Webhook画像重複検出用のキャッシュ
+// key: channelId_imageUrl, value: { messageId, timestamp }
+const webhookImageCache = new Map();
+const DUPLICATE_CHECK_WINDOW_MS = 30000; // 30秒以内の重複を検出
+
 // イベントリスナーの重複登録を防ぐフラグ
 let isSetupComplete = false;
 let imageProxyHandler = null;
@@ -58,29 +63,6 @@ function setup(client) {
         const hasMedia = Array.from(message.attachments.values()).some(attachment => isImageOrVideo(attachment));
         if (!hasMedia) return;
 
-        const messageId = message.id;
-        
-        // 1. すでに処理済み、または処理中のメッセージIDなら何もしない
-        if (processedMessages.has(messageId)) {
-            console.log(`[Proxy] Skipped duplicate message: ${messageId}`);
-            return;
-        }
-        
-        // 2. 処理開始フラグを立てる（ロックする）
-        processedMessages.add(messageId);
-        
-        // 3. 一定時間経過後にフラグを解除する（メモリリーク防止）
-        // 10秒もあれば重複イベントは収まるはずです
-        setTimeout(() => {
-            processedMessages.delete(messageId);
-        }, 10000);
-        
-        // 既存の重複処理防止（後方互換性のため残す）
-        if (processingMessages.has(messageId)) {
-            return;
-        }
-        processingMessages.add(messageId);
-
         try {
             // 権限チェック
             if (!message.guild.members.me.permissions.has('ManageMessages')) {
@@ -116,6 +98,20 @@ function setup(client) {
                 name: attachment.name
             }));
 
+            // 削除ボタン
+            const deleteButton = {
+                type: 2, // BUTTON
+                style: 4, // DANGER
+                label: '削除',
+                custom_id: `delete_${originalAuthor.id}_${Date.now()}`,
+                emoji: '🗑️'
+            };
+
+            const actionRow = {
+                type: 1, // ACTION_ROW
+                components: [deleteButton]
+            };
+
             // コンテンツをサニタイズ
             const sanitizedContent = originalContent
                 .replace(/@everyone/g, '@\u200beveryone')
@@ -123,15 +119,28 @@ function setup(client) {
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
             // Webhook送信を非同期で開始（完了を待たない）
+            const messageId = message.id;
             console.log(`[画像代行] Webhook送信開始: MessageID=${messageId}, Author=${originalAuthor.id}, Channel=${message.channel.id}, FileCount=${files.length}`);
             const webhookSendPromise = webhook.send({
                 content: sanitizedContent,
                 username: displayName,
                 avatarURL: originalAuthor.displayAvatarURL(),
                 files: files,
+                components: [actionRow],
                 allowedMentions: { parse: [] }
             }).then((webhookMessage) => {
                 console.log(`[画像代行] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${webhookMessage.id}`);
+                
+                // 削除情報を保存
+                deletedMessageInfo.set(webhookMessage.id, {
+                    content: originalContent,
+                    author: originalAuthor,
+                    attachments: originalAttachments,
+                    channel: message.channel,
+                    originalMessageId: message.id,
+                    timestamp: Date.now()
+                });
+                
                 return webhookMessage;
             }).catch((sendError) => {
                 // エラーはログに出力するだけ（削除は既に完了しているため）
@@ -157,10 +166,6 @@ function setup(client) {
 
         } catch (error) {
             console.error(`[画像代行] エラー:`, error);
-            // エラー時もロックはタイムアウトで解除される
-        } finally {
-            processingMessages.delete(messageId);
-            // processedMessagesはタイムアウトで自動削除されるため、ここでは削除しない
         }
     };
     
@@ -354,9 +359,73 @@ function setup(client) {
     // 特定ワード自動代行機能のイベントリスナーを登録
     client.on('messageCreate', wordProxyHandler);
 
+    // Webhook画像重複検出・削除機能
+    client.on('messageCreate', async message => {
+        // Webhookからのメッセージのみを処理
+        if (!message.webhookId) return;
+        
+        // 画像がない場合はスキップ
+        if (!message.attachments || message.attachments.size === 0) return;
+        
+        // 画像・動画ファイルがあるかチェック
+        const imageAttachments = Array.from(message.attachments.values()).filter(attachment => isImageOrVideo(attachment));
+        if (imageAttachments.length === 0) return;
+        
+        // 権限チェック
+        if (!message.guild.members.me.permissions.has('ManageMessages')) return;
+
+        try {
+            const channelId = message.channel.id;
+            
+            // 各画像URLをチェック
+            for (const attachment of imageAttachments) {
+                const imageUrl = attachment.url;
+                const cacheKey = `${channelId}_${imageUrl}`;
+                
+                const existing = webhookImageCache.get(cacheKey);
+                const now = Date.now();
+                
+                if (existing) {
+                    // 重複を検出（30秒以内）
+                    if (now - existing.timestamp < DUPLICATE_CHECK_WINDOW_MS) {
+                        console.log(`[画像重複検出] 重複画像を検出: MessageID=${message.id}, 既存MessageID=${existing.messageId}, ImageURL=${imageUrl}`);
+                        
+                        // 新しいメッセージを削除
+                        try {
+                            await message.delete();
+                            console.log(`[画像重複検出] 新しいメッセージを削除: MessageID=${message.id}`);
+                        } catch (deleteError) {
+                            if (deleteError.code !== 10008) { // Unknown Messageは無視
+                                console.error(`[画像重複検出] 新しいメッセージ削除エラー:`, deleteError);
+                            }
+                        }
+                        
+                        // キャッシュは既存のメッセージのまま維持（古い方を残す）
+                        // キャッシュは更新しない
+                    } else {
+                        // 時間が経過しているので、新しいメッセージで更新
+                        webhookImageCache.set(cacheKey, {
+                            messageId: message.id,
+                            timestamp: now
+                        });
+                    }
+                } else {
+                    // 初回の画像なのでキャッシュに追加
+                    webhookImageCache.set(cacheKey, {
+                        messageId: message.id,
+                        timestamp: now
+                    });
+                }
+            }
+        } catch (error) {
+            console.error(`[画像重複検出] エラー:`, error);
+        }
+    });
+
     // 定期的なクリーンアップ
     setInterval(() => {
         const oneHourAgo = Date.now() - (60 * 60 * 1000);
+        const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
 
         for (const [userId, lastUsed] of autoProxyCooldowns.entries()) {
             if (lastUsed < oneHourAgo) autoProxyCooldowns.delete(userId);
@@ -369,6 +438,13 @@ function setup(client) {
                 deletedMessageInfo.delete(messageId);
                 // 削除情報が消える時、送信済みマークも削除
                 sentWebhookMessages.delete(messageId);
+            }
+        }
+        
+        // Webhook画像キャッシュのクリーンアップ（5分以上経過したものを削除）
+        for (const [cacheKey, data] of webhookImageCache.entries()) {
+            if (Date.now() - data.timestamp > fiveMinutesAgo) {
+                webhookImageCache.delete(cacheKey);
             }
         }
 
