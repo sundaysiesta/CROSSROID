@@ -17,6 +17,10 @@ const deletedMessageInfo = new Map(); // key: messageId, value: { content, autho
 const sentWebhookMessages = new Set(); // 送信済みの元メッセージIDを追跡（重複防止）
 const sendingWebhooks = new Set(); // webhook.send()実行中のメッセージIDを追跡（送信中のロック）
 
+// 重複処理防止用のキャッシュ（メモリ上にメッセージIDを一時保存）
+// これにより、短期間に同じメッセージIDに対して処理が走るのを防ぎます
+const processedMessages = new Set();
+
 // イベントリスナーの重複登録を防ぐフラグ
 let isSetupComplete = false;
 let imageProxyHandler = null;
@@ -56,11 +60,25 @@ function setup(client) {
 
         const messageId = message.id;
         
-        // 重複処理を防ぐ
-        if (processingMessages.has(messageId)) {
+        // 1. すでに処理済み、または処理中のメッセージIDなら何もしない
+        if (processedMessages.has(messageId)) {
+            console.log(`[Proxy] Skipped duplicate message: ${messageId}`);
             return;
         }
         
+        // 2. 処理開始フラグを立てる（ロックする）
+        processedMessages.add(messageId);
+        
+        // 3. 一定時間経過後にフラグを解除する（メモリリーク防止）
+        // 10秒もあれば重複イベントは収まるはずです
+        setTimeout(() => {
+            processedMessages.delete(messageId);
+        }, 10000);
+        
+        // 既存の重複処理防止（後方互換性のため残す）
+        if (processingMessages.has(messageId)) {
+            return;
+        }
         processingMessages.add(messageId);
 
         try {
@@ -139,8 +157,10 @@ function setup(client) {
 
         } catch (error) {
             console.error(`[画像代行] エラー:`, error);
+            // エラー時もロックはタイムアウトで解除される
         } finally {
             processingMessages.delete(messageId);
+            // processedMessagesはタイムアウトで自動削除されるため、ここでは削除しない
         }
     };
     
