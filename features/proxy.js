@@ -14,6 +14,7 @@ const autoProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const wordProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const processingMessages = new Set();
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
+const sentWebhookMessages = new Set(); // 送信済みの元メッセージIDを追跡（重複防止）
 
 // ログ用ヘルパー関数
 function logWebhookAction(action, messageId, details = {}) {
@@ -145,12 +146,35 @@ function setup(client) {
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
             // Webhookでメッセージを送信（重複防止の最終チェック）
-            // 念のため、送信直前に再度チェック（他の処理が完了した可能性があるため）
+            // 送信直前に再度チェック：既に送信済みまたは処理中の場合はスキップ
+            if (sentWebhookMessages.has(messageId)) {
+                logWebhookAction('SKIP-ALREADY-SENT', messageId, { 
+                    reason: 'Already sent webhook for this message' 
+                });
+                return;
+            }
+            
+            // メッセージがまだ存在するか確認（削除済みの場合はスキップ）
+            try {
+                await message.fetch();
+            } catch (fetchError) {
+                if (fetchError.code === 10008) { // Unknown Message
+                    logWebhookAction('SKIP-MESSAGE-DELETED', messageId, { 
+                        reason: 'Original message already deleted' 
+                    });
+                    return;
+                }
+                // その他のエラーは続行
+            }
+            
             logWebhookAction('SEND-START', messageId, { 
                 webhookId: webhook.id, 
                 fileCount: files.length,
                 contentLength: sanitizedContent.length 
             });
+            
+            // 送信前にマーク（重複送信を防ぐ）
+            sentWebhookMessages.add(messageId);
             
             const webhookMessage = await webhook.send({
                 content: sanitizedContent,
@@ -159,6 +183,10 @@ function setup(client) {
                 files: files,
                 components: [actionRow],
                 allowedMentions: { parse: [] }
+            }).catch(async (sendError) => {
+                // 送信エラー時はマークを解除
+                sentWebhookMessages.delete(messageId);
+                throw sendError;
             });
 
             logWebhookAction('SEND-SUCCESS', messageId, { 
@@ -379,10 +407,17 @@ function setup(client) {
             if (lastUsed < oneHourAgo) wordProxyCooldowns.delete(userId);
         }
         for (const [messageId, info] of deletedMessageInfo.entries()) {
-            if (Date.now() - (info.timestamp || 0) > oneHourAgo) deletedMessageInfo.delete(messageId);
+            if (Date.now() - (info.timestamp || 0) > oneHourAgo) {
+                deletedMessageInfo.delete(messageId);
+                // 削除情報が消える時、送信済みマークも削除
+                sentWebhookMessages.delete(messageId);
+            }
         }
 
         // 古い処理中フラグのクリーンアップはSetなので難しいが、通常はfinallyで消える
+        // 送信済みマークも1時間以上経過したものは削除
+        // 注: messageIdは数値なので、タイムスタンプから推測できないため、
+        // deletedMessageInfoと連動して削除する
     }, 30 * 60 * 1000);
 }
 
