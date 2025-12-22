@@ -112,9 +112,9 @@ client.once('clientReady', async (client) => {
       new SlashCommandBuilder().setName('random_mention').setDescription('サーバーメンバーをランダムでメンションします'),
       new SlashCommandBuilder().setName('duel').setDescription('他のユーザーと決闘します')
           .addUserOption(option =>
-              option.setName('opponent')
-              .setDescription('対戦相手')
-              .setRequired(true)
+              option.setName('対戦相手')
+              .setDescription('対戦相手（指定しない場合は誰でも挑戦可能）')
+              .setRequired(false)
           ),
       new SlashCommandBuilder().setName('duel_russian').setDescription('ロシアンルーレットで対戦します')
           .addUserOption(option =>

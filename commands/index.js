@@ -1030,7 +1030,7 @@ async function handleCommands(interaction, client) {
     if (interaction.commandName === 'duel') {
         try {
             const userId = interaction.user.id;
-            const opponentUser = interaction.options.getUser('opponent');
+            const opponentUser = interaction.options.getUser('対戦相手');
             const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
             const member = interaction.member;
