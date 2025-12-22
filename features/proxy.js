@@ -104,16 +104,24 @@ function setup(client) {
                 .replace(/@here/g, '@\u200bhere')
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
-            // Webhookでメッセージを送信
-            await webhook.send({
+            // Webhook送信を非同期で開始（完了を待たない）
+            console.log(`[画像代行] Webhook送信開始: MessageID=${messageId}, Author=${originalAuthor.id}, Channel=${message.channel.id}, FileCount=${files.length}`);
+            const webhookSendPromise = webhook.send({
                 content: sanitizedContent,
                 username: displayName,
                 avatarURL: originalAuthor.displayAvatarURL(),
                 files: files,
                 allowedMentions: { parse: [] }
+            }).then((webhookMessage) => {
+                console.log(`[画像代行] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${webhookMessage.id}`);
+                return webhookMessage;
+            }).catch((sendError) => {
+                // エラーはログに出力するだけ（削除は既に完了しているため）
+                console.error(`[画像代行] Webhook送信エラー: MessageID=${messageId}`, sendError);
+                throw sendError;
             });
 
-            // 元のメッセージを削除
+            // 元のメッセージを削除（優先処理：webhook送信の完了を待たない）
             try {
                 await message.delete();
             } catch (deleteError) {
@@ -122,6 +130,12 @@ function setup(client) {
                     console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
                 }
             }
+
+            // Webhook送信の完了を待つ（バックグラウンド処理）
+            // エラーが発生しても処理は続行（既に削除は完了しているため）
+            webhookSendPromise.catch(() => {
+                // エラーは既にログ出力済み
+            });
 
         } catch (error) {
             console.error(`[画像代行] エラー:`, error);
@@ -229,23 +243,26 @@ function setup(client) {
             });
 
             // Webhook送信を非同期で開始（完了を待たない）
+            console.log(`[ワードフィルター] Webhook送信開始: MessageID=${messageId}, Author=${userId}, Channel=${message.channel.id}`);
             const webhookSendPromise = webhook.send({
                 content: sanitizedContent,
                 username: displayName,
                 avatarURL: originalAuthor.displayAvatarURL(),
                 allowedMentions: { parse: [] }
-            }).then(() => {
+            }).then((webhookMessage) => {
+                console.log(`[ワードフィルター] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${webhookMessage.id}`);
                 logWebhookAction('SEND-SUCCESS', messageId, { 
                     type: 'word-filter',
                     webhookId: webhook.id 
                 });
+                return webhookMessage;
             }).catch((sendError) => {
                 logWebhookAction('SEND-ERROR', messageId, { 
                     type: 'word-filter',
                     error: sendError.message,
                     code: sendError.code 
                 });
-                console.error('特定ワード自動代行: Webhook送信エラー:', sendError);
+                console.error(`[ワードフィルター] Webhook送信エラー: MessageID=${messageId}`, sendError);
                 throw sendError;
             });
 
