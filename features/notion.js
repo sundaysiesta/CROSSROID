@@ -7,8 +7,11 @@ class NotionManager {
     constructor() {
         this.cache = new Map(); // Discord ID -> Notion名
         this.reverseCache = new Map(); // Notion名 -> Discord ID
+        this.discordIdToNotionNameMap = new Map(); // Discord ID -> Notion名（逆引き用）
+        this.notionNameToDiscordIdMap = new Map(); // Notion名 -> Discord ID（逆引き用）
         this.lastFetch = 0;
         this.CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+        this.fetchingPromise = null; // 同時実行を防ぐためのPromise
     }
 
     async getNameMap() {
@@ -17,11 +20,29 @@ class NotionManager {
             return this.cache;
         }
 
+        // 既にfetch中の場合、そのPromiseを待つ
+        if (this.fetchingPromise) {
+            console.log('[NotionManager] Already fetching, waiting for existing fetch...');
+            return await this.fetchingPromise;
+        }
+
         if (!NOTION_API_KEY || !NOTION_DATABASE_ID) {
             console.warn('[NotionManager] Missing API Key or DB ID.');
             return new Map();
         }
 
+        // fetchを開始し、Promiseを保存
+        this.fetchingPromise = this._doFetch();
+        
+        try {
+            const result = await this.fetchingPromise;
+            return result;
+        } finally {
+            this.fetchingPromise = null; // 完了したらクリア
+        }
+    }
+
+    async _doFetch() {
         console.log('[NotionManager] Fetching data from Notion...');
         const map = new Map(); // Discord ID -> Notion名
         const reverseMap = new Map(); // Notion名 -> Discord ID
@@ -125,6 +146,9 @@ class NotionManager {
             console.log(`[NotionManager] ✅ Fetch complete: ${map.size} valid users from ${pageCount} pages (Total items fetched: ${totalFetched}, Filtered: ${totalFetched - map.size} items without Discord ID)`);
             this.cache = map;
             this.reverseCache = reverseMap;
+            // 逆引き用のマップも更新
+            this.discordIdToNotionNameMap = new Map(map);
+            this.notionNameToDiscordIdMap = new Map(reverseMap);
             this.lastFetch = Date.now();
             return map;
 
@@ -151,7 +175,39 @@ class NotionManager {
      */
     async getDiscordId(notionName) {
         await this.getNameMap();
-        return this.reverseCache.get(notionName) || null;
+        return this.reverseCache.get(notionName) || this.notionNameToDiscordIdMap.get(notionName) || null;
+    }
+
+    /**
+     * Discord IDからNotion名を取得（getNotionNameのエイリアス）
+     * @param {string} discordId - DiscordユーザーID
+     * @returns {Promise<string|null>} Notion名、存在しない場合はnull
+     */
+    async getName(discordId) {
+        return await this.getNotionName(discordId);
+    }
+
+    /**
+     * キーがNotion名かどうかを判定
+     * @param {string} key - チェックするキー
+     * @returns {Promise<boolean>} Notion名の場合はtrue、そうでなければfalse
+     */
+    async isNotionName(key) {
+        await this.getNameMap();
+        return this.notionNameToDiscordIdMap.has(key);
+    }
+
+    /**
+     * キーからDiscord IDを取得（Notion名の場合は逆引き、そうでなければそのまま返す）
+     * @param {string} key - Notion名またはDiscord ID
+     * @returns {Promise<string|null>} Discord ID、見つからない場合はnull
+     */
+    async getDiscordIdFromKey(key) {
+        if (await this.isNotionName(key)) {
+            return await this.getDiscordId(key);
+        }
+        // 既にDiscord IDの場合はそのまま返す
+        return key;
     }
 
     /**

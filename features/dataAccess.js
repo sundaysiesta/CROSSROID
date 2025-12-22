@@ -27,6 +27,8 @@ async function findDataKey(discordId, data) {
  * @returns {Promise<*>} データ値
  */
 async function getData(discordId, data, defaultValue = null) {
+    // まず移行を試みる
+    await migrateData(discordId, data);
     const key = await findDataKey(discordId, data);
     return key ? data[key] : defaultValue;
 }
@@ -39,6 +41,8 @@ async function getData(discordId, data, defaultValue = null) {
  * @returns {Promise<string>} 使用されたキー
  */
 async function setData(discordId, data, value) {
+    // まず移行を試みる
+    await migrateData(discordId, data);
     const key = await getDataKey(discordId);
     data[key] = value;
     return key;
@@ -53,6 +57,8 @@ async function setData(discordId, data, value) {
  * @returns {Promise<string>} 使用されたキー
  */
 async function updateData(discordId, data, updateFn, defaultValue = null) {
+    // まず移行を試みる
+    await migrateData(discordId, data);
     const existingKey = await findDataKey(discordId, data);
     const existingValue = existingKey ? data[existingKey] : defaultValue;
     const newValue = updateFn(existingValue);
@@ -124,6 +130,8 @@ async function migrateData(discordId, data, prefix = '') {
  * @returns {Promise<*>} データ値
  */
 async function getDataWithPrefix(discordId, data, prefix, defaultValue = null) {
+    // まず移行を試みる
+    await migrateData(discordId, data, prefix);
     const notionName = await notionManager.getNotionName(discordId);
     
     // まずNotion名で検索
@@ -152,6 +160,8 @@ async function getDataWithPrefix(discordId, data, prefix, defaultValue = null) {
  * @returns {Promise<string>} 使用されたキー
  */
 async function setDataWithPrefix(discordId, data, prefix, value) {
+    // まず移行を試みる
+    await migrateData(discordId, data, prefix);
     const key = await getDataKey(discordId);
     const fullKey = `${prefix}${key}`;
     
@@ -168,6 +178,15 @@ async function setDataWithPrefix(discordId, data, prefix, value) {
     return fullKey;
 }
 
+/**
+ * キーからDiscord IDを取得（Notion名の場合は逆引き、そうでなければそのまま返す）
+ * @param {string} key - Notion名またはDiscord ID
+ * @returns {Promise<string|null>} Discord ID、見つからない場合はnull
+ */
+async function getDiscordIdFromKey(key) {
+    return await notionManager.getDiscordIdFromKey(key);
+}
+
 module.exports = {
     getDataKey,
     findDataKey,
@@ -177,6 +196,7 @@ module.exports = {
     deleteData,
     migrateData,
     getDataWithPrefix,
-    setDataWithPrefix
+    setDataWithPrefix,
+    getDiscordIdFromKey
 };
 
