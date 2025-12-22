@@ -59,12 +59,22 @@ function setup(client) {
             return;
         }
         
+        // 送信済みチェックを早期に実行（処理開始前にチェック）
+        if (sentWebhookMessages.has(messageId)) {
+            logWebhookAction('SKIP-ALREADY-SENT-EARLY', messageId, { 
+                reason: 'Already sent webhook (early check)' 
+            });
+            return;
+        }
+        
         // ロックを取得（先にaddすることで、他の処理が開始されないようにする）
         processingMessages.add(messageId);
         logWebhookAction('START', messageId, { 
             author: message.author.id, 
             channel: message.channel.id,
-            attachmentCount: message.attachments.size 
+            attachmentCount: message.attachments.size,
+            processingMessagesSize: processingMessages.size,
+            sentWebhookMessagesSize: sentWebhookMessages.size
         });
 
         let shouldProcess = true;
@@ -189,20 +199,43 @@ function setup(client) {
                 return;
             }
             
-            logWebhookAction('SEND-START', messageId, { 
-                webhookId: webhook.id, 
-                fileCount: files.length,
-                contentLength: sanitizedContent.length 
-            });
-            
             // 送信前にマーク（重複送信を防ぐ）- アトミック操作として実行
+            // チェックと追加をアトミックに行う（ログ出力の前に実行）
             if (sentWebhookMessages.has(messageId)) {
                 logWebhookAction('SKIP-RACE-CONDITION', messageId, { 
                     reason: 'Race condition detected - another process already sent' 
                 });
                 return;
             }
+            // マークを先に追加（ログ出力より前に実行）
             sentWebhookMessages.add(messageId);
+            
+            logWebhookAction('SEND-START', messageId, { 
+                webhookId: webhook.id, 
+                fileCount: files.length,
+                contentLength: sanitizedContent.length,
+                sentWebhookMessagesSize: sentWebhookMessages.size,
+                hasMark: sentWebhookMessages.has(messageId)
+            });
+            
+            // webhook.send()の直前に再度チェック（最後の防御線）
+            // この時点でマークがなければ、他のプロセスが既に送信済みの可能性がある
+            if (!sentWebhookMessages.has(messageId)) {
+                logWebhookAction('ERROR-MARK-LOST', messageId, { 
+                    reason: 'Mark was lost between add and send - aborting send',
+                    sentWebhookMessagesSize: sentWebhookMessages.size
+                });
+                // マークが失われている場合は送信を中止
+                return;
+            }
+            
+            // 念のため、もう一度チェック（二重チェック）
+            if (sentWebhookMessages.has(messageId) && Array.from(sentWebhookMessages).filter(id => id === messageId).length > 1) {
+                logWebhookAction('ERROR-DUPLICATE-MARK', messageId, { 
+                    reason: 'Duplicate mark detected - aborting send'
+                });
+                return;
+            }
             
             // Webhook送信を非同期で開始（完了を待たない）
             const webhookSendPromise = webhook.send({
