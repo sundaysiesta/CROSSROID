@@ -96,7 +96,7 @@ async function interactionCreate(interaction) {
                         }
                         // 他ユーザーと対戦
                         else if (opponent.id !== interaction.user.id && !opponent.bot) {
-                            if (await getData(opponent.id, opponent.id, 0) >= 100) {
+                            if (await getData(opponent.id, romecoin_data, 0) >= 100) {
                                 // 対戦相手の手選択ボタンを表示
                                 const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
                                 const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
