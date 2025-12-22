@@ -118,9 +118,42 @@ function setup(client) {
                 .replace(/@here/g, '@\u200bhere')
                 .replace(/<@&(\d+)>/g, '<@\u200b&$1>');
 
-            // Webhook送信を非同期で開始（完了を待たない）
+            // 重複チェック: 同じ画像が30秒以内に送信されていないか確認
             const messageId = message.id;
-            console.log(`[画像代行] Webhook送信開始: MessageID=${messageId}, Author=${originalAuthor.id}, Channel=${message.channel.id}, FileCount=${files.length}`);
+            const channelId = message.channel.id;
+            let isDuplicate = false;
+            
+            for (const attachment of originalAttachments) {
+                if (!isImageOrVideo(attachment)) continue;
+                
+                const imageUrl = attachment.url;
+                const cacheKey = `${channelId}_${imageUrl}`;
+                const existing = webhookImageCache.get(cacheKey);
+                const now = Date.now();
+                
+                if (existing && (now - existing.timestamp < DUPLICATE_CHECK_WINDOW_MS)) {
+                    // 重複を検出
+                    console.log(`[画像代行] 重複画像を検出: MessageID=${messageId}, 既存MessageID=${existing.messageId}, ImageURL=${imageUrl}`);
+                    isDuplicate = true;
+                    break; // 1つでも重複があればスキップ
+                }
+            }
+            
+            // 重複が検出された場合、元のメッセージを削除して終了
+            if (isDuplicate) {
+                try {
+                    await message.delete();
+                    console.log(`[画像代行] 重複のため元のメッセージを削除: MessageID=${messageId}`);
+                } catch (deleteError) {
+                    if (deleteError.code !== 10008) {
+                        console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
+                    }
+                }
+                return; // webhook送信をスキップ
+            }
+            
+            // Webhook送信を非同期で開始（完了を待たない）
+            console.log(`[画像代行] Webhook送信開始: MessageID=${messageId}, Author=${originalAuthor.id}, Channel=${channelId}, FileCount=${files.length}`);
             const webhookSendPromise = webhook.send({
                 content: sanitizedContent,
                 username: displayName,
@@ -130,6 +163,18 @@ function setup(client) {
                 allowedMentions: { parse: [] }
             }).then((webhookMessage) => {
                 console.log(`[画像代行] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${webhookMessage.id}`);
+                
+                // 画像URLをキャッシュに追加（重複検知用）
+                const now = Date.now();
+                for (const attachment of originalAttachments) {
+                    if (!isImageOrVideo(attachment)) continue;
+                    const imageUrl = attachment.url;
+                    const cacheKey = `${channelId}_${imageUrl}`;
+                    webhookImageCache.set(cacheKey, {
+                        messageId: webhookMessage.id,
+                        timestamp: now
+                    });
+                }
                 
                 // 削除情報を保存
                 deletedMessageInfo.set(webhookMessage.id, {
