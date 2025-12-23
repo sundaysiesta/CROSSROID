@@ -8,7 +8,6 @@ const {
 	ApplicationCommandType,
 } = require('discord.js');
 const express = require('express');
-const { execSync } = require('child_process');
 
 // 環境変数の読み込み（ローカル開発時のみ、他のモジュール読み込み前に実行）
 if (process.env.NODE_ENV !== 'production') {
@@ -308,14 +307,8 @@ client.once('clientReady', async (client) => {
 		const notifyChannelId = '1431905157657923646';
 		const channel = await client.channels.fetch(notifyChannelId).catch(() => null);
 		if (channel) {
-			let commitSha = 'unknown';
-			let commitDate = 'unknown';
-			let commitMessage = 'N/A';
-			try {
-				commitSha = execSync('git rev-parse --short HEAD').toString().trim();
-				commitDate = execSync('git log -1 --pretty=%ad --date=iso').toString().trim();
-				commitMessage = execSync('git log -1 --pretty=%B').toString().trim();
-			} catch (e) {}
+			const commitSha = process.env.KOYEB_GIT_SHA || 'Unknown';
+			const commitMessage = process.env.KOYEB_GIT_COMMIT_MESSAGE || 'Unknown';
 
 			const commitMessageShort =
 				commitMessage.length > 1000 ? commitMessage.slice(0, 997) + '...' : commitMessage;
@@ -324,10 +317,7 @@ client.once('clientReady', async (client) => {
 				.setTitle('🥸再起動しました。確認してください。')
 				.setColor(0x5865f2)
 				.setDescription(commitMessageShort || 'コミットメッセージはありません。')
-				.addFields(
-					{ name: 'Commit', value: '`' + commitSha + '`', inline: true },
-					{ name: 'Date', value: commitDate, inline: true }
-				)
+				.addFields({ name: 'Commit', value: '`' + commitSha + '`', inline: true })
 				.setTimestamp(new Date())
 				.setFooter({ text: client.user.tag, iconURL: client.user.displayAvatarURL() });
 
