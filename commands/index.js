@@ -276,6 +276,111 @@ async function handleCommands(interaction, client) {
 			return;
 		}
 
+		if (interaction.commandName === 'give') {
+			const targetUser = interaction.options.getUser('user');
+			const amount = interaction.options.getInteger('amount');
+
+			// バリデーション
+			if (!targetUser) {
+				return interaction.reply({
+					content: '❌ ユーザーを指定してください。',
+					ephemeral: true,
+				});
+			}
+
+			if (!amount || amount <= 0) {
+				return interaction.reply({
+					content: '❌ 有効な金額（1以上）を指定してください。',
+					ephemeral: true,
+				});
+			}
+
+			// 自分自身への譲渡を防ぐ
+			if (targetUser.id === interaction.user.id) {
+				return interaction.reply({
+					content: '❌ 自分自身にロメコインを譲渡することはできません。',
+					ephemeral: true,
+				});
+			}
+
+			// Botへの譲渡を防ぐ
+			if (targetUser.bot) {
+				return interaction.reply({
+					content: '❌ Botにロメコインを譲渡することはできません。',
+					ephemeral: true,
+				});
+			}
+
+			// 世代ロールチェック（giveを実行するユーザーに必須）
+			const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+			const member = interaction.member;
+			const hasGenerationRole =
+				member.roles.cache.some((r) => romanRegex.test(r.name)) ||
+				member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
+
+			if (!hasGenerationRole) {
+				return interaction.reply({
+					content: '❌ ロメコインを譲渡するには世代ロールが必要です。',
+					ephemeral: true,
+				});
+			}
+
+			// 現在の残高を確認
+			const senderId = interaction.user.id;
+			const currentBalance = await getRomecoin(senderId);
+
+			if (currentBalance < amount) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('ロメコインが不足しています')
+					.addFields(
+						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${currentBalance}`, inline: true },
+						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${amount}`, inline: true }
+					)
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+			}
+
+			// ロメコインを譲渡
+			try {
+				// 送信者のロメコインを減らす
+				await updateRomecoin(senderId, (current) => Math.round((current || 0) - amount));
+				// 受信者のロメコインを増やす
+				await updateRomecoin(targetUser.id, (current) => Math.round((current || 0) + amount));
+
+				// 成功メッセージ
+				const senderNewBalance = await getRomecoin(senderId);
+				const receiverNewBalance = await getRomecoin(targetUser.id);
+
+				const successEmbed = new EmbedBuilder()
+					.setTitle('✅ ロメコイン譲渡成功')
+					.setDescription(`${interaction.user} が ${targetUser} に ${ROMECOIN_EMOJI}${amount} を譲渡しました`)
+					.addFields(
+						{
+							name: `${interaction.user.username}の残高`,
+							value: `${ROMECOIN_EMOJI}${senderNewBalance}`,
+							inline: true,
+						},
+						{
+							name: `${targetUser.username}の残高`,
+							value: `${ROMECOIN_EMOJI}${receiverNewBalance}`,
+							inline: true,
+						}
+					)
+					.setColor(0x00ff00)
+					.setTimestamp();
+
+				await interaction.reply({ embeds: [successEmbed] });
+			} catch (error) {
+				console.error('[Give] エラー:', error);
+				return interaction.reply({
+					content: '❌ ロメコインの譲渡中にエラーが発生しました。',
+					ephemeral: true,
+				});
+			}
+			return;
+		}
+
 		if (interaction.commandName === 'janken_ranking') {
 			const DATA_FILE = path.join(__dirname, '..', 'janken_data.json');
 			const notionManager = require('../features/notion');
