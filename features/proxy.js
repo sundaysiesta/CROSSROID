@@ -1,500 +1,85 @@
-const { WORD_PROXY_COOLDOWN_MS } = require('../constants');
+const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+const { PROXY_COOLDOWN_MS } = require('../constants');
 const { isImageOrVideo, containsFilteredWords } = require('../utils');
 
 // 状態管理
-const autoProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
-const wordProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
-const processingMessages = new Set();
+let messageProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
-const sentWebhookMessages = new Set(); // 送信済みの元メッセージIDを追跡（重複防止）
 
-// Webhook画像重複検出用のキャッシュ
-// key: channelId_imageUrl, value: { messageId, timestamp }
-const webhookImageCache = new Map();
-const DUPLICATE_CHECK_WINDOW_MS = 30000; // 30秒以内の重複を検出
-
-// イベントリスナーの重複登録を防ぐフラグ
-let isSetupComplete = false;
-let imageProxyHandler = null;
-let wordProxyHandler = null;
-
-// ログ用ヘルパー関数
-function logWebhookAction(action, messageId, details = {}) {
-	const timestamp = new Date().toISOString();
-	const detailStr = Object.keys(details).length > 0 ? ` | ${JSON.stringify(details)}` : '';
-	console.log(`[WEBHOOK-${action}] ${timestamp} | MessageID: ${messageId}${detailStr}`);
-}
-
-function setup(client) {
-	// 既にセットアップ済みの場合はスキップ（重複登録を防ぐ）
-	if (isSetupComplete) {
-		console.warn('[PROXY] setup()が既に呼ばれています。重複登録をスキップします。');
-		return;
-	}
-
-	isSetupComplete = true;
-	console.log('[PROXY] イベントリスナーを登録します。');
-
-	// 画像自動代行投稿機能のハンドラー
-	imageProxyHandler = async (message) => {
-		// BotやWebhookのメッセージは除外
-		if (message.author.bot || message.webhookId || message.system) return;
-		// 自身のWebhookによる投稿を念のため除外
-		if (message.author.username === 'CROSSROID Proxy') return;
-		// 添付ファイルがない場合はスキップ
-		if (!message.attachments || message.attachments.size === 0) return;
-
-		// 画像・動画ファイルがあるかチェック
-		const hasMedia = Array.from(message.attachments.values()).some((attachment) => isImageOrVideo(attachment));
-		if (!hasMedia) return;
-
-		const messageId = message.id;
-
-		// 重複処理防止: 既に処理中のメッセージはスキップ
-		if (processingMessages.has(messageId) || sentWebhookMessages.has(messageId)) {
-			console.log(`[画像代行] 重複処理をスキップ: MessageID=${messageId}`);
-			return;
-		}
-
-		try {
-			// 権限チェック
-			if (!message.guild.members.me.permissions.has('ManageMessages')) {
-				return;
-			}
-
-			// 処理中フラグを設定
-			processingMessages.add(messageId);
-
-			// 元のメッセージ情報を保存（削除前に必要情報を取得）
-			const originalContent = message.content || '';
-			const originalAttachments = Array.from(message.attachments.values());
-			const originalAuthor = message.author;
-			const displayName = message.member?.nickname || originalAuthor.displayName;
-			const channel = message.channel;
-
-			// 元のメッセージを削除（最優先：webhook準備より先に削除）
-			try {
-				await message.delete();
-				console.log(`[画像代行] 元のメッセージ削除完了: MessageID=${messageId}`);
-			} catch (deleteError) {
-				// Unknown Message (10008) は無視
-				if (deleteError.code !== 10008) {
-					console.error(`[画像代行] 元のメッセージ削除エラー:`, deleteError);
-				}
-				// 削除失敗時も処理を続行（webhook送信は試みる）
-			}
-
-			// Webhookを取得または作成（削除後に実行）
-			let webhook;
-			try {
-				const webhooks = await channel.fetchWebhooks();
-				// 同じ名前のwebhookをすべて検索
-				const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Proxy');
-				
-				if (matchingWebhooks.length > 0) {
-					// 複数のwebhookがある場合、最新のもの（IDが大きいもの）を使用
-					webhook = matchingWebhooks.reduce((latest, current) => {
-						return current.id > latest.id ? current : latest;
-					});
-
-					// 余分なwebhookを削除（最新のもの以外）
-					if (matchingWebhooks.length > 1) {
-						console.log(`[画像代行] 複数のwebhookを検出（${matchingWebhooks.length}個）。最新のものを使用し、余分なものを削除します。`);
-						for (const wh of matchingWebhooks) {
-							if (wh.id !== webhook.id) {
-								try {
-									await wh.delete();
-									console.log(`[画像代行] 余分なwebhookを削除: ${wh.id}`);
-								} catch (deleteError) {
-									console.error(`[画像代行] webhook削除エラー: ${wh.id}`, deleteError);
-								}
-							}
-						}
-					}
-				} else {
-					// webhookが存在しない場合は作成
-					webhook = await channel.createWebhook({
-						name: 'CROSSROID Proxy',
-						avatar: originalAuthor.displayAvatarURL(),
-					});
-					console.log(`[画像代行] 新しいwebhookを作成: ${webhook.id}`);
-				}
-			} catch (webhookError) {
-				console.error(`[画像代行] Webhook取得/作成エラー:`, webhookError);
-				processingMessages.delete(messageId);
-				return;
-			}
-
-			// ファイルを準備
-			const files = originalAttachments.map((attachment) => ({
-				attachment: attachment.url,
-				name: attachment.name,
-			}));
-
-			// 削除ボタン
-			const deleteButton = {
-				type: 2, // BUTTON
-				style: 4, // DANGER
-				label: '削除',
-				custom_id: `delete_${originalAuthor.id}_${Date.now()}`,
-				emoji: '🗑️',
-			};
-
-			const actionRow = {
-				type: 1, // ACTION_ROW
-				components: [deleteButton],
-			};
-
-			// コンテンツをサニタイズ
-			const sanitizedContent = originalContent
-				.replace(/@everyone/g, '@\u200beveryone')
-				.replace(/@here/g, '@\u200bhere')
-				.replace(/<@&(\d+)>/g, '<@\u200b&$1>');
-
-			// 送信済みフラグを設定（重複送信を防ぐ）
-			sentWebhookMessages.add(messageId);
-
-			// Webhook送信（削除後に実行）
-			console.log(
-				`[画像代行] Webhook送信開始: MessageID=${messageId}, Author=${originalAuthor.id}, Channel=${channel.id}, FileCount=${files.length}`
-			);
-			webhook
-				.send({
-					content: sanitizedContent,
-					username: displayName,
-					avatarURL: originalAuthor.displayAvatarURL(),
-					files: files,
-					components: [actionRow],
-					allowedMentions: { parse: [] },
-				})
-				.then((webhookMessage) => {
-					console.log(
-						`[画像代行] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${webhookMessage.id}`
-					);
-
-					// 削除情報を保存
-					deletedMessageInfo.set(webhookMessage.id, {
-						content: originalContent,
-						author: originalAuthor,
-						attachments: originalAttachments,
-						channel: channel,
-						originalMessageId: messageId,
-						timestamp: Date.now(),
-					});
-				})
-				.catch((sendError) => {
-					// エラーが発生した場合、送信済みフラグを削除（リトライ可能にする）
-					sentWebhookMessages.delete(messageId);
-					// エラーはログに出力するだけ（削除は既に完了しているため）
-					console.error(`[画像代行] Webhook送信エラー: MessageID=${messageId}`, sendError);
-				})
-				.finally(() => {
-					// 処理中フラグを解除
-					processingMessages.delete(messageId);
-				});
-		} catch (error) {
-			console.error(`[画像代行] エラー:`, error);
-			// エラー発生時もフラグを確実に解除
-			processingMessages.delete(messageId);
-			sentWebhookMessages.delete(messageId);
-		}
-	};
-
-	// 画像自動代行投稿機能のイベントリスナーを登録
-	client.on('messageCreate', imageProxyHandler);
-
-	// 特定ワード自動代行機能のハンドラー
-	wordProxyHandler = async (message) => {
-		if (message.author.bot || message.webhookId || message.system) return;
-		if (message.author.username === 'CROSSROID Word Filter') return;
-		if (!message.content || message.content.trim() === '') return;
-
-		if (!containsFilteredWords(message.content)) return;
-
-		const messageId = message.id;
-		const userId = message.author.id;
-		const lastWordProxyAt = wordProxyCooldowns.get(userId) || 0;
-		if (Date.now() - lastWordProxyAt < WORD_PROXY_COOLDOWN_MS) return;
-
-		// ロック機構: 既に処理中の場合は即座にreturn
-		if (processingMessages.has(messageId)) {
-			logWebhookAction('SKIP-DUPLICATE', messageId, {
-				type: 'word-filter',
-				reason: 'Already processing',
-			});
-			return;
-		}
-
-		// ロックを取得
-		processingMessages.add(messageId);
-		logWebhookAction('START', messageId, {
-			type: 'word-filter',
-			author: userId,
-			channel: message.channel.id,
-		});
-
-		let shouldProcess = true;
-		try {
-			const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-			if (!message.guild.members.me.permissions.has('ManageMessages')) {
-				logWebhookAction('SKIP', messageId, {
-					type: 'word-filter',
-					reason: 'Missing ManageMessages permission',
-				});
-				shouldProcess = false;
-				return;
-			}
-
-			// 元のメッセージ情報を保存（削除前に必要情報を取得）
-			const originalContent = message.content;
-			const originalAuthor = message.author;
-			const displayName = member?.nickname || originalAuthor.displayName;
-			const channel = message.channel;
-
-			// 元のメッセージを削除（最優先：webhook準備より先に削除）
-			let deleteSuccess = false;
-			try {
-				await message.delete();
-				deleteSuccess = true;
-				logWebhookAction('DELETE-ORIGINAL', messageId, {
-					type: 'word-filter',
-					success: true,
-				});
-				console.log(`[ワードフィルター] 元のメッセージ削除完了: MessageID=${messageId}`);
-			} catch (deleteError) {
-				if (deleteError.code !== 10008) {
-					logWebhookAction('DELETE-ERROR', messageId, {
-						type: 'word-filter',
-						error: deleteError.message,
-						code: deleteError.code,
-					});
-					console.error('元のメッセージの削除に失敗しました:', deleteError);
-				} else {
-					logWebhookAction('DELETE-SKIP', messageId, {
-						type: 'word-filter',
-						reason: 'Message already deleted (10008)',
-					});
-					deleteSuccess = true; // 既に削除済みなので成功とみなす
-				}
-			}
-
-			// クールダウンを更新（削除成功時のみ）
-			if (deleteSuccess) {
-				wordProxyCooldowns.set(userId, Date.now());
-			}
-
-			// Webhookを取得または作成（削除後に実行）
-			let webhook;
-			try {
-				logWebhookAction('FETCH-WEBHOOK', messageId, {
-					type: 'word-filter',
-					channel: channel.id,
-				});
-				const webhooks = await channel.fetchWebhooks();
-				webhook = webhooks.find((wh) => wh.name === 'CROSSROID Word Filter');
-
-				if (!webhook) {
-					logWebhookAction('CREATE-WEBHOOK', messageId, {
-						type: 'word-filter',
-						channel: channel.id,
-					});
-					webhook = await channel.createWebhook({
-						name: 'CROSSROID Word Filter',
-						avatar: originalAuthor.displayAvatarURL(),
-					});
-					logWebhookAction('WEBHOOK-CREATED', messageId, {
-						type: 'word-filter',
-						webhookId: webhook.id,
-					});
-				} else {
-					logWebhookAction('WEBHOOK-FOUND', messageId, {
-						type: 'word-filter',
-						webhookId: webhook.id,
-					});
-				}
-			} catch (webhookError) {
-				logWebhookAction('ERROR', messageId, {
-					type: 'word-filter',
-					stage: 'webhook-fetch-create',
-					error: webhookError.message,
-				});
-				console.error(`[ワードフィルター] Webhook取得/作成エラー:`, webhookError);
-				// 削除は既に完了しているため、webhookエラーでも処理を続行しない
-				return;
-			}
-
-			const sanitizedContent = originalContent
-				.replace(/@everyone/g, '@\u200beveryone')
-				.replace(/@here/g, '@\u200bhere')
-				.replace(/<@&(\d+)>/g, '<@\u200b&$1>');
-
-			logWebhookAction('SEND-START', messageId, {
-				type: 'word-filter',
-				webhookId: webhook.id,
-				contentLength: sanitizedContent.length,
-			});
-
-			// Webhook送信（削除後に実行）
-			console.log(
-				`[ワードフィルター] Webhook送信開始: MessageID=${messageId}, Author=${userId}, Channel=${channel.id}`
-			);
-			webhook
-				.send({
-					content: sanitizedContent,
-					username: displayName,
-					avatarURL: originalAuthor.displayAvatarURL(),
-					allowedMentions: { parse: [] },
-				})
-				.then((webhookMessage) => {
-					console.log(
-						`[ワードフィルター] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${webhookMessage.id}`
-					);
-					logWebhookAction('SEND-SUCCESS', messageId, {
-						type: 'word-filter',
-						webhookId: webhook.id,
-					});
-				})
-				.catch((sendError) => {
-					logWebhookAction('SEND-ERROR', messageId, {
-						type: 'word-filter',
-						error: sendError.message,
-						code: sendError.code,
-					});
-					console.error(`[ワードフィルター] Webhook送信エラー: MessageID=${messageId}`, sendError);
-				});
-
-			// 削除完了時点でCOMPLETEログを出力（webhook送信の完了を待たない）
-			logWebhookAction('COMPLETE', messageId, {
-				type: 'word-filter',
-				deleteSuccess: deleteSuccess,
-				note: 'Webhook send may still be in progress',
-			});
-
-			logWebhookAction('COMPLETE', messageId, { type: 'word-filter' });
-		} catch (error) {
-			logWebhookAction('ERROR', messageId, {
-				type: 'word-filter',
-				error: error.message,
-				stack: error.stack?.split('\n')[0],
-			});
-			console.error('特定ワード自動代行でエラーが発生しました:', error.message);
-		} finally {
-			// 確実にロックを解除（早期リターン時も含む）
-			if (processingMessages.has(messageId)) {
-				processingMessages.delete(messageId);
-				logWebhookAction('UNLOCK', messageId, {
-					type: 'word-filter',
-					processed: shouldProcess !== false,
-				});
-			}
-		}
-	};
-
-	// 特定ワード自動代行機能のイベントリスナーを登録
-	client.on('messageCreate', wordProxyHandler);
-
-	// Webhook画像重複検出・削除機能
-	client.on('messageCreate', async (message) => {
-		// Webhookからのメッセージのみを処理
-		if (!message.webhookId) return;
-
-		// 画像がない場合はスキップ
-		if (!message.attachments || message.attachments.size === 0) return;
-
-		// 画像・動画ファイルがあるかチェック
-		const imageAttachments = Array.from(message.attachments.values()).filter((attachment) =>
-			isImageOrVideo(attachment)
-		);
-		if (imageAttachments.length === 0) return;
-
-		// 権限チェック
-		if (!message.guild.members.me.permissions.has('ManageMessages')) return;
-
-		try {
-			const channelId = message.channel.id;
-
-			// 各画像URLをチェック
-			for (const attachment of imageAttachments) {
-				const imageUrl = attachment.url;
-				const cacheKey = `${channelId}_${imageUrl}`;
-
-				const existing = webhookImageCache.get(cacheKey);
-				const now = Date.now();
-
-				if (existing) {
-					// 重複を検出（30秒以内）
-					if (now - existing.timestamp < DUPLICATE_CHECK_WINDOW_MS) {
-						console.log(
-							`[画像重複検出] 重複画像を検出: MessageID=${message.id}, 既存MessageID=${existing.messageId}, ImageURL=${imageUrl}`
-						);
-
-						// 新しいメッセージを削除
-						try {
-							await message.delete();
-							console.log(`[画像重複検出] 新しいメッセージを削除: MessageID=${message.id}`);
-						} catch (deleteError) {
-							if (deleteError.code !== 10008) {
-								// Unknown Messageは無視
-								console.error(`[画像重複検出] 新しいメッセージ削除エラー:`, deleteError);
-							}
-						}
-
-						// キャッシュは既存のメッセージのまま維持（古い方を残す）
-						// キャッシュは更新しない
-					} else {
-						// 時間が経過しているので、新しいメッセージで更新
-						webhookImageCache.set(cacheKey, {
-							messageId: message.id,
-							timestamp: now,
-						});
-					}
-				} else {
-					// 初回の画像なのでキャッシュに追加
-					webhookImageCache.set(cacheKey, {
-						messageId: message.id,
-						timestamp: now,
-					});
-				}
-			}
-		} catch (error) {
-			console.error(`[画像重複検出] エラー:`, error);
-		}
-	});
-
-	// 定期的なクリーンアップ
+// 30分ごとにクールダウンをクリア
+async function clientReady(client) {
 	setInterval(() => {
-		const oneHourAgo = Date.now() - 60 * 60 * 1000;
-		const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-
-		for (const [userId, lastUsed] of autoProxyCooldowns.entries()) {
-			if (lastUsed < oneHourAgo) autoProxyCooldowns.delete(userId);
-		}
-		for (const [userId, lastUsed] of wordProxyCooldowns.entries()) {
-			if (lastUsed < oneHourAgo) wordProxyCooldowns.delete(userId);
-		}
-		for (const [messageId, info] of deletedMessageInfo.entries()) {
-			if (Date.now() - (info.timestamp || 0) > oneHourAgo) {
-				deletedMessageInfo.delete(messageId);
-				// 削除情報が消える時、送信済みマークも削除
-				sentWebhookMessages.delete(messageId);
-			}
-		}
-
-		// Webhook画像キャッシュのクリーンアップ（5分以上経過したものを削除）
-		for (const [cacheKey, data] of webhookImageCache.entries()) {
-			if (Date.now() - data.timestamp > fiveMinutesAgo) {
-				webhookImageCache.delete(cacheKey);
-			}
-		}
-
-		// 古い処理中フラグのクリーンアップはSetなので難しいが、通常はfinallyで消える
-		// 送信済みマークも1時間以上経過したものは削除
-		// 注: messageIdは数値なので、タイムスタンプから推測できないため、
-		// deletedMessageInfoと連動して削除する
+		messageProxyCooldowns = new Map();
 	}, 30 * 60 * 1000);
 }
 
+async function messageCreate(message) {
+	if (message.author.bot || message.webhookId || message.system) return;
+
+	// 画像・動画ファイルがあったorフィルタリングワードが含まれていたら画像代理投稿処理
+	const hasMedia = Array.from(message.attachments?.values() ?? []).some((attachment) => isImageOrVideo(attachment));
+	if (hasMedia || containsFilteredWords(message.content)) {
+		// クールダウン中だったら代理投稿しない
+		const lastProxiedAt = messageProxyCooldowns.get(message.author.id) || 0;
+		if (Date.now() - lastProxiedAt < PROXY_COOLDOWN_MS) return;
+
+		const messageId = message.id;
+
+		// Webhookを取得または作成
+		let webhook;
+		const webhooks = await message.channel.fetchWebhooks();
+		webhook = webhooks.find((wh) => wh.name === 'CROSSROID');
+
+		if (!webhook) {
+			webhook = await message.channel.createWebhook({
+				name: 'CROSSROID',
+				avatar: message.client.user.displayAvatarURL(),
+			});
+		}
+
+		const files = message.attachments.map((attachment) => ({
+			attachment: attachment.url,
+			name: attachment.name,
+		}));
+
+		// 代理投稿を送信
+		const deleteButton = new ButtonBuilder()
+			.setCustomId(`delete_${message.author.id}_${Date.now()}`)
+			.setLabel('削除')
+			.setStyle(ButtonStyle.Danger)
+			.setEmoji('🗑️');
+		const row = new ActionRowBuilder().addComponents(deleteButton);
+		const displayName = message.member?.nickname || message.author.displayName;
+		const proxiedMessage = await webhook.send({
+			content: message.content,
+			username: displayName,
+			avatarURL: message.author.displayAvatarURL(),
+			files: files,
+			components: [row],
+			allowedMentions: { parse: [] },
+		});
+		console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
+
+		// 元のメッセージを削除
+		await message.delete();
+
+		// 削除情報を保存
+		deletedMessageInfo.set(proxiedMessage.id, {
+			content: message.content,
+			author: message.author,
+			attachments: Array.from(message.attachments.values()),
+			channel: message.channel,
+			originalMessageId: message.id,
+			timestamp: Date.now(),
+		});
+
+		// クールダウンを更新
+		messageProxyCooldowns.set(message.author.id, Date.now());
+	}
+}
+
 module.exports = {
-	setup,
-	deletedMessageInfo, // for imageLog to access
+	clientReady,
+	messageCreate,
+	deletedMessageInfo,
 };

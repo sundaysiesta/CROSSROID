@@ -335,7 +335,7 @@ client.once('clientReady', async (client) => {
 	// データ復元後に同期を開始
 	persistence.startSync(client);
 	activityTracker.start(client);
-	proxy.setup(client);
+	await proxy.clientReady(client);
 	await romecoin.clientReady(client);
 });
 
@@ -347,6 +347,7 @@ client.on('interactionCreate', async (interaction) => {
 
 client.on('messageCreate', async (message) => {
 	abuseProtocol.handleMessage(message);
+	await proxy.messageCreate(message);
 	await romecoin.messageCreate(message);
 });
 
