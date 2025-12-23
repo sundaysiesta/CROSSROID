@@ -76,12 +76,12 @@ async function save(client) {
 	try {
 		const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
 
-		// Prepare Files
+		// Prepare Files（ロメコインと同じ方式：ファイルパスの文字列配列）
 		const uploads = [];
 		for (const file of FILES) {
 			const p = path.join(__dirname, '..', file);
 			if (fs.existsSync(p)) {
-				uploads.push({ attachment: p, name: file });
+				uploads.push(p);
 			}
 		}
 
@@ -89,7 +89,7 @@ async function save(client) {
 
 		// ロメコインと同じ方式：新しいメッセージとして送信（編集しない）
 		await db_channel.send({ files: uploads });
-		console.log(`[Persistence] Saved ${uploads.length} file(s) to database channel.`);
+		console.log(`[Persistence] Saved ${uploads.length} file(s) to database channel: ${FILES.filter(f => fs.existsSync(path.join(__dirname, '..', f))).join(', ')}`);
 	} catch (e) {
 		console.error('[Persistence] Save failed:', e);
 	}
