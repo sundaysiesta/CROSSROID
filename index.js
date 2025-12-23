@@ -315,7 +315,7 @@ client.once('clientReady', async (client) => {
 				commitSha = execSync('git rev-parse --short HEAD').toString().trim();
 				commitDate = execSync('git log -1 --pretty=%ad --date=iso').toString().trim();
 				commitMessage = execSync('git log -1 --pretty=%B').toString().trim();
-			} catch (_) {}
+			} catch (e) {}
 
 			const commitMessageShort =
 				commitMessage.length > 1000 ? commitMessage.slice(0, 997) + '...' : commitMessage;

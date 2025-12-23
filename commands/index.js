@@ -1,20 +1,18 @@
-const { EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const {
-	generateWacchoi,
-	generateDailyUserId,
-	generateDailyUserIdForDate,
-	getHolidayName,
-	getAnonymousName,
-} = require('../utils');
+	EmbedBuilder,
+	PermissionFlagsBits,
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
+	ChannelType,
+} = require('discord.js');
+const { generateWacchoi, generateDailyUserId, getAnonymousName } = require('../utils');
 const {
-	ANONYMOUS_COOLDOWN_MS,
 	ANONYMOUS_COOLDOWN_TIERS,
 	BUMP_COOLDOWN_MS,
 	RANDOM_MENTION_COOLDOWN_MS,
-	CLUB_CATEGORY_IDS,
 	MAIN_CHANNEL_ID,
 	CURRENT_GENERATION_ROLE_ID,
-	TIME_REPORT_CHANNEL_ID,
 	EVENT_CATEGORY_ID,
 	EVENT_NOTIFY_CHANNEL_ID,
 	EVENT_ADMIN_ROLE_ID,
@@ -25,7 +23,6 @@ const {
 	OWNER_ROLE_ID,
 	RADIATION_ROLE_ID,
 } = require('../constants');
-const { generateTimeReportMessage } = require('../features/timeSignal');
 const fs = require('fs');
 const path = require('path');
 const { checkAdmin } = require('../utils');
@@ -530,7 +527,6 @@ async function handleCommands(interaction, client) {
 						if (loserMember) {
 							// STANDARD TIMEOUT (10m)
 							let timeoutDuration = 10 * 60 * 1000; // 10分
-							const timeoutMinutes = timeoutDuration / 60000;
 
 							if (loserMember.moderatable) {
 								try {
@@ -1057,7 +1053,6 @@ async function handleCommands(interaction, client) {
 								],
 							});
 
-						let sentCount = 0;
 						for (let i = 0; i < repeat; i++) {
 							let sentMsg;
 							if (replyToId) {
@@ -1070,7 +1065,6 @@ async function handleCommands(interaction, client) {
 							} else {
 								sentMsg = await channel.send(content);
 							}
-							sentCount++;
 
 							if (deleteAfter && deleteAfter > 0) {
 								setTimeout(() => sentMsg.delete().catch(() => {}), deleteAfter * 1000);
@@ -1505,7 +1499,6 @@ async function handleCommands(interaction, client) {
 				const rollA = Math.floor(Math.random() * 100) + 1;
 				const rollB = Math.floor(Math.random() * 100) + 1;
 
-				let resultMsg = `🎲 **結果** 🎲\n${interaction.user}: **${rollA}**\n${actualOpponentUser}: **${rollB}**\n\n`;
 				let loser = null;
 				let winner = null;
 				let diff = 0;
@@ -1514,16 +1507,10 @@ async function handleCommands(interaction, client) {
 					diff = rollA - rollB;
 					loser = actualOpponentMember;
 					winner = member;
-					resultMsg += `🏆 **勝利者: ${interaction.user}**\n💀 **敗者: ${actualOpponentUser}**`;
 				} else {
 					diff = Math.abs(rollB - rollA);
 					loser = member;
 					winner = actualOpponentMember;
-					if (rollA === rollB) {
-						resultMsg += `⚖️ **引き分け (防御側の勝利)**\n💀 **敗者: ${interaction.user}**`;
-					} else {
-						resultMsg += `🏆 **勝利者: ${actualOpponentUser}**\n💀 **敗者: ${interaction.user}**`;
-					}
 				}
 
 				// ロメコインのやり取り
@@ -1583,7 +1570,6 @@ async function handleCommands(interaction, client) {
 					streak: 0,
 					maxStreak: 0,
 				});
-				resultMsg += `\n📊 **Stats:** ${winner} (${winnerData.streak}連勝中) vs ${loser}`;
 
 				// 3連勝以上で通知
 				if (winnerData.streak >= 3) {
@@ -1922,7 +1908,6 @@ async function handleCommands(interaction, client) {
 						// ペナルティ: タイムアウト
 						if (loserMember) {
 							const timeoutMs = 10 * 60 * 1000; // 10分
-							const timeoutMinutes = timeoutMs / 60000;
 
 							if (loserMember.moderatable) {
 								try {

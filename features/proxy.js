@@ -1,5 +1,5 @@
-const { AUTO_PROXY_COOLDOWN_MS, WORD_PROXY_COOLDOWN_MS, ELITE_ROLE_ID } = require('../constants');
-const { isImageOrVideo, containsFilteredWords, hasForceProxyRole } = require('../utils');
+const { WORD_PROXY_COOLDOWN_MS } = require('../constants');
+const { isImageOrVideo, containsFilteredWords } = require('../utils');
 
 // 状態管理
 const autoProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
@@ -7,11 +7,6 @@ const wordProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const processingMessages = new Set();
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
 const sentWebhookMessages = new Set(); // 送信済みの元メッセージIDを追跡（重複防止）
-const sendingWebhooks = new Set(); // webhook.send()実行中のメッセージIDを追跡（送信中のロック）
-
-// 重複処理防止用のキャッシュ（メモリ上にメッセージIDを一時保存）
-// これにより、短期間に同じメッセージIDに対して処理が走るのを防ぎます
-const processedMessages = new Set();
 
 // Webhook画像重複検出用のキャッシュ
 // key: channelId_imageUrl, value: { messageId, timestamp }

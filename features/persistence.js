@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { PermissionFlagsBits, ChannelType } = require('discord.js');
-const { EVENT_CATEGORY_ID, ADMIN_ROLE_ID } = require('../constants');
+const { ADMIN_ROLE_ID } = require('../constants');
 const https = require('https');
 
 // Config

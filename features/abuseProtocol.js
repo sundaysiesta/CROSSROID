@@ -1,5 +1,3 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, WebhookClient } = require('discord.js');
-
 // In-memory penalty list (Resets on restart, which is fine)
 // Map<userId, expireTimestamp>
 const HELL_LIST = new Map();

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { MAIN_CHANNEL_ID } = require('../constants');
-const { getDataKey, updateData, migrateData } = require('./dataAccess');
+const { getDataKey, migrateData } = require('./dataAccess');
 
 const DATA_FILE = path.join(__dirname, '../activity_data.json');
 
@@ -104,7 +104,6 @@ async function backfill(client) {
 
 	let lastId = undefined;
 	let loops = 0;
-	let botCount = 0; // Track bots/system messages skipped
 	const LIMIT_MSGS = 100000;
 	const MAX_LOOPS = LIMIT_MSGS / 100;
 
@@ -112,8 +111,6 @@ async function backfill(client) {
 	let oldestReached = Date.now();
 
 	try {
-		const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-
 		while (loops < MAX_LOOPS) {
 			const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
 			if (msgs.size === 0) {
@@ -135,7 +132,6 @@ async function backfill(client) {
 				oldestReached = msg.createdTimestamp;
 
 				if (!msg.author || msg.author.bot) {
-					botCount++;
 					lastId = msg.id;
 					continue;
 				}
@@ -163,10 +159,7 @@ async function backfill(client) {
 			loops++;
 
 			if (loops % 50 === 0) {
-				const progress = Math.round((loops / MAX_LOOPS) * 100);
 				console.log(`[ActivityTracker] Backfill progress: ${loops * 100} msgs`);
-				if (loops % 100 === 0) {
-				}
 			}
 		}
 
@@ -187,7 +180,6 @@ async function backfill(client) {
 
 		saveData();
 		console.log('[ActivityTracker] Backfill complete.');
-		const reachedDateStr = new Date(oldestReached).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
 	} catch (e) {
 		console.error('[ActivityTracker] Backfill error:', e);
 	} finally {

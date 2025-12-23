@@ -12,7 +12,6 @@ const {
 	ADMIN_ROLE_ID,
 	TECHTEAM_ROLE_ID,
 } = require('./constants');
-const { EmbedBuilder } = require('discord.js');
 
 // ゲーム進行状況管理（duel, duel_russian, jankenの重複実行を防ぐ）
 const gameProgressData = new Map(); // userId -> { type: 'duel' | 'duel_russian' | 'janken', progressId: string }
@@ -34,14 +33,6 @@ function clearUserGame(userId) {
 	gameProgressData.delete(userId);
 }
 
-async function logError(error, context = 'Unknown Context') {
-	// Logging disabled - no-op
-}
-
-async function logSystem(message, context = 'System') {
-	// Logging disabled - no-op
-}
-
 // 祝日判定関数
 function isJapaneseHoliday(date) {
 	const year = date.getFullYear();
@@ -58,7 +49,6 @@ function isJapaneseHoliday(date) {
 
 // 祝日名取得関数
 function getHolidayName(date) {
-	const year = date.getFullYear();
 	const dateString = date.toISOString().split('T')[0];
 
 	const holidayNames = {
@@ -208,7 +198,7 @@ function isImageOrVideo(attachment) {
 
 // ハッシュから「ダサい名前」を生成する関数
 // ハッシュから「ダサい名前」を生成する関数
-function getAnonymousName(dailyId, isElite = false) {
+function getAnonymousName(dailyId) {
 	const num = parseInt(dailyId, 36);
 	if (isNaN(num)) return '名無しのバグ';
 
@@ -295,7 +285,5 @@ module.exports = {
 	hasAllowedRole,
 	hasForceProxyRole,
 	getAnonymousName,
-	logError,
-	logSystem,
 	checkAdmin,
 };
