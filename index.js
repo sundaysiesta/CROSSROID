@@ -115,11 +115,21 @@ client.once('clientReady', async (client) => {
               option.setName('対戦相手')
               .setDescription('対戦相手（指定しない場合は誰でも挑戦可能）')
               .setRequired(false)
+          )
+          .addIntegerOption(option =>
+              option.setName('bet')
+              .setDescription('賭けるロメコインの量（指定されていない場合は100）')
+              .setRequired(false)
           ),
       new SlashCommandBuilder().setName('duel_russian').setDescription('ロシアンルーレットで対戦します')
           .addUserOption(option =>
               option.setName('対戦相手')
               .setDescription('対戦相手（指定しない場合は誰でも挑戦可能）')
+              .setRequired(false)
+          )
+          .addIntegerOption(option =>
+              option.setName('bet')
+              .setDescription('賭けるロメコインの量（指定されていない場合は100）')
               .setRequired(false)
           ),
       new SlashCommandBuilder().setName('duel_ranking').setDescription('決闘のランキングを表示します'),

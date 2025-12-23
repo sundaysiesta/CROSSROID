@@ -24,6 +24,8 @@ const path = require('path');
 const { checkAdmin } = require('../utils');
 const persistence = require('../features/persistence');
 const { getData, updateData, migrateData, getDataWithPrefix, setDataWithPrefix } = require('../features/dataAccess');
+const { getRomecoin, updateRomecoin } = require('../features/romecoin');
+const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 // コマンドごとのクールダウン管理
 const anonymousCooldowns = new Map();
@@ -213,11 +215,39 @@ async function handleCommands(interaction, client) {
             const userId = interaction.user.id;
             const opponentUser = interaction.options.getUser('対戦相手');
             const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
+            
+            // ロメコインチェック
+            const userRomecoin = await getRomecoin(userId);
+            if (userRomecoin < bet) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('ロメコインが不足しています')
+                    .addFields(
+                        { name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
+                        { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                    )
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
 
             // 相手が指定されている場合のバリデーション
             if (opponentUser) {
                 if (opponentUser.id === userId || opponentUser.bot) {
                     return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+                }
+                
+                // 対戦相手のロメコインチェック
+                const opponentRomecoin = await getRomecoin(opponentUser.id);
+                if (opponentRomecoin < bet) {
+                    const errorEmbed = new EmbedBuilder()
+                        .setTitle('❌ エラー')
+                        .setDescription('対戦相手のロメコインが不足しています')
+                        .addFields(
+                            { name: `${opponentUser}の現在の所持ロメコイン`, value: `${ROMECOIN_EMOJI}${opponentRomecoin}`, inline: true },
+                            { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                        )
+                        .setColor(0xFF0000);
+                    return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
                 }
             }
 
@@ -936,9 +966,24 @@ async function handleCommands(interaction, client) {
         try {
             const userId = interaction.user.id;
             const opponentUser = interaction.options.getUser('対戦相手');
+            const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
             const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
             const member = interaction.member;
+            
+            // ロメコインチェック
+            const userRomecoin = await getRomecoin(userId);
+            if (userRomecoin < bet) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('ロメコインが不足しています')
+                    .addFields(
+                        { name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
+                        { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                    )
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
 
             // ロールチェック（世代ロール必須）- 挑戦者のみ
             const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
@@ -985,6 +1030,7 @@ async function handleCommands(interaction, client) {
                 .addFields(
                     { name: 'ルール', value: '1d100のダイス勝負', inline: true },
                     { name: 'ルール', value: '完全ランダム（1-100）& 引き分けは防御側の勝利', inline: true },
+                    { name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
                     { name: 'ペナルティ', value: '敗者はタイムアウト（最大10分）', inline: false },
                     { name: '注意', value: '受諾後、キャンセル不可', inline: false }
                 )
@@ -1027,10 +1073,38 @@ async function handleCommands(interaction, client) {
                     if (actualOpponentUser.bot) {
                         return i.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
                     }
+                    
+                    // 受諾者のロメコインチェック
+                    const opponentRomecoin = await getRomecoin(actualOpponentUser.id);
+                    if (opponentRomecoin < bet) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ エラー')
+                            .setDescription('ロメコインが不足しています')
+                            .addFields(
+                                { name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${opponentRomecoin}`, inline: true },
+                                { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                            )
+                            .setColor(0xFF0000);
+                        return i.reply({ embeds: [errorEmbed], ephemeral: true });
+                    }
                 } else {
                     actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
                     if (!actualOpponentMember) {
                         return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+                    }
+                    
+                    // 対戦相手のロメコインチェック
+                    const opponentRomecoin = await getRomecoin(opponentUser.id);
+                    if (opponentRomecoin < bet) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ エラー')
+                            .setDescription('対戦相手のロメコインが不足しています')
+                            .addFields(
+                                { name: `${opponentUser}の現在の所持ロメコイン`, value: `${ROMECOIN_EMOJI}${opponentRomecoin}`, inline: true },
+                                { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                            )
+                            .setColor(0xFF0000);
+                        return i.reply({ embeds: [errorEmbed], ephemeral: true });
                     }
                 }
 
@@ -1068,6 +1142,10 @@ async function handleCommands(interaction, client) {
                         resultMsg += `🏆 **勝利者: ${actualOpponentUser}**\n💀 **敗者: ${interaction.user}**`;
                     }
                 }
+                
+                // ロメコインのやり取り
+                await updateRomecoin(winner.user.id, (current) => Math.round((current || 0) + bet));
+                await updateRomecoin(loser.user.id, (current) => Math.round((current || 0) - bet));
 
                 // 戦績記録
                 const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
@@ -1165,7 +1243,8 @@ async function handleCommands(interaction, client) {
                     .addFields(
                         { name: `${interaction.user.username} (攻)`, value: `🎲 **${rollA}**`, inline: true },
                         { name: `${actualOpponentUser.username} (守)`, value: `🎲 **${rollB}**`, inline: true },
-                        { name: '差', value: `${diff}`, inline: true }
+                        { name: '差', value: `${diff}`, inline: true },
+                        { name: '獲得/損失', value: `${winner} は ${ROMECOIN_EMOJI}${bet} を獲得\n${loser} は ${ROMECOIN_EMOJI}${bet} を失いました`, inline: false }
                     );
 
                 if (timeoutSuccess) {
@@ -1203,12 +1282,41 @@ async function handleCommands(interaction, client) {
         try {
             const userId = interaction.user.id;
             const opponentUser = interaction.options.getUser('対戦相手');
+            const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
             const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
+
+            // ロメコインチェック
+            const userRomecoin = await getRomecoin(userId);
+            if (userRomecoin < bet) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('ロメコインが不足しています')
+                    .addFields(
+                        { name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
+                        { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                    )
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
 
             // 相手が指定されている場合のバリデーション
             if (opponentUser) {
                 if (opponentUser.id === userId || opponentUser.bot) {
                     return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+                }
+                
+                // 対戦相手のロメコインチェック
+                const opponentRomecoin = await getRomecoin(opponentUser.id);
+                if (opponentRomecoin < bet) {
+                    const errorEmbed = new EmbedBuilder()
+                        .setTitle('❌ エラー')
+                        .setDescription('対戦相手のロメコインが不足しています')
+                        .addFields(
+                            { name: `${opponentUser}の現在の所持ロメコイン`, value: `${ROMECOIN_EMOJI}${opponentRomecoin}`, inline: true },
+                            { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                        )
+                        .setColor(0xFF0000);
+                    return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
                 }
             }
 
@@ -1228,6 +1336,7 @@ async function handleCommands(interaction, client) {
                     : `${opponentUser}\n${interaction.user} から死のゲームへの招待です。`)
                 .addFields(
                     { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に引き金を引く', inline: false },
+                    { name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
                     { name: '敗北時', value: '10分Timeout', inline: true },
                     { name: '勝利時', value: '戦績に記録', inline: true }
                 )
@@ -1261,6 +1370,20 @@ async function handleCommands(interaction, client) {
 
                     if (actualOpponentUser.bot) {
                         return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
+                    }
+                    
+                    // 受諾者のロメコインチェック
+                    const opponentRomecoin = await getRomecoin(actualOpponentUser.id);
+                    if (opponentRomecoin < bet) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ エラー')
+                            .setDescription('ロメコインが不足しています')
+                            .addFields(
+                                { name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${opponentRomecoin}`, inline: true },
+                                { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+                            )
+                            .setColor(0xFF0000);
+                        return i.reply({ embeds: [errorEmbed], ephemeral: true });
                     }
                 } else {
                     actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
@@ -1305,9 +1428,15 @@ async function handleCommands(interaction, client) {
                     const isHit = cylinder[state.current] === 1;
 
                     if (isHit) {
+                        const winnerUser = move.user.id === userId ? actualOpponentUser : interaction.user;
+                        const loserUser = move.user.id === userId ? interaction.user : actualOpponentUser;
+                        
                         const deathEmbed = new EmbedBuilder()
                             .setTitle('💥 BANG!!!')
-                            .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝利者** ${move.user.id === userId ? actualOpponentUser : interaction.user}`)
+                            .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝利者** ${winnerUser}`)
+                            .addFields(
+                                { name: '獲得/損失', value: `${winnerUser} は ${ROMECOIN_EMOJI}${bet} を獲得\n${loserUser} は ${ROMECOIN_EMOJI}${bet} を失いました`, inline: false }
+                            )
                             .setColor(0x880000)
                             .setImage('https://media1.tenor.com/m/X215c2D-i_0AAAAC/gun-gunshot.gif');
 
@@ -1319,6 +1448,14 @@ async function handleCommands(interaction, client) {
                         const winnerId = loserId === userId ? actualOpponentUser.id : userId;
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
+                        
+                        // ロメコインのやり取り
+                        await updateRomecoin(winnerId, (current) => Math.round((current || 0) + bet));
+                        await updateRomecoin(loserId, (current) => Math.round((current || 0) - bet));
+
+                        // ロメコインのやり取り
+                        await updateRomecoin(winnerId, (current) => Math.round((current || 0) + bet));
+                        await updateRomecoin(loserId, (current) => Math.round((current || 0) - bet));
 
                         // ペナルティ: タイムアウト
                         if (loserMember) {
