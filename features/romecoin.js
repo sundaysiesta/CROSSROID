@@ -3,7 +3,7 @@ const { DATABASE_CHANNEL_ID } = require('../constants');
 const { checkAdmin } = require('../utils');
 const { getData, updateData, migrateData } = require('./dataAccess');
 const notionManager = require('./notion');
-const { MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const crypto = require('crypto');
 
 // ロメコインデータ
@@ -13,6 +13,10 @@ let message_cooldown_users = new Array();
 let reaction_cooldown_users = new Array();
 // じゃんけん進行データ
 let janken_progress_data = new Object();
+// ロメコインランキングのサーバー間クールダウン（30秒）
+let romecoin_ranking_cooldowns = new Map();
+// ロメコイン絵文字
+const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 const RSPEnum = Object.freeze({
     rock: 'グー',
@@ -55,10 +59,27 @@ async function interactionCreate(interaction) {
         if (interaction.commandName === 'romecoin') {
             const user = interaction.options.getUser('user') ? interaction.options.getUser('user').id : interaction.user.id;
             const romecoin = await getData(user, romecoin_data, 0);
-            interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${romecoin}`, ephemeral: true });
+            interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${ROMECOIN_EMOJI}${romecoin}`, ephemeral: true });
         }
 
         else if (interaction.commandName === 'romecoin_ranking') {
+            // サーバー間クールダウンチェック（30秒）
+            const guildId = interaction.guild?.id || 'dm';
+            const now = Date.now();
+            const lastUsed = romecoin_ranking_cooldowns.get(guildId) || 0;
+            const COOLDOWN_MS = 30 * 1000; // 30秒
+            
+            if (now - lastUsed < COOLDOWN_MS) {
+                const remainSec = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
+                return interaction.reply({ 
+                    content: `⏳ クールダウン中です（残り${remainSec}秒）`, 
+                    ephemeral: true 
+                });
+            }
+            
+            // クールダウンを更新
+            romecoin_ranking_cooldowns.set(guildId, now);
+            
             // データを配列に変換（Notion名の場合はDiscord IDを取得）
             const sortedData = await Promise.all(Object.entries(romecoin_data).map(async ([key, value]) => {
                 const isNotionName = !/^\d+$/.test(key);
@@ -73,14 +94,67 @@ async function interactionCreate(interaction) {
             
             sortedData.sort((a, b) => b.value - a.value);
             
-            let content = '# ROMECOINランキング\n';
-            for (let i = 0; i < Math.min(10, sortedData.length); i++) {
-                const display = sortedData[i].displayName 
-                    ? `${sortedData[i].displayName} (<@${sortedData[i].discordId}>)` 
-                    : `<@${sortedData[i].discordId}>`;
-                content += `${i + 1}位: ${display} - ${sortedData[i].value}\n`;
-            }
-            await interaction.reply({ content: content, ephemeral: true });
+            // ページネーション用のデータ準備
+            const ITEMS_PER_PAGE = 10;
+            const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+            let currentPage = 0;
+            
+            // ランキング表示用の関数
+            const buildRankingEmbed = (page) => {
+                const startIndex = page * ITEMS_PER_PAGE;
+                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
+                const pageData = sortedData.slice(startIndex, endIndex);
+                
+                let rankingText = '';
+                for (let i = 0; i < pageData.length; i++) {
+                    const rank = startIndex + i + 1;
+                    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+                    const display = pageData[i].displayName 
+                        ? `${pageData[i].displayName} (<@${pageData[i].discordId}>)` 
+                        : `<@${pageData[i].discordId}>`;
+                    rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
+                }
+                
+                if (rankingText === '') {
+                    rankingText = 'データがありません';
+                }
+                
+                const embed = new EmbedBuilder()
+                    .setTitle('🏆 ROMECOINランキング')
+                    .setDescription(rankingText)
+                    .setColor(0xFFD700)
+                    .setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
+                    .setTimestamp();
+                
+                return embed;
+            };
+            
+            // ボタン作成
+            const buildButtons = (page) => {
+                const row = new ActionRowBuilder();
+                
+                const prevButton = new ButtonBuilder()
+                    .setCustomId(`romecoin_ranking_prev_${page}`)
+                    .setLabel('前へ')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(page === 0);
+                
+                const nextButton = new ButtonBuilder()
+                    .setCustomId(`romecoin_ranking_next_${page}`)
+                    .setLabel('次へ')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(page >= totalPages - 1);
+                
+                row.addComponents(prevButton, nextButton);
+                return row;
+            };
+            
+            // 初回表示
+            await interaction.reply({ 
+                embeds: [buildRankingEmbed(currentPage)], 
+                components: totalPages > 1 ? [buildButtons(currentPage)] : [],
+                ephemeral: false
+            });
         }
 
         else if (interaction.commandName === 'janken') {
@@ -100,7 +174,7 @@ async function interactionCreate(interaction) {
                             const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
                             const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
                             const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                            await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\nベット: ${bet}\n出す手を選択してください`, components: [row]});
+                            await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\nベット: ${ROMECOIN_EMOJI}${bet}\n出す手を選択してください`, components: [row]});
                             janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, bet: bet, timeout_id: null, user_hand: null, opponent_hand: opponentHand, status: 'selecting_hands'};
                         }
                         // 他ユーザーと対戦
@@ -111,7 +185,7 @@ async function interactionCreate(interaction) {
                                 const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
                                 const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
                                 const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                                const select_message = await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\nベット: ${bet}\n出す手を選択してください`, components: [row]});
+                                const select_message = await interaction.reply({ content: `${interaction.user}が${opponent}にじゃんけん勝負を仕掛けた！\nベット: ${ROMECOIN_EMOJI}${bet}\n出す手を選択してください`, components: [row]});
                                 
                                 // 60秒たっても選択されなかったら勝負破棄
                                 const timeout_id = setTimeout(async () => {
@@ -121,7 +195,7 @@ async function interactionCreate(interaction) {
                                 }, 60000);
                                 janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, bet:bet, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'selecting_hands'};
                             } else {
-                                await interaction.reply({ content: `対戦相手のロメコインが不足しています\n${opponent}の現在の所持ロメコイン: ${await getData(opponent.id, romecoin_data, 0)}\n必要なロメコイン: ${bet}`, flags: [MessageFlags.Ephemeral] });
+                                await interaction.reply({ content: `対戦相手のロメコインが不足しています\n${opponent}の現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(opponent.id, romecoin_data, 0)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`, flags: [MessageFlags.Ephemeral] });
                             }
                         } else {
                             await interaction.reply({ content: '自分自身やクロスロイド以外のBotと対戦することはできません', flags: [MessageFlags.Ephemeral] });
@@ -139,7 +213,7 @@ async function interactionCreate(interaction) {
                         janken_progress_data[progress_id] = {user: interaction.user, opponent: null, bet:bet, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'waiting_for_opponent'};
                     }
                 } else {
-                    await interaction.reply({ content: `ロメコインが不足しています\n現在の所持ロメコイン: ${await getData(interaction.user.id, romecoin_data, 0)}\n必要なロメコイン: ${bet}`, flags: [MessageFlags.Ephemeral] });
+                    await interaction.reply({ content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(interaction.user.id, romecoin_data, 0)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`, flags: [MessageFlags.Ephemeral] });
                 }
             } else {
                 await interaction.reply({ content: 'あなたは現在対戦中のため新規の対戦を開始できません', flags: [MessageFlags.Ephemeral] });
@@ -212,6 +286,108 @@ async function interactionCreate(interaction) {
         }
     }
     else if (interaction.isButton()) {
+        // romecoin_ranking ページネーションボタン処理
+        if (interaction.customId.startsWith('romecoin_ranking_')) {
+            const parts = interaction.customId.split('_');
+            const action = parts[2]; // 'prev' or 'next'
+            const currentPage = parseInt(parts[3]);
+            
+            // サーバー間クールダウンチェック（30秒）
+            const guildId = interaction.guild?.id || 'dm';
+            const now = Date.now();
+            const lastUsed = romecoin_ranking_cooldowns.get(guildId) || 0;
+            const COOLDOWN_MS = 30 * 1000; // 30秒
+            
+            if (now - lastUsed < COOLDOWN_MS) {
+                const remainSec = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
+                return interaction.reply({ 
+                    content: `⏳ クールダウン中です（残り${remainSec}秒）`, 
+                    ephemeral: true 
+                });
+            }
+            
+            // データを配列に変換
+            const sortedData = await Promise.all(Object.entries(romecoin_data).map(async ([key, value]) => {
+                const isNotionName = !/^\d+$/.test(key);
+                let discordId = key;
+                
+                if (isNotionName) {
+                    discordId = await notionManager.getDiscordId(key) || key;
+                }
+                
+                return { key, discordId, displayName: isNotionName ? key : null, value };
+            }));
+            
+            sortedData.sort((a, b) => b.value - a.value);
+            
+            const ITEMS_PER_PAGE = 10;
+            const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+            
+            let newPage = currentPage;
+            if (action === 'prev' && currentPage > 0) {
+                newPage = currentPage - 1;
+            } else if (action === 'next' && currentPage < totalPages - 1) {
+                newPage = currentPage + 1;
+            }
+            
+            // ランキング表示用の関数
+            const buildRankingEmbed = (page) => {
+                const startIndex = page * ITEMS_PER_PAGE;
+                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
+                const pageData = sortedData.slice(startIndex, endIndex);
+                
+                let rankingText = '';
+                for (let i = 0; i < pageData.length; i++) {
+                    const rank = startIndex + i + 1;
+                    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+                    const display = pageData[i].displayName 
+                        ? `${pageData[i].displayName} (<@${pageData[i].discordId}>)` 
+                        : `<@${pageData[i].discordId}>`;
+                    rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
+                }
+                
+                if (rankingText === '') {
+                    rankingText = 'データがありません';
+                }
+                
+                const embed = new EmbedBuilder()
+                    .setTitle('🏆 ROMECOINランキング')
+                    .setDescription(rankingText)
+                    .setColor(0xFFD700)
+                    .setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
+                    .setTimestamp();
+                
+                return embed;
+            };
+            
+            // ボタン作成
+            const buildButtons = (page) => {
+                const row = new ActionRowBuilder();
+                
+                const prevButton = new ButtonBuilder()
+                    .setCustomId(`romecoin_ranking_prev_${page}`)
+                    .setLabel('前へ')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(page === 0);
+                
+                const nextButton = new ButtonBuilder()
+                    .setCustomId(`romecoin_ranking_next_${page}`)
+                    .setLabel('次へ')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(page >= totalPages - 1);
+                
+                row.addComponents(prevButton, nextButton);
+                return row;
+            };
+            
+            await interaction.update({ 
+                embeds: [buildRankingEmbed(newPage)], 
+                components: totalPages > 1 ? [buildButtons(newPage)] : []
+            });
+            
+            return;
+        }
+        
         // jankenボタンインタラクション処理(対戦承諾)
         if (interaction.customId.startsWith('janken_accept_')) {
             const progress_id = interaction.customId.split('_')[2];
@@ -223,7 +399,7 @@ async function interactionCreate(interaction) {
                     const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
                     const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
                     await interaction.message.delete();
-                    const select_message = await interaction.channel.send({ content: `${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です\nこの勝負のベット: ${janken_progress_data[progress_id].bet}\n出す手を選択してください`, components: [row]});
+                    const select_message = await interaction.channel.send({ content: `${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です\nこの勝負のベット: ${ROMECOIN_EMOJI}${janken_progress_data[progress_id].bet}\n出す手を選択してください`, components: [row]});
                     janken_progress_data[progress_id].opponent = interaction.user;
                     janken_progress_data[progress_id].status = 'selecting_hands';
                     const timeout_id = setTimeout(async () => {
@@ -259,11 +435,11 @@ async function interactionCreate(interaction) {
                 if (progress.user_hand === progress.opponent_hand) {
                     result = '引き分け';
                 } else if ((progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') || (progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') || (progress.user_hand === 'paper' && progress.opponent_hand === 'rock')) {
-                    result = `${progress.user}の勝利！\n${progress.user}は${progress.bet}ロメコインを獲得し、${progress.opponent}は${progress.bet}ロメコインを失いました`;
+                    result = `${progress.user}の勝利！\n${progress.user}は${ROMECOIN_EMOJI}${progress.bet}を獲得し、${progress.opponent}は${ROMECOIN_EMOJI}${progress.bet}を失いました`;
                     await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
                     await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
                 } else {
-                    result = `${progress.opponent}の勝利！\n${progress.opponent}は${progress.bet}ロメコインを獲得し、${progress.user}は${progress.bet}ロメコインを失いました`;
+                    result = `${progress.opponent}の勝利！\n${progress.opponent}は${ROMECOIN_EMOJI}${progress.bet}を獲得し、${progress.user}は${ROMECOIN_EMOJI}${progress.bet}を失いました`;
                     await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
                     await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
                 }
