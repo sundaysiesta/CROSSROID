@@ -20,842 +20,998 @@ let romecoin_ranking_cooldowns = new Map();
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 const RSPEnum = Object.freeze({
-    rock: 'グー',
-    scissors: 'チョキ',
-    paper: 'パー'
-})
+	rock: 'グー',
+	scissors: 'チョキ',
+	paper: 'パー',
+});
 
 async function clientReady(client) {
-    // DBからデータを取得
-    const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
-    const message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
-    message.attachments.forEach(async (attachment) => {
-        if (attachment.name === 'romecoin_data.json') {
-            const response = await fetch(attachment.url);
-            const data = await response.text();
-            romecoin_data = JSON.parse(data);
-        }
-    });
+	// DBからデータを取得
+	const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+	const message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
+	message.attachments.forEach(async (attachment) => {
+		if (attachment.name === 'romecoin_data.json') {
+			const response = await fetch(attachment.url);
+			const data = await response.text();
+			romecoin_data = JSON.parse(data);
+		}
+	});
 
-    // 60秒ごとにデータを送信
-    setInterval(async () => {
-        fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
-            if (err) {
-                throw err;
-            }
-        });
+	// 60秒ごとにデータを送信
+	setInterval(async () => {
+		fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
+			if (err) {
+				throw err;
+			}
+		});
 
-        await db_channel.send({files: ['./.tmp/romecoin_data.json']});
-    }, 60000);
+		await db_channel.send({ files: ['./.tmp/romecoin_data.json'] });
+	}, 60000);
 
-    // 10秒ごとにクールダウンをリセット
-    setInterval(async () => {
-        message_cooldown_users = new Array();
-        reaction_cooldown_users = new Array();
-    }, 10000);
+	// 10秒ごとにクールダウンをリセット
+	setInterval(async () => {
+		message_cooldown_users = new Array();
+		reaction_cooldown_users = new Array();
+	}, 10000);
 }
 
 async function interactionCreate(interaction) {
-    if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'romecoin') {
-            const user = interaction.options.getUser('user') ? interaction.options.getUser('user').id : interaction.user.id;
-            const romecoin = await getData(user, romecoin_data, 0);
-            interaction.reply({ content: `<@${user}>の現在の所持ロメコイン: ${ROMECOIN_EMOJI}${romecoin}`, ephemeral: true });
-        }
+	if (interaction.isChatInputCommand()) {
+		if (interaction.commandName === 'romecoin') {
+			const user = interaction.options.getUser('user')
+				? interaction.options.getUser('user').id
+				: interaction.user.id;
+			const romecoin = await getData(user, romecoin_data, 0);
+			interaction.reply({
+				content: `<@${user}>の現在の所持ロメコイン: ${ROMECOIN_EMOJI}${romecoin}`,
+				ephemeral: true,
+			});
+		} else if (interaction.commandName === 'romecoin_ranking') {
+			// サーバー間クールダウンチェック（30秒）
+			const guildId = interaction.guild?.id || 'dm';
+			const now = Date.now();
+			const lastUsed = romecoin_ranking_cooldowns.get(guildId) || 0;
+			const COOLDOWN_MS = 30 * 1000; // 30秒
 
-        else if (interaction.commandName === 'romecoin_ranking') {
-            // サーバー間クールダウンチェック（30秒）
-            const guildId = interaction.guild?.id || 'dm';
-            const now = Date.now();
-            const lastUsed = romecoin_ranking_cooldowns.get(guildId) || 0;
-            const COOLDOWN_MS = 30 * 1000; // 30秒
-            
-            if (now - lastUsed < COOLDOWN_MS) {
-                const remainSec = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
-                return interaction.reply({ 
-                    content: `⏳ クールダウン中です（残り${remainSec}秒）`, 
-                    ephemeral: true 
-                });
-            }
-            
-            // クールダウンを更新
-            romecoin_ranking_cooldowns.set(guildId, now);
-            
-            // データを配列に変換（Notion名の場合はDiscord IDを取得）
-            const sortedData = await Promise.all(Object.entries(romecoin_data).map(async ([key, value]) => {
-                const isNotionName = !/^\d+$/.test(key);
-                let discordId = key;
-                
-                if (isNotionName) {
-                    discordId = await notionManager.getDiscordId(key) || key;
-                }
-                
-                return { key, discordId, displayName: isNotionName ? key : null, value };
-            }));
-            
-            sortedData.sort((a, b) => b.value - a.value);
-            
-            // ページネーション用のデータ準備
-            const ITEMS_PER_PAGE = 10;
-            const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
-            let currentPage = 0;
-            
-            // ランキング表示用の関数
-            const buildRankingEmbed = (page) => {
-                const startIndex = page * ITEMS_PER_PAGE;
-                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
-                const pageData = sortedData.slice(startIndex, endIndex);
-                
-                let rankingText = '';
-                for (let i = 0; i < pageData.length; i++) {
-                    const rank = startIndex + i + 1;
-                    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
-                    const display = pageData[i].displayName 
-                        ? `${pageData[i].displayName} (<@${pageData[i].discordId}>)` 
-                        : `<@${pageData[i].discordId}>`;
-                    rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
-                }
-                
-                if (rankingText === '') {
-                    rankingText = 'データがありません';
-                }
-                
-                const embed = new EmbedBuilder()
-                    .setTitle('🏆 ROMECOINランキング')
-                    .setDescription(rankingText)
-                    .setColor(0xFFD700)
-                    .setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
-                    .setTimestamp();
-                
-                return embed;
-            };
-            
-            // ボタン作成
-            const buildButtons = (page, userId) => {
-                const row = new ActionRowBuilder();
-                
-                const prevButton = new ButtonBuilder()
-                    .setCustomId(`romecoin_ranking_prev_${page}_${userId}`)
-                    .setLabel('前へ')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(page === 0);
-                
-                const nextButton = new ButtonBuilder()
-                    .setCustomId(`romecoin_ranking_next_${page}_${userId}`)
-                    .setLabel('次へ')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(page >= totalPages - 1);
-                
-                row.addComponents(prevButton, nextButton);
-                return row;
-            };
-            
-            // 初回表示
-            await interaction.reply({ 
-                embeds: [buildRankingEmbed(currentPage)], 
-                components: totalPages > 1 ? [buildButtons(currentPage, interaction.user.id)] : [],
-                ephemeral: false
-            });
-        }
+			if (now - lastUsed < COOLDOWN_MS) {
+				const remainSec = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
+				return interaction.reply({
+					content: `⏳ クールダウン中です（残り${remainSec}秒）`,
+					ephemeral: true,
+				});
+			}
 
-        else if (interaction.commandName === 'janken') {
-            const bet = interaction.options.getInteger('bet') ? interaction.options.getInteger('bet') : 100;
-            if (bet < 100) return interaction.reply({ content: 'ベットは100以上の整数で指定してください', flags: [MessageFlags.Ephemeral] });
-            
-            // 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
-            if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle('❌ エラー')
-                    .setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
-                    .setColor(0xFF0000);
-                return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-            }
-            
-            // 重複実行チェック
-            if (isUserInGame(interaction.user.id)) {
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle('❌ エラー')
-                    .setDescription('あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。')
-                    .setColor(0xFF0000);
-                return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-            }
-            
-            if (!Object.values(janken_progress_data).some(data => (data.user && data.user.id === interaction.user.id) || (data.opponent && data.opponent.id === interaction.user.id))) {
-                const opponent = interaction.options.getUser('opponent');
-                if (await getData(interaction.user.id, romecoin_data, 0) >= bet) {
-                    const progress_id =  crypto.randomUUID();
-                    if (opponent) {
-                        // クロスロイドと対戦
-                        if (opponent.id === interaction.client.user.id) {
-                            const hands = ['rock', 'scissors', 'paper'];
-                            const opponentHand = hands[Math.floor(Math.random() * hands.length)];
-                            // 手選択ボタンを表示
-                            const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
-                            const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
-                            const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
-                            const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                            
-                            const embed = new EmbedBuilder()
-                                .setTitle('✂️ じゃんけん勝負')
-                                .setDescription(`${opponent}\n${interaction.user} からじゃんけん勝負を申し込まれました。`)
-                                .addFields(
-                                    { name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
-                                    { name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
-                                    { name: '注意', value: '受諾後、キャンセル不可', inline: false }
-                                )
-                                .setColor(0xFFA500)
-                                .setThumbnail(interaction.user.displayAvatarURL());
-                            
-                            const replyMessage = await interaction.reply({ 
-                                content: `${opponent}`,
-                                embeds: [embed], 
-                                components: [row],
-                                fetchReply: true
-                            });
-                            janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, bet: bet, timeout_id: null, user_hand: null, opponent_hand: opponentHand, status: 'selecting_hands', message: replyMessage};
-                        }
-                        // 他ユーザーと対戦
-                        else if (opponent.id !== interaction.user.id && !opponent.bot) {
-                            // 被爆ロールチェック：対戦相手が被爆ロールを持っている場合は挑戦できない
-                            const opponentMember = await interaction.guild.members.fetch(opponent.id).catch(() => null);
-                            if (opponentMember && opponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
-                                const errorEmbed = new EmbedBuilder()
-                                    .setTitle('❌ エラー')
-                                    .setDescription('対戦相手が被爆ロールを持っているため、挑戦できません。')
-                                    .setColor(0xFF0000);
-                                return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-                            }
-                            
-                            if (await getData(opponent.id, romecoin_data, 0) >= bet) {
-                                // 対戦相手の手選択ボタンを表示
-                                const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
-                                const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
-                                const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
-                                const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                                
-                                const embed = new EmbedBuilder()
-                                    .setTitle('✂️ じゃんけん勝負')
-                                    .setDescription(`${opponent}\n${interaction.user} からじゃんけん勝負を申し込まれました。`)
-                                    .addFields(
-                                        { name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
-                                        { name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
-                                        { name: '注意', value: '受諾後、キャンセル不可', inline: false }
-                                    )
-                                    .setColor(0xFFA500)
-                                    .setThumbnail(interaction.user.displayAvatarURL());
-                                
-                                const select_message = await interaction.reply({ 
-                                    content: `${opponent}`,
-                                    embeds: [embed], 
-                                    components: [row],
-                                    fetchReply: true
-                                });
-                                
-                                // ゲーム開始：進行状況を記録
-                                setUserGame(interaction.user.id, 'janken', progress_id);
-                                setUserGame(opponent.id, 'janken', progress_id);
-                                
-                                // 60秒たっても選択されなかったら勝負破棄
-                                const timeout_id = setTimeout(async () => {
-                                    const timeoutEmbed = new EmbedBuilder()
-                                        .setTitle('⏰ 時間切れ')
-                                        .setDescription('時間切れとなったため、勝負は破棄されました')
-                                        .setColor(0x99AAB5);
-                                    select_message.edit({ content: null, embeds: [timeoutEmbed], components: [] });
-                                    await interaction.followUp({ content: '時間切れとなったため、勝負は破棄されました', flags: [MessageFlags.Ephemeral] });
-                                    delete janken_progress_data[progress_id];
-                                    // タイムアウト時も進行状況をクリア
-                                    clearUserGame(interaction.user.id);
-                                    clearUserGame(opponent.id);
-                                }, 60000);
-                                janken_progress_data[progress_id] = {user: interaction.user, opponent: opponent, bet:bet, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'selecting_hands', message: select_message};
-                            } else {
-                                const errorEmbed = new EmbedBuilder()
-                                    .setTitle('❌ エラー')
-                                    .setDescription(`対戦相手のロメコインが不足しています`)
-                                    .addFields(
-                                        { name: `${opponent}の現在の所持ロメコイン`, value: `${ROMECOIN_EMOJI}${await getData(opponent.id, romecoin_data, 0)}`, inline: true },
-                                        { name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
-                                    )
-                                    .setColor(0xFF0000);
-                                await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-                            }
-                        } else {
-                            const errorEmbed = new EmbedBuilder()
-                                .setTitle('❌ エラー')
-                                .setDescription('自分自身やクロスロイド以外のBotと対戦することはできません')
-                                .setColor(0xFF0000);
-                            await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-                        }
-                    }
-                    // 対戦相手が指定されていない場合は対戦募集ボードを表示
-                    else {
-                        const acceptButton = new ButtonBuilder().setCustomId(`janken_accept_${progress_id}`).setLabel('受ける').setStyle(ButtonStyle.Success);
-                        const row = new ActionRowBuilder().addComponents(acceptButton);
-                        
-                        const embed = new EmbedBuilder()
-                            .setTitle('✂️ じゃんけん勝負募集')
-                            .setDescription(`${interaction.user} が誰でも挑戦可能なじゃんけん勝負を開始しました。\n\n**誰でも「受ける」ボタンを押して挑戦できます！**`)
-                            .addFields(
-                                { name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
-                                { name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
-                                { name: '注意', value: '受諾後、キャンセル不可', inline: false }
-                            )
-                            .setColor(0xFFA500)
-                            .setThumbnail(interaction.user.displayAvatarURL());
-                        
-                        const replyMessage = await interaction.reply({ 
-                            content: null,
-                            embeds: [embed], 
-                            components: [row],
-                            fetchReply: true
-                        });
-                        // ゲーム開始：進行状況を記録（募集段階）
-                        setUserGame(interaction.user.id, 'janken', progress_id);
-                        const timeout_id = setTimeout(async () => {
-                            const timeoutEmbed = new EmbedBuilder()
-                                .setTitle('⏰ 時間切れ')
-                                .setDescription('時間切れとなったため、対戦募集は終了しました')
-                                .setColor(0x99AAB5);
-                            await replyMessage.edit({ content: null, embeds: [timeoutEmbed], components: []});
-                            delete janken_progress_data[progress_id];
-                            // タイムアウト時も進行状況をクリア
-                            clearUserGame(interaction.user.id);
-                        }, 60000);
-                        janken_progress_data[progress_id] = {user: interaction.user, opponent: null, bet:bet, timeout_id: timeout_id, user_hand: null, opponent_hand: null, status: 'waiting_for_opponent', message: replyMessage};
-                    }
-                } else {
-                    await interaction.reply({ content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(interaction.user.id, romecoin_data, 0)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`, flags: [MessageFlags.Ephemeral] });
-                }
-            } else {
-                await interaction.reply({ content: 'あなたは現在対戦中のため新規の対戦を開始できません', flags: [MessageFlags.Ephemeral] });
-            }
-        }
-        else if (interaction.commandName === 'database_export') {
-            if ((await checkAdmin(interaction.member))) {
-                fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
-                    if (err) {
-                        throw err;
-                    }
-                });
+			// クールダウンを更新
+			romecoin_ranking_cooldowns.set(guildId, now);
 
-                await interaction.reply({files: ['./.tmp/romecoin_data.json'], ephemeral: true });
-            }
-        }
-        else if (interaction.commandName === 'data_migrate') {
-            if (!(await checkAdmin(interaction.member))) {
-                return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
-            }
-            
-            const targetUser = interaction.options.getUser('user');
-            if (!targetUser) {
-                return interaction.reply({ content: '❌ ユーザーを指定してください。', ephemeral: true });
-            }
-            
-            const fs = require('fs');
-            const path = require('path');
-            const { migrateData } = require('./dataAccess');
-            const persistence = require('./persistence');
-            
-            let migratedCount = 0;
-            const results = [];
-            
-            // 各データファイルを引き継ぎ
-            const files = [
-                { file: 'duel_data.json', name: '決闘データ' },
-                { file: 'romecoin_data.json', name: 'ロメコインデータ' },
-                { file: 'activity_data.json', name: 'アクティビティデータ' },
-                { file: 'custom_cooldowns.json', name: 'クールダウンデータ', prefix: 'battle_' }
-            ];
-            
-            for (const { file, name, prefix = '' } of files) {
-                const filePath = path.join(__dirname, '..', file);
-                if (fs.existsSync(filePath)) {
-                    try {
-                        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                        const migrated = await migrateData(targetUser.id, data, prefix);
-                        if (migrated) {
-                            fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                            migratedCount++;
-                            results.push(`✅ ${name}`);
-                        } else {
-                            results.push(`⏭️ ${name} (引き継ぎ不要)`);
-                        }
-                    } catch (e) {
-                        results.push(`❌ ${name} (エラー: ${e.message})`);
-                    }
-                }
-            }
-            
-            // Memory storeに保存
-            await persistence.save(interaction.client).catch(() => {});
-            
-            const resultText = results.join('\n');
-            await interaction.reply({ 
-                content: `📊 **データ引き継ぎ結果**\n対象: <@${targetUser.id}>\n\n${resultText}\n\n引き継ぎ完了: ${migratedCount}件`, 
-                ephemeral: true 
-            });
-        }
-    }
-    else if (interaction.isButton()) {
-        // romecoin_ranking ページネーションボタン処理
-        if (interaction.customId.startsWith('romecoin_ranking_')) {
-            const parts = interaction.customId.split('_');
-            const action = parts[2]; // 'prev' or 'next'
-            const currentPage = parseInt(parts[3]);
-            const commandUserId = parts[4]; // コマンド実行者のID
-            
-            // コマンド実行者のみが操作できるようにチェック
-            if (interaction.user.id !== commandUserId) {
-                return interaction.reply({ 
-                    content: 'このランキングを表示したユーザーのみが操作できます。', 
-                    ephemeral: true 
-                });
-            }
-            
-            // データを配列に変換
-            const sortedData = await Promise.all(Object.entries(romecoin_data).map(async ([key, value]) => {
-                const isNotionName = !/^\d+$/.test(key);
-                let discordId = key;
-                
-                if (isNotionName) {
-                    discordId = await notionManager.getDiscordId(key) || key;
-                }
-                
-                return { key, discordId, displayName: isNotionName ? key : null, value };
-            }));
-            
-            sortedData.sort((a, b) => b.value - a.value);
-            
-            const ITEMS_PER_PAGE = 10;
-            const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
-            
-            let newPage = currentPage;
-            if (action === 'prev' && currentPage > 0) {
-                newPage = currentPage - 1;
-            } else if (action === 'next' && currentPage < totalPages - 1) {
-                newPage = currentPage + 1;
-            }
-            
-            // ランキング表示用の関数
-            const buildRankingEmbed = (page) => {
-                const startIndex = page * ITEMS_PER_PAGE;
-                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
-                const pageData = sortedData.slice(startIndex, endIndex);
-                
-                let rankingText = '';
-                for (let i = 0; i < pageData.length; i++) {
-                    const rank = startIndex + i + 1;
-                    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
-                    const display = pageData[i].displayName 
-                        ? `${pageData[i].displayName} (<@${pageData[i].discordId}>)` 
-                        : `<@${pageData[i].discordId}>`;
-                    rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
-                }
-                
-                if (rankingText === '') {
-                    rankingText = 'データがありません';
-                }
-                
-                const embed = new EmbedBuilder()
-                    .setTitle('🏆 ROMECOINランキング')
-                    .setDescription(rankingText)
-                    .setColor(0xFFD700)
-                    .setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
-                    .setTimestamp();
-                
-                return embed;
-            };
-            
-            // ボタン作成
-            const buildButtons = (page, userId) => {
-                const row = new ActionRowBuilder();
-                
-                const prevButton = new ButtonBuilder()
-                    .setCustomId(`romecoin_ranking_prev_${page}_${userId}`)
-                    .setLabel('前へ')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(page === 0);
-                
-                const nextButton = new ButtonBuilder()
-                    .setCustomId(`romecoin_ranking_next_${page}_${userId}`)
-                    .setLabel('次へ')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(page >= totalPages - 1);
-                
-                row.addComponents(prevButton, nextButton);
-                return row;
-            };
-            
-            await interaction.update({ 
-                embeds: [buildRankingEmbed(newPage)], 
-                components: totalPages > 1 ? [buildButtons(newPage, commandUserId)] : []
-            });
-            
-            return;
-        }
-        
-        // jankenボタンインタラクション処理(対戦承諾)
-        if (interaction.customId.startsWith('janken_accept_')) {
-            const progress_id = interaction.customId.split('_')[2];
-            
-            // 被爆ロールチェック：被爆ロールがついている人は受諾できない
-            if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle('❌ エラー')
-                    .setDescription('被爆ロールがついているため、対戦を受諾できません。')
-                    .setColor(0xFF0000);
-                return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-            }
-            
-            if (interaction.user.id !== janken_progress_data[progress_id].user.id && await getData(interaction.user.id, romecoin_data, 0) >= janken_progress_data[progress_id].bet) {
-                if (!Object.values(janken_progress_data).some(data => (data.user && data.user.id === interaction.user.id) || (data.opponent && data.opponent.id === interaction.user.id))) {
-                    clearTimeout(janken_progress_data[progress_id].timeout_id);
-                    const rockButton = new ButtonBuilder().setCustomId(`janken_rock_${progress_id}`).setLabel('グー').setEmoji('✊').setStyle(ButtonStyle.Primary);
-                    const scissorsButton = new ButtonBuilder().setCustomId(`janken_scissors_${progress_id}`).setLabel('チョキ').setEmoji('✌️').setStyle(ButtonStyle.Success);
-                    const paperButton = new ButtonBuilder().setCustomId(`janken_paper_${progress_id}`).setLabel('パー').setEmoji('✋').setStyle(ButtonStyle.Danger);
-                    const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-                    // 最初のメッセージを編集
-                    const startEmbed = new EmbedBuilder()
-                        .setTitle('✂️ じゃんけん勝負開始')
-                        .setDescription(`${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です`)
-                        .addFields(
-                            { name: 'ベット', value: `${ROMECOIN_EMOJI}${janken_progress_data[progress_id].bet}`, inline: true },
-                            { name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true }
-                        )
-                        .setColor(0xFFA500);
-                    
-                    try {
-                        // 最初のメッセージを編集（オープンチャレンジの場合）
-                        if (janken_progress_data[progress_id].message) {
-                            await janken_progress_data[progress_id].message.edit({ 
-                                content: null,
-                                embeds: [startEmbed], 
-                                components: [row]
-                            });
-                        } else {
-                            // メッセージが保存されていない場合は新しいメッセージとして送信
-                            await interaction.channel.send({ 
-                                content: null,
-                                embeds: [startEmbed], 
-                                components: [row]
-                            });
-                        }
-                        
-                        // インタラクションに応答（既に応答済みの場合は無視）
-                        if (!interaction.replied && !interaction.deferred) {
-                            await interaction.deferUpdate().catch(() => {});
-                        }
-                    } catch (error) {
-                        console.error('じゃんけん受諾処理エラー:', error);
-                        // エラーが発生しても処理を続行
-                    }
-                    
-                    janken_progress_data[progress_id].opponent = interaction.user;
-                    janken_progress_data[progress_id].status = 'selecting_hands';
-                    const timeout_id = setTimeout(async () => {
-                        const timeoutEmbed = new EmbedBuilder()
-                            .setTitle('⏰ 時間切れ')
-                            .setDescription('時間切れとなったため、勝負は破棄されました')
-                            .setColor(0x99AAB5);
-                        if (janken_progress_data[progress_id] && janken_progress_data[progress_id].message) {
-                            await janken_progress_data[progress_id].message.edit({ content: null, embeds: [timeoutEmbed], components: []}).catch(() => {});
-                        }
-                        delete janken_progress_data[progress_id];
-                    }, 60000);
-                    janken_progress_data[progress_id].timeout_id = timeout_id;
-                } else {
-                    const errorEmbed = new EmbedBuilder()
-                        .setTitle('❌ エラー')
-                        .setDescription('あなたは現在対戦中のため対戦ボードを承諾できません')
-                        .setColor(0xFF0000);
-                    await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-                }
-            } else {
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle('❌ エラー')
-                    .setDescription('自分自身やロメコインが不足しているユーザーは対戦できません')
-                    .setColor(0xFF0000);
-                await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-            }
-        }
-        // jankenボタンインタラクション処理(手選択)
-        else if (interaction.customId.startsWith('janken_')) {
-            const progress_id = interaction.customId.split('_')[2];
-            const progress = janken_progress_data[progress_id];
-            
-            // progressが存在しない、または必要なデータが不足している場合はエラー
-            if (!progress || !progress.user) {
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle('❌ エラー')
-                    .setDescription('この勝負は既に終了しているか、無効です。')
-                    .setColor(0xFF0000);
-                return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-            }
-            
-            // 既に両方の手が選択されている場合は処理しない
-            if (progress.user_hand && progress.opponent_hand) {
-                return;
-            }
-            
-            // ユーザーの手選択処理
-            if (interaction.user.id === progress.user.id) {
-                // 既に手を選択している場合は処理しない
-                if (progress.user_hand) {
-                    return;
-                }
-                progress.user_hand = interaction.customId.split('_')[1];
-                const handEmbed = new EmbedBuilder()
-                    .setTitle('✂️ 手を選択しました')
-                    .setDescription(`あなたの手は${RSPEnum[progress.user_hand]}に決定しました。\n対戦相手の手を待っています...`)
-                    .setColor(0x00FF00);
-                try {
-                    if (!interaction.replied && !interaction.deferred) {
-                        await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
-                    }
-                } catch (error) {
-                    console.error('手選択応答エラー:', error);
-                }
-            }
-            // 対戦相手の手選択処理
-            else if (progress.opponent && interaction.user.id === progress.opponent.id) {
-                // 既に手を選択している場合は処理しない
-                if (progress.opponent_hand) {
-                    return;
-                }
-                progress.opponent_hand = interaction.customId.split('_')[1];
-                const handEmbed = new EmbedBuilder()
-                    .setTitle('✂️ 手を選択しました')
-                    .setDescription(`あなたの手は${RSPEnum[progress.opponent_hand]}に決定しました。\n対戦相手の手を待っています...`)
-                    .setColor(0x00FF00);
-                try {
-                    if (!interaction.replied && !interaction.deferred) {
-                        await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
-                    }
-                } catch (error) {
-                    console.error('手選択応答エラー:', error);
-                }
-            } else {
-                // 該当するユーザーではない場合
-                const errorEmbed = new EmbedBuilder()
-                    .setTitle('❌ エラー')
-                    .setDescription('あなたはこの勝負に参加していません。')
-                    .setColor(0xFF0000);
-                try {
-                    if (!interaction.replied && !interaction.deferred) {
-                        return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-                    }
-                } catch (error) {
-                    console.error('エラー応答エラー:', error);
-                }
-                return;
-            }
-            
-            // 勝敗判定
-            if (progress.user_hand && progress.opponent_hand) {
-                clearTimeout(progress.timeout_id);
-                let winner = null;
-                let loser = null;
-                let isDraw = false;
-                
-                if (progress.user_hand === progress.opponent_hand) {
-                    isDraw = true;
-                } else if ((progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') || (progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') || (progress.user_hand === 'paper' && progress.opponent_hand === 'rock')) {
-                    winner = progress.user;
-                    loser = progress.opponent;
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
-                } else {
-                    winner = progress.opponent;
-                    loser = progress.user;
-                    await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
-                    await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
-                }
-                
-                const resultEmbed = new EmbedBuilder()
-                    .setTitle(isDraw ? '⚖️ じゃんけん引き分け' : '✂️ じゃんけん決着')
-                    .setColor(isDraw ? 0x99AAB5 : 0xFFD700)
-                    .setDescription(`${progress.user} vs ${progress.opponent}`)
-                    .addFields(
-                        { name: `${progress.user.username}`, value: `${RSPEnum[progress.user_hand]}`, inline: true },
-                        { name: `${progress.opponent.username}`, value: `${RSPEnum[progress.opponent_hand]}`, inline: true },
-                        { name: 'ベット', value: `${ROMECOIN_EMOJI}${progress.bet}`, inline: true }
-                    );
-                
-                if (isDraw) {
-                    resultEmbed.addFields(
-                        { name: '結果', value: '引き分け', inline: false }
-                    );
-                } else {
-                    resultEmbed.addFields(
-                        { name: '🏆 勝利者', value: `${winner}`, inline: false },
-                        { name: '獲得/損失', value: `${winner} は ${ROMECOIN_EMOJI}${progress.bet} を獲得\n${loser} は ${ROMECOIN_EMOJI}${progress.bet} を失いました`, inline: false }
-                    );
-                }
-                
-                // ゲーム終了：進行状況をクリア
-                clearUserGame(progress.user.id);
-                if (progress.opponent) {
-                    clearUserGame(progress.opponent.id);
-                }
-                
-                // 最初のメッセージを編集
-                try {
-                    if (progress.message) {
-                        await progress.message.edit({ embeds: [resultEmbed], components: [] }).catch(() => {});
-                    } else {
-                        // メッセージが保存されていない場合は新しいメッセージとして送信
-                        await interaction.channel.send({ embeds: [resultEmbed], components: [] }).catch(() => {});
-                    }
-                } catch (error) {
-                    console.error('結果表示エラー:', error);
-                }
-                delete janken_progress_data[progress_id];
-            }
-        }
-    }
+			// データを配列に変換（Notion名の場合はDiscord IDを取得）
+			const sortedData = await Promise.all(
+				Object.entries(romecoin_data).map(async ([key, value]) => {
+					const isNotionName = !/^\d+$/.test(key);
+					let discordId = key;
+
+					if (isNotionName) {
+						discordId = (await notionManager.getDiscordId(key)) || key;
+					}
+
+					return { key, discordId, displayName: isNotionName ? key : null, value };
+				})
+			);
+
+			sortedData.sort((a, b) => b.value - a.value);
+
+			// ページネーション用のデータ準備
+			const ITEMS_PER_PAGE = 10;
+			const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+			let currentPage = 0;
+
+			// ランキング表示用の関数
+			const buildRankingEmbed = (page) => {
+				const startIndex = page * ITEMS_PER_PAGE;
+				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
+				const pageData = sortedData.slice(startIndex, endIndex);
+
+				let rankingText = '';
+				for (let i = 0; i < pageData.length; i++) {
+					const rank = startIndex + i + 1;
+					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+					const display = pageData[i].displayName
+						? `${pageData[i].displayName} (<@${pageData[i].discordId}>)`
+						: `<@${pageData[i].discordId}>`;
+					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
+				}
+
+				if (rankingText === '') {
+					rankingText = 'データがありません';
+				}
+
+				const embed = new EmbedBuilder()
+					.setTitle('🏆 ROMECOINランキング')
+					.setDescription(rankingText)
+					.setColor(0xffd700)
+					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
+					.setTimestamp();
+
+				return embed;
+			};
+
+			// ボタン作成
+			const buildButtons = (page, userId) => {
+				const row = new ActionRowBuilder();
+
+				const prevButton = new ButtonBuilder()
+					.setCustomId(`romecoin_ranking_prev_${page}_${userId}`)
+					.setLabel('前へ')
+					.setStyle(ButtonStyle.Primary)
+					.setDisabled(page === 0);
+
+				const nextButton = new ButtonBuilder()
+					.setCustomId(`romecoin_ranking_next_${page}_${userId}`)
+					.setLabel('次へ')
+					.setStyle(ButtonStyle.Primary)
+					.setDisabled(page >= totalPages - 1);
+
+				row.addComponents(prevButton, nextButton);
+				return row;
+			};
+
+			// 初回表示
+			await interaction.reply({
+				embeds: [buildRankingEmbed(currentPage)],
+				components: totalPages > 1 ? [buildButtons(currentPage, interaction.user.id)] : [],
+				ephemeral: false,
+			});
+		} else if (interaction.commandName === 'janken') {
+			const bet = interaction.options.getInteger('bet') ? interaction.options.getInteger('bet') : 100;
+			if (bet < 100)
+				return interaction.reply({
+					content: 'ベットは100以上の整数で指定してください',
+					flags: [MessageFlags.Ephemeral],
+				});
+
+			// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
+			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+			}
+
+			// 重複実行チェック
+			if (isUserInGame(interaction.user.id)) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription(
+						'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
+					)
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+			}
+
+			if (
+				!Object.values(janken_progress_data).some(
+					(data) =>
+						(data.user && data.user.id === interaction.user.id) ||
+						(data.opponent && data.opponent.id === interaction.user.id)
+				)
+			) {
+				const opponent = interaction.options.getUser('opponent');
+				if ((await getData(interaction.user.id, romecoin_data, 0)) >= bet) {
+					const progress_id = crypto.randomUUID();
+					if (opponent) {
+						// クロスロイドと対戦
+						if (opponent.id === interaction.client.user.id) {
+							const hands = ['rock', 'scissors', 'paper'];
+							const opponentHand = hands[Math.floor(Math.random() * hands.length)];
+							// 手選択ボタンを表示
+							const rockButton = new ButtonBuilder()
+								.setCustomId(`janken_rock_${progress_id}`)
+								.setLabel('グー')
+								.setEmoji('✊')
+								.setStyle(ButtonStyle.Primary);
+							const scissorsButton = new ButtonBuilder()
+								.setCustomId(`janken_scissors_${progress_id}`)
+								.setLabel('チョキ')
+								.setEmoji('✌️')
+								.setStyle(ButtonStyle.Success);
+							const paperButton = new ButtonBuilder()
+								.setCustomId(`janken_paper_${progress_id}`)
+								.setLabel('パー')
+								.setEmoji('✋')
+								.setStyle(ButtonStyle.Danger);
+							const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
+
+							const embed = new EmbedBuilder()
+								.setTitle('✂️ じゃんけん勝負')
+								.setDescription(
+									`${opponent}\n${interaction.user} からじゃんけん勝負を申し込まれました。`
+								)
+								.addFields(
+									{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
+									{ name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
+									{ name: '注意', value: '受諾後、キャンセル不可', inline: false }
+								)
+								.setColor(0xffa500)
+								.setThumbnail(interaction.user.displayAvatarURL());
+
+							const replyMessage = await interaction.reply({
+								content: `${opponent}`,
+								embeds: [embed],
+								components: [row],
+								fetchReply: true,
+							});
+							janken_progress_data[progress_id] = {
+								user: interaction.user,
+								opponent: opponent,
+								bet: bet,
+								timeout_id: null,
+								user_hand: null,
+								opponent_hand: opponentHand,
+								status: 'selecting_hands',
+								message: replyMessage,
+							};
+						}
+						// 他ユーザーと対戦
+						else if (opponent.id !== interaction.user.id && !opponent.bot) {
+							// 被爆ロールチェック：対戦相手が被爆ロールを持っている場合は挑戦できない
+							const opponentMember = await interaction.guild.members.fetch(opponent.id).catch(() => null);
+							if (opponentMember && opponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
+								const errorEmbed = new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setDescription('対戦相手が被爆ロールを持っているため、挑戦できません。')
+									.setColor(0xff0000);
+								return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+							}
+
+							if ((await getData(opponent.id, romecoin_data, 0)) >= bet) {
+								// 対戦相手の手選択ボタンを表示
+								const rockButton = new ButtonBuilder()
+									.setCustomId(`janken_rock_${progress_id}`)
+									.setLabel('グー')
+									.setEmoji('✊')
+									.setStyle(ButtonStyle.Primary);
+								const scissorsButton = new ButtonBuilder()
+									.setCustomId(`janken_scissors_${progress_id}`)
+									.setLabel('チョキ')
+									.setEmoji('✌️')
+									.setStyle(ButtonStyle.Success);
+								const paperButton = new ButtonBuilder()
+									.setCustomId(`janken_paper_${progress_id}`)
+									.setLabel('パー')
+									.setEmoji('✋')
+									.setStyle(ButtonStyle.Danger);
+								const row = new ActionRowBuilder().addComponents(
+									rockButton,
+									scissorsButton,
+									paperButton
+								);
+
+								const embed = new EmbedBuilder()
+									.setTitle('✂️ じゃんけん勝負')
+									.setDescription(
+										`${opponent}\n${interaction.user} からじゃんけん勝負を申し込まれました。`
+									)
+									.addFields(
+										{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
+										{ name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
+										{ name: '注意', value: '受諾後、キャンセル不可', inline: false }
+									)
+									.setColor(0xffa500)
+									.setThumbnail(interaction.user.displayAvatarURL());
+
+								const select_message = await interaction.reply({
+									content: `${opponent}`,
+									embeds: [embed],
+									components: [row],
+									fetchReply: true,
+								});
+
+								// ゲーム開始：進行状況を記録
+								setUserGame(interaction.user.id, 'janken', progress_id);
+								setUserGame(opponent.id, 'janken', progress_id);
+
+								// 60秒たっても選択されなかったら勝負破棄
+								const timeout_id = setTimeout(async () => {
+									const timeoutEmbed = new EmbedBuilder()
+										.setTitle('⏰ 時間切れ')
+										.setDescription('時間切れとなったため、勝負は破棄されました')
+										.setColor(0x99aab5);
+									select_message.edit({ content: null, embeds: [timeoutEmbed], components: [] });
+									await interaction.followUp({
+										content: '時間切れとなったため、勝負は破棄されました',
+										flags: [MessageFlags.Ephemeral],
+									});
+									delete janken_progress_data[progress_id];
+									// タイムアウト時も進行状況をクリア
+									clearUserGame(interaction.user.id);
+									clearUserGame(opponent.id);
+								}, 60000);
+								janken_progress_data[progress_id] = {
+									user: interaction.user,
+									opponent: opponent,
+									bet: bet,
+									timeout_id: timeout_id,
+									user_hand: null,
+									opponent_hand: null,
+									status: 'selecting_hands',
+									message: select_message,
+								};
+							} else {
+								const errorEmbed = new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setDescription(`対戦相手のロメコインが不足しています`)
+									.addFields(
+										{
+											name: `${opponent}の現在の所持ロメコイン`,
+											value: `${ROMECOIN_EMOJI}${await getData(opponent.id, romecoin_data, 0)}`,
+											inline: true,
+										},
+										{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+									)
+									.setColor(0xff0000);
+								await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+							}
+						} else {
+							const errorEmbed = new EmbedBuilder()
+								.setTitle('❌ エラー')
+								.setDescription('自分自身やクロスロイド以外のBotと対戦することはできません')
+								.setColor(0xff0000);
+							await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+						}
+					}
+					// 対戦相手が指定されていない場合は対戦募集ボードを表示
+					else {
+						const acceptButton = new ButtonBuilder()
+							.setCustomId(`janken_accept_${progress_id}`)
+							.setLabel('受ける')
+							.setStyle(ButtonStyle.Success);
+						const row = new ActionRowBuilder().addComponents(acceptButton);
+
+						const embed = new EmbedBuilder()
+							.setTitle('✂️ じゃんけん勝負募集')
+							.setDescription(
+								`${interaction.user} が誰でも挑戦可能なじゃんけん勝負を開始しました。\n\n**誰でも「受ける」ボタンを押して挑戦できます！**`
+							)
+							.addFields(
+								{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
+								{ name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
+								{ name: '注意', value: '受諾後、キャンセル不可', inline: false }
+							)
+							.setColor(0xffa500)
+							.setThumbnail(interaction.user.displayAvatarURL());
+
+						const replyMessage = await interaction.reply({
+							content: null,
+							embeds: [embed],
+							components: [row],
+							fetchReply: true,
+						});
+						// ゲーム開始：進行状況を記録（募集段階）
+						setUserGame(interaction.user.id, 'janken', progress_id);
+						const timeout_id = setTimeout(async () => {
+							const timeoutEmbed = new EmbedBuilder()
+								.setTitle('⏰ 時間切れ')
+								.setDescription('時間切れとなったため、対戦募集は終了しました')
+								.setColor(0x99aab5);
+							await replyMessage.edit({ content: null, embeds: [timeoutEmbed], components: [] });
+							delete janken_progress_data[progress_id];
+							// タイムアウト時も進行状況をクリア
+							clearUserGame(interaction.user.id);
+						}, 60000);
+						janken_progress_data[progress_id] = {
+							user: interaction.user,
+							opponent: null,
+							bet: bet,
+							timeout_id: timeout_id,
+							user_hand: null,
+							opponent_hand: null,
+							status: 'waiting_for_opponent',
+							message: replyMessage,
+						};
+					}
+				} else {
+					await interaction.reply({
+						content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(
+							interaction.user.id,
+							romecoin_data,
+							0
+						)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`,
+						flags: [MessageFlags.Ephemeral],
+					});
+				}
+			} else {
+				await interaction.reply({
+					content: 'あなたは現在対戦中のため新規の対戦を開始できません',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
+		} else if (interaction.commandName === 'database_export') {
+			if (await checkAdmin(interaction.member)) {
+				fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
+					if (err) {
+						throw err;
+					}
+				});
+
+				await interaction.reply({ files: ['./.tmp/romecoin_data.json'], ephemeral: true });
+			}
+		} else if (interaction.commandName === 'data_migrate') {
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+			}
+
+			const targetUser = interaction.options.getUser('user');
+			if (!targetUser) {
+				return interaction.reply({ content: '❌ ユーザーを指定してください。', ephemeral: true });
+			}
+
+			const fs = require('fs');
+			const path = require('path');
+			const { migrateData } = require('./dataAccess');
+			const persistence = require('./persistence');
+
+			let migratedCount = 0;
+			const results = [];
+
+			// 各データファイルを引き継ぎ
+			const files = [
+				{ file: 'duel_data.json', name: '決闘データ' },
+				{ file: 'romecoin_data.json', name: 'ロメコインデータ' },
+				{ file: 'activity_data.json', name: 'アクティビティデータ' },
+				{ file: 'custom_cooldowns.json', name: 'クールダウンデータ', prefix: 'battle_' },
+			];
+
+			for (const { file, name, prefix = '' } of files) {
+				const filePath = path.join(__dirname, '..', file);
+				if (fs.existsSync(filePath)) {
+					try {
+						const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+						const migrated = await migrateData(targetUser.id, data, prefix);
+						if (migrated) {
+							fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+							migratedCount++;
+							results.push(`✅ ${name}`);
+						} else {
+							results.push(`⏭️ ${name} (引き継ぎ不要)`);
+						}
+					} catch (e) {
+						results.push(`❌ ${name} (エラー: ${e.message})`);
+					}
+				}
+			}
+
+			// Memory storeに保存
+			await persistence.save(interaction.client).catch(() => {});
+
+			const resultText = results.join('\n');
+			await interaction.reply({
+				content: `📊 **データ引き継ぎ結果**\n対象: <@${targetUser.id}>\n\n${resultText}\n\n引き継ぎ完了: ${migratedCount}件`,
+				ephemeral: true,
+			});
+		}
+	} else if (interaction.isButton()) {
+		// romecoin_ranking ページネーションボタン処理
+		if (interaction.customId.startsWith('romecoin_ranking_')) {
+			const parts = interaction.customId.split('_');
+			const action = parts[2]; // 'prev' or 'next'
+			const currentPage = parseInt(parts[3]);
+			const commandUserId = parts[4]; // コマンド実行者のID
+
+			// コマンド実行者のみが操作できるようにチェック
+			if (interaction.user.id !== commandUserId) {
+				return interaction.reply({
+					content: 'このランキングを表示したユーザーのみが操作できます。',
+					ephemeral: true,
+				});
+			}
+
+			// データを配列に変換
+			const sortedData = await Promise.all(
+				Object.entries(romecoin_data).map(async ([key, value]) => {
+					const isNotionName = !/^\d+$/.test(key);
+					let discordId = key;
+
+					if (isNotionName) {
+						discordId = (await notionManager.getDiscordId(key)) || key;
+					}
+
+					return { key, discordId, displayName: isNotionName ? key : null, value };
+				})
+			);
+
+			sortedData.sort((a, b) => b.value - a.value);
+
+			const ITEMS_PER_PAGE = 10;
+			const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+
+			let newPage = currentPage;
+			if (action === 'prev' && currentPage > 0) {
+				newPage = currentPage - 1;
+			} else if (action === 'next' && currentPage < totalPages - 1) {
+				newPage = currentPage + 1;
+			}
+
+			// ランキング表示用の関数
+			const buildRankingEmbed = (page) => {
+				const startIndex = page * ITEMS_PER_PAGE;
+				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
+				const pageData = sortedData.slice(startIndex, endIndex);
+
+				let rankingText = '';
+				for (let i = 0; i < pageData.length; i++) {
+					const rank = startIndex + i + 1;
+					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+					const display = pageData[i].displayName
+						? `${pageData[i].displayName} (<@${pageData[i].discordId}>)`
+						: `<@${pageData[i].discordId}>`;
+					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
+				}
+
+				if (rankingText === '') {
+					rankingText = 'データがありません';
+				}
+
+				const embed = new EmbedBuilder()
+					.setTitle('🏆 ROMECOINランキング')
+					.setDescription(rankingText)
+					.setColor(0xffd700)
+					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
+					.setTimestamp();
+
+				return embed;
+			};
+
+			// ボタン作成
+			const buildButtons = (page, userId) => {
+				const row = new ActionRowBuilder();
+
+				const prevButton = new ButtonBuilder()
+					.setCustomId(`romecoin_ranking_prev_${page}_${userId}`)
+					.setLabel('前へ')
+					.setStyle(ButtonStyle.Primary)
+					.setDisabled(page === 0);
+
+				const nextButton = new ButtonBuilder()
+					.setCustomId(`romecoin_ranking_next_${page}_${userId}`)
+					.setLabel('次へ')
+					.setStyle(ButtonStyle.Primary)
+					.setDisabled(page >= totalPages - 1);
+
+				row.addComponents(prevButton, nextButton);
+				return row;
+			};
+
+			await interaction.update({
+				embeds: [buildRankingEmbed(newPage)],
+				components: totalPages > 1 ? [buildButtons(newPage, commandUserId)] : [],
+			});
+
+			return;
+		}
+
+		// jankenボタンインタラクション処理(対戦承諾)
+		if (interaction.customId.startsWith('janken_accept_')) {
+			const progress_id = interaction.customId.split('_')[2];
+
+			// 被爆ロールチェック：被爆ロールがついている人は受諾できない
+			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('被爆ロールがついているため、対戦を受諾できません。')
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+			}
+
+			if (
+				interaction.user.id !== janken_progress_data[progress_id].user.id &&
+				(await getData(interaction.user.id, romecoin_data, 0)) >= janken_progress_data[progress_id].bet
+			) {
+				if (
+					!Object.values(janken_progress_data).some(
+						(data) =>
+							(data.user && data.user.id === interaction.user.id) ||
+							(data.opponent && data.opponent.id === interaction.user.id)
+					)
+				) {
+					clearTimeout(janken_progress_data[progress_id].timeout_id);
+					const rockButton = new ButtonBuilder()
+						.setCustomId(`janken_rock_${progress_id}`)
+						.setLabel('グー')
+						.setEmoji('✊')
+						.setStyle(ButtonStyle.Primary);
+					const scissorsButton = new ButtonBuilder()
+						.setCustomId(`janken_scissors_${progress_id}`)
+						.setLabel('チョキ')
+						.setEmoji('✌️')
+						.setStyle(ButtonStyle.Success);
+					const paperButton = new ButtonBuilder()
+						.setCustomId(`janken_paper_${progress_id}`)
+						.setLabel('パー')
+						.setEmoji('✋')
+						.setStyle(ButtonStyle.Danger);
+					const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
+					// 最初のメッセージを編集
+					const startEmbed = new EmbedBuilder()
+						.setTitle('✂️ じゃんけん勝負開始')
+						.setDescription(
+							`${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です`
+						)
+						.addFields(
+							{
+								name: 'ベット',
+								value: `${ROMECOIN_EMOJI}${janken_progress_data[progress_id].bet}`,
+								inline: true,
+							},
+							{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true }
+						)
+						.setColor(0xffa500);
+
+					try {
+						// 最初のメッセージを編集（オープンチャレンジの場合）
+						if (janken_progress_data[progress_id].message) {
+							await janken_progress_data[progress_id].message.edit({
+								content: null,
+								embeds: [startEmbed],
+								components: [row],
+							});
+						} else {
+							// メッセージが保存されていない場合は新しいメッセージとして送信
+							await interaction.channel.send({
+								content: null,
+								embeds: [startEmbed],
+								components: [row],
+							});
+						}
+
+						// インタラクションに応答（既に応答済みの場合は無視）
+						if (!interaction.replied && !interaction.deferred) {
+							await interaction.deferUpdate().catch(() => {});
+						}
+					} catch (error) {
+						console.error('じゃんけん受諾処理エラー:', error);
+						// エラーが発生しても処理を続行
+					}
+
+					janken_progress_data[progress_id].opponent = interaction.user;
+					janken_progress_data[progress_id].status = 'selecting_hands';
+					const timeout_id = setTimeout(async () => {
+						const timeoutEmbed = new EmbedBuilder()
+							.setTitle('⏰ 時間切れ')
+							.setDescription('時間切れとなったため、勝負は破棄されました')
+							.setColor(0x99aab5);
+						if (janken_progress_data[progress_id] && janken_progress_data[progress_id].message) {
+							await janken_progress_data[progress_id].message
+								.edit({ content: null, embeds: [timeoutEmbed], components: [] })
+								.catch(() => {});
+						}
+						delete janken_progress_data[progress_id];
+					}, 60000);
+					janken_progress_data[progress_id].timeout_id = timeout_id;
+				} else {
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription('あなたは現在対戦中のため対戦ボードを承諾できません')
+						.setColor(0xff0000);
+					await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+				}
+			} else {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('自分自身やロメコインが不足しているユーザーは対戦できません')
+					.setColor(0xff0000);
+				await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+			}
+		}
+		// jankenボタンインタラクション処理(手選択)
+		else if (interaction.customId.startsWith('janken_')) {
+			const progress_id = interaction.customId.split('_')[2];
+			const progress = janken_progress_data[progress_id];
+
+			// progressが存在しない、または必要なデータが不足している場合はエラー
+			if (!progress || !progress.user) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('この勝負は既に終了しているか、無効です。')
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+			}
+
+			// 既に両方の手が選択されている場合は処理しない
+			if (progress.user_hand && progress.opponent_hand) {
+				return;
+			}
+
+			// ユーザーの手選択処理
+			if (interaction.user.id === progress.user.id) {
+				// 既に手を選択している場合は処理しない
+				if (progress.user_hand) {
+					return;
+				}
+				progress.user_hand = interaction.customId.split('_')[1];
+				const handEmbed = new EmbedBuilder()
+					.setTitle('✂️ 手を選択しました')
+					.setDescription(
+						`あなたの手は${RSPEnum[progress.user_hand]}に決定しました。\n対戦相手の手を待っています...`
+					)
+					.setColor(0x00ff00);
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					console.error('手選択応答エラー:', error);
+				}
+			}
+			// 対戦相手の手選択処理
+			else if (progress.opponent && interaction.user.id === progress.opponent.id) {
+				// 既に手を選択している場合は処理しない
+				if (progress.opponent_hand) {
+					return;
+				}
+				progress.opponent_hand = interaction.customId.split('_')[1];
+				const handEmbed = new EmbedBuilder()
+					.setTitle('✂️ 手を選択しました')
+					.setDescription(
+						`あなたの手は${RSPEnum[progress.opponent_hand]}に決定しました。\n対戦相手の手を待っています...`
+					)
+					.setColor(0x00ff00);
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					console.error('手選択応答エラー:', error);
+				}
+			} else {
+				// 該当するユーザーではない場合
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('あなたはこの勝負に参加していません。')
+					.setColor(0xff0000);
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					console.error('エラー応答エラー:', error);
+				}
+				return;
+			}
+
+			// 勝敗判定
+			if (progress.user_hand && progress.opponent_hand) {
+				clearTimeout(progress.timeout_id);
+				let winner = null;
+				let loser = null;
+				let isDraw = false;
+
+				if (progress.user_hand === progress.opponent_hand) {
+					isDraw = true;
+				} else if (
+					(progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') ||
+					(progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') ||
+					(progress.user_hand === 'paper' && progress.opponent_hand === 'rock')
+				) {
+					winner = progress.user;
+					loser = progress.opponent;
+					await updateData(progress.user.id, romecoin_data, (current) =>
+						Math.round((current || 0) + progress.bet)
+					);
+					await updateData(progress.opponent.id, romecoin_data, (current) =>
+						Math.round((current || 0) - progress.bet)
+					);
+				} else {
+					winner = progress.opponent;
+					loser = progress.user;
+					await updateData(progress.user.id, romecoin_data, (current) =>
+						Math.round((current || 0) - progress.bet)
+					);
+					await updateData(progress.opponent.id, romecoin_data, (current) =>
+						Math.round((current || 0) + progress.bet)
+					);
+				}
+
+				const resultEmbed = new EmbedBuilder()
+					.setTitle(isDraw ? '⚖️ じゃんけん引き分け' : '✂️ じゃんけん決着')
+					.setColor(isDraw ? 0x99aab5 : 0xffd700)
+					.setDescription(`${progress.user} vs ${progress.opponent}`)
+					.addFields(
+						{ name: `${progress.user.username}`, value: `${RSPEnum[progress.user_hand]}`, inline: true },
+						{
+							name: `${progress.opponent.username}`,
+							value: `${RSPEnum[progress.opponent_hand]}`,
+							inline: true,
+						},
+						{ name: 'ベット', value: `${ROMECOIN_EMOJI}${progress.bet}`, inline: true }
+					);
+
+				if (isDraw) {
+					resultEmbed.addFields({ name: '結果', value: '引き分け', inline: false });
+				} else {
+					resultEmbed.addFields(
+						{ name: '🏆 勝利者', value: `${winner}`, inline: false },
+						{
+							name: '獲得/損失',
+							value: `${winner} は ${ROMECOIN_EMOJI}${progress.bet} を獲得\n${loser} は ${ROMECOIN_EMOJI}${progress.bet} を失いました`,
+							inline: false,
+						}
+					);
+				}
+
+				// ゲーム終了：進行状況をクリア
+				clearUserGame(progress.user.id);
+				if (progress.opponent) {
+					clearUserGame(progress.opponent.id);
+				}
+
+				// 最初のメッセージを編集
+				try {
+					if (progress.message) {
+						await progress.message.edit({ embeds: [resultEmbed], components: [] }).catch(() => {});
+					} else {
+						// メッセージが保存されていない場合は新しいメッセージとして送信
+						await interaction.channel.send({ embeds: [resultEmbed], components: [] }).catch(() => {});
+					}
+				} catch (error) {
+					console.error('結果表示エラー:', error);
+				}
+				delete janken_progress_data[progress_id];
+			}
+		}
+	}
 }
 
 async function messageCreate(message) {
-    if (message.author.bot) return;
-    if (message_cooldown_users.includes(message.author.id)) return;
-    
-    // 被爆ロールチェック：被爆ロールがついている人はロメコインが溜まらない
-    if (message.member && message.member.roles.cache.has(RADIATION_ROLE_ID)) {
-        message_cooldown_users.push(message.author.id);
-        return;
-    }
+	if (message.author.bot) return;
+	if (message_cooldown_users.includes(message.author.id)) return;
 
-    let score = 10;
+	// 被爆ロールチェック：被爆ロールがついている人はロメコインが溜まらない
+	if (message.member && message.member.roles.cache.has(RADIATION_ROLE_ID)) {
+		message_cooldown_users.push(message.author.id);
+		return;
+	}
 
-    const generationRoles = [
-        '1431905155938258988', // 第1世代
-        '1431905155938258989', // 第2世代
-        '1431905155938258990', // 第3世代
-        '1431905155938258991', // 第4世代
-        '1431905155938258992', // 第5世代
-        '1431905155938258993', // 第6世代
-        '1431905155938258994', // 第7世代
-        '1431905155955294290', // 第8世代
-        '1431905155955294291', // 第9世代
-        '1431905155955294292', // 第10世代
-        '1431905155955294293', // 第11世代
-        '1431905155955294294', // 第12世代
-        '1431905155955294295', // 第13世代
-        '1431905155955294296', // 第14世代
-        '1431905155955294297', // 第15世代
-        '1431905155955294298', // 第16世代
-        '1431905155955294299', // 第17世代
-        '1431905155984392303', // 第18世代
-        //'1433777496767074386' // 第19世代
-    ]
+	let score = 10;
 
-    // 新規
-    if (!message.member.roles.cache.some(role => generationRoles.includes(role.id))) {
-        score *= 1.1;
-    }
+	const generationRoles = [
+		'1431905155938258988', // 第1世代
+		'1431905155938258989', // 第2世代
+		'1431905155938258990', // 第3世代
+		'1431905155938258991', // 第4世代
+		'1431905155938258992', // 第5世代
+		'1431905155938258993', // 第6世代
+		'1431905155938258994', // 第7世代
+		'1431905155955294290', // 第8世代
+		'1431905155955294291', // 第9世代
+		'1431905155955294292', // 第10世代
+		'1431905155955294293', // 第11世代
+		'1431905155955294294', // 第12世代
+		'1431905155955294295', // 第13世代
+		'1431905155955294296', // 第14世代
+		'1431905155955294297', // 第15世代
+		'1431905155955294298', // 第16世代
+		'1431905155955294299', // 第17世代
+		'1431905155984392303', // 第18世代
+		//'1433777496767074386' // 第19世代
+	];
 
-    // 直近10件のメッセージ中で会話している人の数
-    let talkingMembers = [];
-    (await message.channel.messages.fetch({ limit: 10 })).forEach(_message => {
-        if (!_message.author.bot && _message.author.id !== message.author.id && !talkingMembers.includes(_message.author.id)) {
-            talkingMembers.push(_message.author.id);
-        }
-    })
-    score *= 1+talkingMembers.length/10;
+	// 新規
+	if (!message.member.roles.cache.some((role) => generationRoles.includes(role.id))) {
+		score *= 1.1;
+	}
 
-    // 深夜
-    if (message.createdAt.getHours() < 6) {
-        score *= 1.5;
-    }
+	// 直近10件のメッセージ中で会話している人の数
+	let talkingMembers = [];
+	(await message.channel.messages.fetch({ limit: 10 })).forEach((_message) => {
+		if (
+			!_message.author.bot &&
+			_message.author.id !== message.author.id &&
+			!talkingMembers.includes(_message.author.id)
+		) {
+			talkingMembers.push(_message.author.id);
+		}
+	});
+	score *= 1 + talkingMembers.length / 10;
 
-    // データ引き継ぎ（ID → Notion名）
-    await migrateData(message.author.id, romecoin_data);
-    
-    // ロメコインを更新
-    await updateData(message.author.id, romecoin_data, (current) => {
-        return Math.round((current || 0) + score);
-    });
+	// 深夜
+	if (message.createdAt.getHours() < 6) {
+		score *= 1.5;
+	}
 
-    // 返信先のユーザーにも付与
-    if (message.reference) {
-        const reference = await message.fetchReference();
-        if (reference.guild.id === message.guild.id && !reference.author.bot && reference.author.id !== message.author.id) {
-            // 被爆ロールチェック：返信先が被爆ロールを持っている場合はロメコインを付与しない
-            const referenceMember = await message.guild.members.fetch(reference.author.id).catch(() => null);
-            if (referenceMember && !referenceMember.roles.cache.has(RADIATION_ROLE_ID)) {
-                // データ引き継ぎ（ID → Notion名）
-                await migrateData(reference.author.id, romecoin_data);
-                
-                // ロメコインを更新
-                await updateData(reference.author.id, romecoin_data, (current) => {
-                    return Math.round((current || 0) + 5);
-                });
-            }
-        }
-    }
+	// データ引き継ぎ（ID → Notion名）
+	await migrateData(message.author.id, romecoin_data);
 
-    message_cooldown_users.push(message.author.id);
+	// ロメコインを更新
+	await updateData(message.author.id, romecoin_data, (current) => {
+		return Math.round((current || 0) + score);
+	});
+
+	// 返信先のユーザーにも付与
+	if (message.reference) {
+		const reference = await message.fetchReference();
+		if (
+			reference.guild.id === message.guild.id &&
+			!reference.author.bot &&
+			reference.author.id !== message.author.id
+		) {
+			// 被爆ロールチェック：返信先が被爆ロールを持っている場合はロメコインを付与しない
+			const referenceMember = await message.guild.members.fetch(reference.author.id).catch(() => null);
+			if (referenceMember && !referenceMember.roles.cache.has(RADIATION_ROLE_ID)) {
+				// データ引き継ぎ（ID → Notion名）
+				await migrateData(reference.author.id, romecoin_data);
+
+				// ロメコインを更新
+				await updateData(reference.author.id, romecoin_data, (current) => {
+					return Math.round((current || 0) + 5);
+				});
+			}
+		}
+	}
+
+	message_cooldown_users.push(message.author.id);
 }
 
 async function messageReactionAdd(reaction, user) {
-    if (user.bot || reaction.message.author.bot) return;
-    if (reaction.message.author.id === user.id) return;
-    if (reaction_cooldown_users.includes(user.id)) return;
+	if (user.bot || reaction.message.author.bot) return;
+	if (reaction.message.author.id === user.id) return;
+	if (reaction_cooldown_users.includes(user.id)) return;
 
-    // 被爆ロールチェック：メッセージ送信者が被爆ロールを持っている場合はロメコインを付与しない
-    const messageAuthorMember = await reaction.message.guild.members.fetch(reaction.message.author.id).catch(() => null);
-    if (messageAuthorMember && messageAuthorMember.roles.cache.has(RADIATION_ROLE_ID)) {
-        reaction_cooldown_users.push(user.id);
-        return;
-    }
+	// 被爆ロールチェック：メッセージ送信者が被爆ロールを持っている場合はロメコインを付与しない
+	const messageAuthorMember = await reaction.message.guild.members
+		.fetch(reaction.message.author.id)
+		.catch(() => null);
+	if (messageAuthorMember && messageAuthorMember.roles.cache.has(RADIATION_ROLE_ID)) {
+		reaction_cooldown_users.push(user.id);
+		return;
+	}
 
-    // データ引き継ぎ（ID → Notion名）
-    await migrateData(reaction.message.author.id, romecoin_data);
-    
-    // メッセージがリアクションされたときにも付与
-    await updateData(reaction.message.author.id, romecoin_data, (current) => {
-        return Math.round((current || 0) + 5);
-    });
-    
-    reaction_cooldown_users.push(user.id);
+	// データ引き継ぎ（ID → Notion名）
+	await migrateData(reaction.message.author.id, romecoin_data);
+
+	// メッセージがリアクションされたときにも付与
+	await updateData(reaction.message.author.id, romecoin_data, (current) => {
+		return Math.round((current || 0) + 5);
+	});
+
+	reaction_cooldown_users.push(user.id);
 }
 
 // romecoin_dataにアクセスする関数
 function getRomecoinData() {
-    return romecoin_data;
+	return romecoin_data;
 }
 
 async function getRomecoin(userId) {
-    try {
-        // romecoin_dataが初期化されていない場合は空オブジェクトを使用
-        const data = romecoin_data || {};
-        const balance = await getData(userId, data, 0);
-        return balance;
-    } catch (error) {
-        console.error('[getRomecoin] エラー:', error);
-        console.error('[getRomecoin] userId:', userId);
-        console.error('[getRomecoin] romecoin_data存在:', !!romecoin_data);
-        // エラーが発生した場合は0を返す（デフォルト値）
-        return 0;
-    }
+	try {
+		// romecoin_dataが初期化されていない場合は空オブジェクトを使用
+		const data = romecoin_data || {};
+		const balance = await getData(userId, data, 0);
+		return balance;
+	} catch (error) {
+		console.error('[getRomecoin] エラー:', error);
+		console.error('[getRomecoin] userId:', userId);
+		console.error('[getRomecoin] romecoin_data存在:', !!romecoin_data);
+		// エラーが発生した場合は0を返す（デフォルト値）
+		return 0;
+	}
 }
 
 async function updateRomecoin(userId, updateFn) {
-    // romecoin_dataが初期化されていない場合は初期化
-    if (!romecoin_data) {
-        romecoin_data = {};
-    }
-    await migrateData(userId, romecoin_data);
-    await updateData(userId, romecoin_data, updateFn);
+	// romecoin_dataが初期化されていない場合は初期化
+	if (!romecoin_data) {
+		romecoin_data = {};
+	}
+	await migrateData(userId, romecoin_data);
+	await updateData(userId, romecoin_data, updateFn);
 }
 
 module.exports = {
-    clientReady,
-    interactionCreate,
-    messageCreate,
-    messageReactionAdd,
-    getRomecoinData,
-    getRomecoin,
-    updateRomecoin
+	clientReady,
+	interactionCreate,
+	messageCreate,
+	messageReactionAdd,
+	getRomecoinData,
+	getRomecoin,
+	updateRomecoin,
 };

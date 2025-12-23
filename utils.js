@@ -1,20 +1,16 @@
 const crypto = require('crypto');
+const { JAPANESE_HOLIDAYS_2024, JAPANESE_HOLIDAYS_2025, SCHOOL_VACATIONS } = require('./holidays');
 const {
-    JAPANESE_HOLIDAYS_2024,
-    JAPANESE_HOLIDAYS_2025,
-    SCHOOL_VACATIONS
-} = require('./holidays');
-const {
-    FILTERED_WORDS,
-    ALLOWED_ROLE_IDS,
-    FORCE_PROXY_ROLE_ID,
-    SECRET_SALT,
-    ANONYMOUS_NAMING_PREFIXES,
-    ANONYMOUS_NAMING_SUFFIXES,
-    ELITE_NAMING_PREFIXES,
-    ELITE_NAMING_SUFFIXES,
-    ADMIN_ROLE_ID,
-    TECHTEAM_ROLE_ID,
+	FILTERED_WORDS,
+	ALLOWED_ROLE_IDS,
+	FORCE_PROXY_ROLE_ID,
+	SECRET_SALT,
+	ANONYMOUS_NAMING_PREFIXES,
+	ANONYMOUS_NAMING_SUFFIXES,
+	ELITE_NAMING_PREFIXES,
+	ELITE_NAMING_SUFFIXES,
+	ADMIN_ROLE_ID,
+	TECHTEAM_ROLE_ID,
 } = require('./constants');
 const { EmbedBuilder } = require('discord.js');
 
@@ -22,142 +18,142 @@ const { EmbedBuilder } = require('discord.js');
 const gameProgressData = new Map(); // userId -> { type: 'duel' | 'duel_russian' | 'janken', progressId: string }
 
 function isUserInGame(userId) {
-    return gameProgressData.has(userId);
+	return gameProgressData.has(userId);
 }
 
 function getUserGameType(userId) {
-    const progress = gameProgressData.get(userId);
-    return progress ? progress.type : null;
+	const progress = gameProgressData.get(userId);
+	return progress ? progress.type : null;
 }
 
 function setUserGame(userId, type, progressId) {
-    gameProgressData.set(userId, { type, progressId });
+	gameProgressData.set(userId, { type, progressId });
 }
 
 function clearUserGame(userId) {
-    gameProgressData.delete(userId);
+	gameProgressData.delete(userId);
 }
 
 async function logError(error, context = 'Unknown Context') {
-    // Logging disabled - no-op
+	// Logging disabled - no-op
 }
 
 async function logSystem(message, context = 'System') {
-    // Logging disabled - no-op
+	// Logging disabled - no-op
 }
 
 // 祝日判定関数
 function isJapaneseHoliday(date) {
-    const year = date.getFullYear();
-    const dateString = date.toISOString().split('T')[0];
+	const year = date.getFullYear();
+	const dateString = date.toISOString().split('T')[0];
 
-    if (year === 2024) {
-        return JAPANESE_HOLIDAYS_2024.includes(dateString);
-    } else if (year === 2025) {
-        return JAPANESE_HOLIDAYS_2025.includes(dateString);
-    }
+	if (year === 2024) {
+		return JAPANESE_HOLIDAYS_2024.includes(dateString);
+	} else if (year === 2025) {
+		return JAPANESE_HOLIDAYS_2025.includes(dateString);
+	}
 
-    return false;
+	return false;
 }
 
 // 祝日名取得関数
 function getHolidayName(date) {
-    const year = date.getFullYear();
-    const dateString = date.toISOString().split('T')[0];
+	const year = date.getFullYear();
+	const dateString = date.toISOString().split('T')[0];
 
-    const holidayNames = {
-        '2024-01-01': '元日',
-        '2024-01-08': '成人の日',
-        '2024-02-11': '建国記念の日',
-        '2024-02-12': '建国記念の日 振替休日',
-        '2024-02-23': '天皇誕生日',
-        '2024-03-20': '春分の日',
-        '2024-04-29': '昭和の日',
-        '2024-05-03': '憲法記念日',
-        '2024-05-04': 'みどりの日',
-        '2024-05-05': 'こどもの日',
-        '2024-05-06': 'こどもの日 振替休日',
-        '2024-07-15': '海の日',
-        '2024-08-11': '山の日',
-        '2024-08-12': '山の日 振替休日',
-        '2024-09-16': '敬老の日',
-        '2024-09-22': '秋分の日',
-        '2024-09-23': '秋分の日 振替休日',
-        '2024-10-14': 'スポーツの日',
-        '2024-11-03': '文化の日',
-        '2024-11-04': '文化の日 振替休日',
-        '2024-11-23': '勤労感謝の日',
-        '2025-01-01': '元日',
-        '2025-01-13': '成人の日',
-        '2025-02-11': '建国記念の日',
-        '2025-02-23': '天皇誕生日',
-        '2025-03-20': '春分の日',
-        '2025-04-29': '昭和の日',
-        '2025-05-03': '憲法記念日',
-        '2025-05-04': 'みどりの日',
-        '2025-05-05': 'こどもの日',
-        '2025-05-06': 'こどもの日 振替休日',
-        '2025-07-21': '海の日',
-        '2025-08-11': '山の日',
-        '2025-09-15': '敬老の日',
-        '2025-09-23': '秋分の日',
-        '2025-10-13': 'スポーツの日',
-        '2025-11-03': '文化の日',
-        '2025-11-23': '勤労感謝の日',
-        '2025-11-24': '勤労感謝の日 振替休日'
-    };
+	const holidayNames = {
+		'2024-01-01': '元日',
+		'2024-01-08': '成人の日',
+		'2024-02-11': '建国記念の日',
+		'2024-02-12': '建国記念の日 振替休日',
+		'2024-02-23': '天皇誕生日',
+		'2024-03-20': '春分の日',
+		'2024-04-29': '昭和の日',
+		'2024-05-03': '憲法記念日',
+		'2024-05-04': 'みどりの日',
+		'2024-05-05': 'こどもの日',
+		'2024-05-06': 'こどもの日 振替休日',
+		'2024-07-15': '海の日',
+		'2024-08-11': '山の日',
+		'2024-08-12': '山の日 振替休日',
+		'2024-09-16': '敬老の日',
+		'2024-09-22': '秋分の日',
+		'2024-09-23': '秋分の日 振替休日',
+		'2024-10-14': 'スポーツの日',
+		'2024-11-03': '文化の日',
+		'2024-11-04': '文化の日 振替休日',
+		'2024-11-23': '勤労感謝の日',
+		'2025-01-01': '元日',
+		'2025-01-13': '成人の日',
+		'2025-02-11': '建国記念の日',
+		'2025-02-23': '天皇誕生日',
+		'2025-03-20': '春分の日',
+		'2025-04-29': '昭和の日',
+		'2025-05-03': '憲法記念日',
+		'2025-05-04': 'みどりの日',
+		'2025-05-05': 'こどもの日',
+		'2025-05-06': 'こどもの日 振替休日',
+		'2025-07-21': '海の日',
+		'2025-08-11': '山の日',
+		'2025-09-15': '敬老の日',
+		'2025-09-23': '秋分の日',
+		'2025-10-13': 'スポーツの日',
+		'2025-11-03': '文化の日',
+		'2025-11-23': '勤労感謝の日',
+		'2025-11-24': '勤労感謝の日 振替休日',
+	};
 
-    return holidayNames[dateString] || null;
+	return holidayNames[dateString] || null;
 }
 
 // 長期休暇判定関数
 function getSchoolVacationType(date) {
-    const dateString = date.toISOString().split('T')[0];
+	const dateString = date.toISOString().split('T')[0];
 
-    // 春休み
-    if (dateString >= SCHOOL_VACATIONS.spring.start && dateString <= SCHOOL_VACATIONS.spring.end) {
-        return 'spring';
-    }
+	// 春休み
+	if (dateString >= SCHOOL_VACATIONS.spring.start && dateString <= SCHOOL_VACATIONS.spring.end) {
+		return 'spring';
+	}
 
-    // 夏休み
-    if (dateString >= SCHOOL_VACATIONS.summer.start && dateString <= SCHOOL_VACATIONS.summer.end) {
-        return 'summer';
-    }
+	// 夏休み
+	if (dateString >= SCHOOL_VACATIONS.summer.start && dateString <= SCHOOL_VACATIONS.summer.end) {
+		return 'summer';
+	}
 
-    // 冬休み
-    if (dateString >= SCHOOL_VACATIONS.winter.start && dateString <= SCHOOL_VACATIONS.winter.end) {
-        return 'winter';
-    }
+	// 冬休み
+	if (dateString >= SCHOOL_VACATIONS.winter.start && dateString <= SCHOOL_VACATIONS.winter.end) {
+		return 'winter';
+	}
 
-    return null;
+	return null;
 }
 
 // 曜日判定関数
 function getDayType(date) {
-    const dayOfWeek = date.getDay(); // 0=日曜日, 1=月曜日, ..., 6=土曜日
+	const dayOfWeek = date.getDay(); // 0=日曜日, 1=月曜日, ..., 6=土曜日
 
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-        return 'weekend';
-    } else {
-        return 'weekday';
-    }
+	if (dayOfWeek === 0 || dayOfWeek === 6) {
+		return 'weekend';
+	} else {
+		return 'weekday';
+	}
 }
 
 // ユーザーごと日替わりの英数字IDを生成（旧方式: UTC日基準、英小文字+数字）
 function generateDailyUserIdForDate(userId, dateUtc) {
-    const y = dateUtc.getUTCFullYear();
-    const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(dateUtc.getUTCDate()).padStart(2, '0');
-    const dayKey = `${y}${m}${d}`;
-    const hash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:${dayKey}`).digest('hex');
-    const segment = hash.slice(0, 10);
-    const num = parseInt(segment, 16);
-    const id36 = num.toString(36).toLowerCase();
-    return id36.slice(0, 8).padStart(6, '0');
+	const y = dateUtc.getUTCFullYear();
+	const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
+	const d = String(dateUtc.getUTCDate()).padStart(2, '0');
+	const dayKey = `${y}${m}${d}`;
+	const hash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:${dayKey}`).digest('hex');
+	const segment = hash.slice(0, 10);
+	const num = parseInt(segment, 16);
+	const id36 = num.toString(36).toLowerCase();
+	return id36.slice(0, 8).padStart(6, '0');
 }
 
 function generateDailyUserId(userId) {
-    return generateDailyUserIdForDate(userId, new Date());
+	return generateDailyUserIdForDate(userId, new Date());
 }
 
 // ユーザーごと日替わりの英数字IDを生成（ワッチョイ形式）
@@ -166,142 +162,140 @@ function generateDailyUserId(userId) {
 // DDDD: 毎日切替の日次ID
 
 function generateWacchoi(userId, date = new Date()) {
-    const dateUtc = new Date(date);
+	const dateUtc = new Date(date);
 
-    // --- Weekly ID (Thursday Reset) ---
-    // 1970-01-01 is Thursday.
-    // We can just take Unix Time / (7 days).
-    // However, to ensure it aligns with JST "Thursday 00:00" might be complex,
-    // but strictly speaking 5ch uses a specific logic.
-    // Here we assume UTC Thursday 00:00 reset for simplicity and consistency.
-    const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
-    const weekIndex = Math.floor(dateUtc.getTime() / oneWeekMs);
+	// --- Weekly ID (Thursday Reset) ---
+	// 1970-01-01 is Thursday.
+	// We can just take Unix Time / (7 days).
+	// However, to ensure it aligns with JST "Thursday 00:00" might be complex,
+	// but strictly speaking 5ch uses a specific logic.
+	// Here we assume UTC Thursday 00:00 reset for simplicity and consistency.
+	const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+	const weekIndex = Math.floor(dateUtc.getTime() / oneWeekMs);
 
-    const weeklyHash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:week:${weekIndex}`).digest('hex');
-    // Use first 4 chars, base36 conversion to make it look "ID-like" (alphanumeric)
-    // Parsing hex to int then to base36 ensures valid alphanumeric
-    const weeklySegment = weeklyHash.slice(0, 10);
-    const weeklyNum = parseInt(weeklySegment, 16);
-    const weeklyId = weeklyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
+	const weeklyHash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:week:${weekIndex}`).digest('hex');
+	// Use first 4 chars, base36 conversion to make it look "ID-like" (alphanumeric)
+	// Parsing hex to int then to base36 ensures valid alphanumeric
+	const weeklySegment = weeklyHash.slice(0, 10);
+	const weeklyNum = parseInt(weeklySegment, 16);
+	const weeklyId = weeklyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
 
-    // --- Daily ID (Daily Reset) ---
-    const y = dateUtc.getUTCFullYear();
-    const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(dateUtc.getUTCDate()).padStart(2, '0');
-    const dayKey = `${y}${m}${d}`;
+	// --- Daily ID (Daily Reset) ---
+	const y = dateUtc.getUTCFullYear();
+	const m = String(dateUtc.getUTCMonth() + 1).padStart(2, '0');
+	const d = String(dateUtc.getUTCDate()).padStart(2, '0');
+	const dayKey = `${y}${m}${d}`;
 
-    const dailyHash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:day:${dayKey}`).digest('hex');
-    const dailySegment = dailyHash.slice(0, 10);
-    const dailyNum = parseInt(dailySegment, 16);
-    const dailyId = dailyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
+	const dailyHash = crypto.createHash('sha256').update(`${userId}:${SECRET_SALT}:day:${dayKey}`).digest('hex');
+	const dailySegment = dailyHash.slice(0, 10);
+	const dailyNum = parseInt(dailySegment, 16);
+	const dailyId = dailyNum.toString(36).toLowerCase().slice(0, 4).padStart(4, '0');
 
-    return {
-        full: `${weeklyId}-${dailyId}`,
-        weekly: weeklyId,
-        daily: dailyId
-    };
+	return {
+		full: `${weeklyId}-${dailyId}`,
+		weekly: weeklyId,
+		daily: dailyId,
+	};
 }
-
-
 
 // 画像・動画ファイルの拡張子をチェック
 function isImageOrVideo(attachment) {
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg'];
-    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
-    const extension = attachment.name.toLowerCase().substring(attachment.name.lastIndexOf('.'));
-    return imageExtensions.includes(extension) || videoExtensions.includes(extension);
+	const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg'];
+	const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
+	const extension = attachment.name.toLowerCase().substring(attachment.name.lastIndexOf('.'));
+	return imageExtensions.includes(extension) || videoExtensions.includes(extension);
 }
 
 // ハッシュから「ダサい名前」を生成する関数
 // ハッシュから「ダサい名前」を生成する関数
 function getAnonymousName(dailyId, isElite = false) {
-    const num = parseInt(dailyId, 36);
-    if (isNaN(num)) return '名無しのバグ';
+	const num = parseInt(dailyId, 36);
+	if (isNaN(num)) return '名無しのバグ';
 
-    // すべてのプレフィックスとサフィックスを統合（エリートかどうかに関係なく完全ランダム）
-    const allPrefixes = [...ANONYMOUS_NAMING_PREFIXES, ...ELITE_NAMING_PREFIXES];
-    const allSuffixes = [...ANONYMOUS_NAMING_SUFFIXES, ...ELITE_NAMING_SUFFIXES];
+	// すべてのプレフィックスとサフィックスを統合（エリートかどうかに関係なく完全ランダム）
+	const allPrefixes = [...ANONYMOUS_NAMING_PREFIXES, ...ELITE_NAMING_PREFIXES];
+	const allSuffixes = [...ANONYMOUS_NAMING_SUFFIXES, ...ELITE_NAMING_SUFFIXES];
 
-    const pLen = allPrefixes.length;
-    const sLen = allSuffixes.length;
+	const pLen = allPrefixes.length;
+	const sLen = allSuffixes.length;
 
-    // 偏りを減らすために少し混ぜる
-    const prefixIndex = num % pLen;
-    const suffixIndex = (Math.floor(num / pLen)) % sLen;
+	// 偏りを減らすために少し混ぜる
+	const prefixIndex = num % pLen;
+	const suffixIndex = Math.floor(num / pLen) % sLen;
 
-    return `${allPrefixes[prefixIndex]}${allSuffixes[suffixIndex]}`;
+	return `${allPrefixes[prefixIndex]}${allSuffixes[suffixIndex]}`;
 }
 
 // ワイルドカード対応のワードマッチング関数
 function matchesFilteredWord(text, pattern) {
-    // パターンからワイルドカードを除去して実際のワードを取得
-    const word = pattern.replace(/\*/g, '');
+	// パターンからワイルドカードを除去して実際のワードを取得
+	const word = pattern.replace(/\*/g, '');
 
-    // 空文字列の場合はマッチしない（全ての文字列にマッチしてしまうため）
-    if (!word || word.trim() === '') {
-        return false;
-    }
+	// 空文字列の場合はマッチしない（全ての文字列にマッチしてしまうため）
+	if (!word || word.trim() === '') {
+		return false;
+	}
 
-    // 全角数字を半角数字に変換してから検索
-    const normalizedText = text
-        .replace(/[０-９]/g, (match) => String.fromCharCode(match.charCodeAt(0) - 0xFEE0))
-        .toLowerCase();
-    const normalizedWord = word
-        .replace(/[０-９]/g, (match) => String.fromCharCode(match.charCodeAt(0) - 0xFEE0))
-        .toLowerCase();
+	// 全角数字を半角数字に変換してから検索
+	const normalizedText = text
+		.replace(/[０-９]/g, (match) => String.fromCharCode(match.charCodeAt(0) - 0xfee0))
+		.toLowerCase();
+	const normalizedWord = word
+		.replace(/[０-９]/g, (match) => String.fromCharCode(match.charCodeAt(0) - 0xfee0))
+		.toLowerCase();
 
-    // 大文字小文字を区別せずに検索
-    return normalizedText.includes(normalizedWord);
+	// 大文字小文字を区別せずに検索
+	return normalizedText.includes(normalizedWord);
 }
 
 // フィルタリング対象のワードが含まれているかチェック
 function containsFilteredWords(text) {
-    if (!text) return false;
+	if (!text) return false;
 
-    for (const pattern of FILTERED_WORDS) {
-        if (matchesFilteredWord(text, pattern)) {
-            return true;
-        }
-    }
-    return false;
+	for (const pattern of FILTERED_WORDS) {
+		if (matchesFilteredWord(text, pattern)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // ロールチェック機能
 function hasAllowedRole(member) {
-    if (!member) return false;
-    return member.roles.cache.some(role => ALLOWED_ROLE_IDS.includes(role.id));
+	if (!member) return false;
+	return member.roles.cache.some((role) => ALLOWED_ROLE_IDS.includes(role.id));
 }
 
 // 強制代行投稿ロールチェック機能
 function hasForceProxyRole(member) {
-    if (!member) return false;
-    return member.roles.cache.has(FORCE_PROXY_ROLE_ID);
+	if (!member) return false;
+	return member.roles.cache.has(FORCE_PROXY_ROLE_ID);
 }
 
 async function checkAdmin(member) {
-    if (member.roles.cache.has(ADMIN_ROLE_ID)) return true;
-    if (member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
-    return false;
+	if (member.roles.cache.has(ADMIN_ROLE_ID)) return true;
+	if (member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
+	return false;
 }
 
 module.exports = {
-    isUserInGame,
-    getUserGameType,
-    setUserGame,
-    clearUserGame,
-    isJapaneseHoliday,
-    getHolidayName,
-    getSchoolVacationType,
-    getDayType,
-    generateDailyUserId,
-    generateDailyUserIdForDate,
-    generateWacchoi,
-    isImageOrVideo,
-    containsFilteredWords,
-    hasAllowedRole,
-    hasForceProxyRole,
-    getAnonymousName,
-    logError,
-    logSystem,
-    checkAdmin
+	isUserInGame,
+	getUserGameType,
+	setUserGame,
+	clearUserGame,
+	isJapaneseHoliday,
+	getHolidayName,
+	getSchoolVacationType,
+	getDayType,
+	generateDailyUserId,
+	generateDailyUserIdForDate,
+	generateWacchoi,
+	isImageOrVideo,
+	containsFilteredWords,
+	hasAllowedRole,
+	hasForceProxyRole,
+	getAnonymousName,
+	logError,
+	logSystem,
+	checkAdmin,
 };
