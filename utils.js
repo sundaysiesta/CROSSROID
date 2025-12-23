@@ -237,6 +237,11 @@ function matchesFilteredWord(text, pattern) {
     // パターンからワイルドカードを除去して実際のワードを取得
     const word = pattern.replace(/\*/g, '');
 
+    // 空文字列の場合はマッチしない（全ての文字列にマッチしてしまうため）
+    if (!word || word.trim() === '') {
+        return false;
+    }
+
     // 全角数字を半角数字に変換してから検索
     const normalizedText = text
         .replace(/[０-９]/g, (match) => String.fromCharCode(match.charCodeAt(0) - 0xFEE0))
