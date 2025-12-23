@@ -144,6 +144,23 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
   }
 });
 
+// 404ハンドラー（デバッグ用）
+app.use((req, res) => {
+  console.log(`[404] リクエストが見つかりません: ${req.method} ${req.path}`);
+  console.log(`[404] クエリ:`, req.query);
+  console.log(`[404] ヘッダー:`, req.headers);
+  res.status(404).json({ 
+    error: 'エンドポイントが見つかりません',
+    method: req.method,
+    path: req.path,
+    availableEndpoints: [
+      'GET /',
+      'GET /api/romecoin/:userId',
+      'POST /api/romecoin/:userId/deduct'
+    ]
+  });
+});
+
 // ボットが準備完了したときに一度だけ実行されるイベント
 client.once('clientReady', async (client) => {
   console.log(`Logged in as ${client.user.tag}!`);
