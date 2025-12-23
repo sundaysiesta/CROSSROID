@@ -1,4 +1,3 @@
-// 必要なモジュールをインポート
 const {
 	Client,
 	GatewayIntentBits,
@@ -32,36 +31,13 @@ const highlight = require('./features/highlight');
 const imageLog = require('./features/imageLog');
 const roleAward = require('./features/roleAward');
 const legacyMigration = require('./features/legacyMigration');
+const persistence = require('./features/persistence');
+const activityTracker = require('./features/activityTracker');
+const abuseProtocol = require('./features/abuseProtocol');
 
 // Command Handler
 const { handleCommands } = require('./commands');
-const { clientReady, interactionCreate, messageCreate, messageReactionAdd } = require('./features/romecoin');
-
-// デバッグ用: 環境変数の確認
-console.log('=== 環境変数の確認 ===');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log(
-	'DISCORD_TOKEN:',
-	process.env.DISCORD_TOKEN ? `設定済み (長さ: ${process.env.DISCORD_TOKEN.length})` : '未設定'
-);
-console.log(
-	'GROQ_API_KEY:',
-	process.env.GROQ_API_KEY ? `設定済み (長さ: ${process.env.GROQ_API_KEY.length})` : '未設定'
-);
-console.log('PORT:', process.env.PORT || '3000');
-
-// Discordトークンチェック
-if (process.env.DISCORD_TOKEN) {
-	const token = process.env.DISCORD_TOKEN;
-	if (token.length < 50 || !token.includes('.')) {
-		console.error('❌ Discordトークンの形式が正しくありません。');
-	} else {
-		console.log('✅ Discordトークンの形式は正しく見えます');
-	}
-} else {
-	console.error('❌ DISCORD_TOKENが設定されていません');
-	// エラー終了させずにログを出す（プロセス管理に任せる場合もあるため）
-}
+const romecoin = require('./features/romecoin');
 
 // Discordクライアントのインスタンスを作成
 const client = new Client({
@@ -100,9 +76,6 @@ const authenticateAPI = (req, res, next) => {
 	next();
 };
 
-// ロメコインAPI
-const { getRomecoin, updateRomecoin } = require('./features/romecoin');
-
 // ロメコイン残高を取得
 app.get('/api/romecoin/:userId', authenticateAPI, async (req, res) => {
 	try {
@@ -113,7 +86,7 @@ app.get('/api/romecoin/:userId', authenticateAPI, async (req, res) => {
 			return res.status(400).json({ error: 'ユーザーIDが指定されていません' });
 		}
 
-		const balance = await getRomecoin(userId);
+		const balance = await romecoin.getRomecoin(userId);
 		console.log(`[API] ロメコイン取得成功: userId=${userId}, balance=${balance}`);
 		res.json({ userId, balance });
 	} catch (error) {
@@ -138,7 +111,7 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 		}
 
 		// 現在の残高を確認
-		const currentBalance = await getRomecoin(userId);
+		const currentBalance = await romecoin.getRomecoin(userId);
 		if (currentBalance < amount) {
 			return res.status(400).json({
 				error: 'ロメコインが不足しています',
@@ -149,8 +122,8 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 		}
 
 		// ロメコインを減らす
-		await updateRomecoin(userId, (current) => Math.round((current || 0) - amount));
-		const newBalance = await getRomecoin(userId);
+		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) - amount));
+		const newBalance = await romecoin.getRomecoin(userId);
 
 		res.json({
 			success: true,
@@ -183,7 +156,6 @@ app.use((req, res) => {
 	});
 });
 
-// ボットが準備完了したときに一度だけ実行されるイベント
 client.once('clientReady', async (client) => {
 	console.log(`Logged in as ${client.user.tag}!`);
 	console.log(`CROSSROID, ready for duty.`);
@@ -295,11 +267,10 @@ client.once('clientReady', async (client) => {
 	].map((command) => command.toJSON());
 
 	try {
-		console.log('スラッシュコマンドを登録中...');
 		await client.application.commands.set(commands);
 		console.log('スラッシュコマンドの登録が完了しました！');
-	} catch (error) {
-		console.error('スラッシュコマンドの登録に失敗しました:', error);
+	} catch (e) {
+		console.error('スラッシュコマンドの登録に失敗しました:', e);
 	}
 
 	// 再起動通知を送信
@@ -335,45 +306,33 @@ client.once('clientReady', async (client) => {
 	imageLog.setup(client);
 	roleAward.setup(client);
 	legacyMigration.setup(client);
-
-	// --- CLOUD PERSISTENCE RESTORE ---
-	const persistence = require('./features/persistence');
-	await persistence.restore(client);
 	persistence.startSync(client);
-
-	// --- Feature Setup (Load data after restore) ---
-	const activityTracker = require('./features/activityTracker');
 	activityTracker.start(client);
-
-	// Note: dataBackup is deprecated/removed in favor of persistence
-	// const dataBackup = require('./features/dataBackup');
-	// dataBackup.setup(client);
-	await clientReady(client);
+	await persistence.restore(client);
+	await romecoin.clientReady(client);
 });
 
 // コマンド処理
 client.on('interactionCreate', async (interaction) => {
 	await handleCommands(interaction, client);
-	await interactionCreate(interaction);
+	await romecoin.interactionCreate(interaction);
 });
 
-// ABUSE PROTOCOL MONITOR
 client.on('messageCreate', async (message) => {
-	require('./features/abuseProtocol').handleMessage(message);
-	await messageCreate(message);
+	abuseProtocol.handleMessage(message);
+	await romecoin.messageCreate(message);
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
-	await messageReactionAdd(reaction, user);
+	await romecoin.messageReactionAdd(reaction, user);
 });
 
-// エラーハンドリング（未捕捉の例外）
-process.on('uncaughtException', async (error) => {
-	console.error('【CRASH PREVENTION】Uncaught Exception:', error);
+process.on('uncaughtException', async (error, origin) => {
+	console.error('Uncaught Exception:', error);
 	try {
 		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
 		if (errorlog_channel) {
-			await errorlog_channel.send({ content: error.message }).catch(() => {
+			await errorlog_channel.send({ content: `Uncaught Exception\n\`\`\`${error.stack}\`\`\`` }).catch(() => {
 				// エラーログ送信に失敗しても無視（無限ループを防ぐ）
 			});
 		}
@@ -385,11 +344,12 @@ process.on('uncaughtException', async (error) => {
 });
 
 process.on('unhandledRejection', async (reason, promise) => {
-	console.error('【CRASH PREVENTION】Unhandled Rejection:', reason);
+	console.error('Unhandled Rejection:', reason);
 	try {
 		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
+		const message = reason instanceof Error ? reason.stack : String(reason);
 		if (errorlog_channel) {
-			await errorlog_channel.send({ content: reason.toString() }).catch(() => {
+			await errorlog_channel.send({ content: `Unhandled Rejection\n\`\`\`${message}\`\`\`` }).catch(() => {
 				// エラーログ送信に失敗しても無視（無限ループを防ぐ）
 			});
 		}
