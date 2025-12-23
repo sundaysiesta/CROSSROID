@@ -125,12 +125,27 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) - amount));
 		const newBalance = await romecoin.getRomecoin(userId);
 
+		// Botアカウントにロメコインを追加（部活作成費用など）
+		const botUserId = client.user?.id;
+		if (botUserId) {
+			try {
+				await romecoin.updateRomecoin(botUserId, (current) => Math.round((current || 0) + amount));
+				console.log(`[API] Botアカウントに${amount}ロメコインを追加しました`);
+			} catch (botError) {
+				console.error('[API] Botアカウントへのロメコイン追加エラー:', botError);
+				// Botへの追加が失敗しても、ユーザーからの減額は成功しているので処理は続行
+			}
+		} else {
+			console.warn('[API] client.user.idが利用できません。Botアカウントへのロメコイン追加をスキップします。');
+		}
+
 		res.json({
 			success: true,
 			userId,
 			deducted: amount,
 			previousBalance: currentBalance,
 			newBalance,
+			transferredToBot: botUserId ? amount : 0,
 		});
 	} catch (error) {
 		console.error('[API] ロメコイン減額エラー:', error);
@@ -224,6 +239,7 @@ client.once('clientReady', async (client) => {
 					.setRequired(false)
 			),
 		new SlashCommandBuilder().setName('duel_ranking').setDescription('決闘のランキングを表示します'),
+		new SlashCommandBuilder().setName('janken_ranking').setDescription('じゃんけんのランキングを表示します'),
 		new SlashCommandBuilder()
 			.setName('event_create')
 			.setDescription('イベント用チャンネルを作成し、告知を行います')

@@ -457,6 +457,7 @@ async function interactionCreate(interaction) {
 			// 各データファイルを引き継ぎ
 			const files = [
 				{ file: 'duel_data.json', name: '決闘データ' },
+				{ file: 'janken_data.json', name: 'じゃんけんデータ' },
 				{ file: 'romecoin_data.json', name: 'ロメコインデータ' },
 				{ file: 'activity_data.json', name: 'アクティビティデータ' },
 				{ file: 'custom_cooldowns.json', name: 'クールダウンデータ', prefix: 'battle_' },
@@ -810,6 +811,56 @@ async function interactionCreate(interaction) {
 					await updateData(progress.opponent.id, romecoin_data, (current) =>
 						Math.round((current || 0) + progress.bet)
 					);
+				}
+
+				// じゃんけんの勝敗記録（引き分け以外の場合のみ）
+				if (!isDraw && winner && loser && !winner.bot && !loser.bot) {
+					const fs = require('fs');
+					const path = require('path');
+					const persistence = require('./persistence');
+					const DATA_FILE = path.join(__dirname, '..', 'janken_data.json');
+					let jankenData = {};
+					if (fs.existsSync(DATA_FILE)) {
+						try {
+							jankenData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+						} catch (e) {
+							console.error('じゃんけんデータ読み込みエラー:', e);
+						}
+					}
+
+					// データ引き継ぎ（ID → Notion名）
+					await migrateData(winner.id, jankenData);
+					await migrateData(loser.id, jankenData);
+
+					// 勝者のデータを更新
+					await updateData(winner.id, jankenData, (current) => {
+						const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+						data.wins++;
+						data.streak++;
+						if (data.streak > data.maxStreak) {
+							data.maxStreak = data.streak;
+						}
+						return data;
+					});
+
+					// 敗者のデータを更新
+					await updateData(loser.id, jankenData, (current) => {
+						const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
+						data.losses++;
+						data.streak = 0;
+						return data;
+					});
+
+					try {
+						fs.writeFileSync(DATA_FILE, JSON.stringify(jankenData, null, 2));
+						// Memory storeに保存（clientはinteractionから取得）
+						const client = interaction.client;
+						if (client) {
+							persistence.save(client).catch((err) => console.error('Memory store保存エラー:', err));
+						}
+					} catch (e) {
+						console.error('じゃんけんデータ書き込みエラー:', e);
+					}
 				}
 
 				const resultEmbed = new EmbedBuilder()

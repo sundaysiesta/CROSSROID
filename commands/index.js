@@ -237,6 +237,8 @@ async function handleCommands(interaction, client) {
 			const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
 			// Top Streaks (Current)
 			const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
+			// Top Losses
+			const topLosses = [...players].sort((a, b) => b.losses - a.losses).slice(0, 5);
 
 			const buildLeaderboard = (list, type) => {
 				if (list.length === 0) return 'なし';
@@ -244,7 +246,14 @@ async function handleCommands(interaction, client) {
 					.map((p, i) => {
 						if (!p || !p.discordId) return ''; // nullチェック
 						const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-						const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
+						let val;
+						if (type === 'wins') {
+							val = `${p.wins}勝`;
+						} else if (type === 'losses') {
+							val = `${p.losses}敗`;
+						} else {
+							val = `${p.streak}連勝`;
+						}
 						const display = p.displayName ? `${p.displayName} (<@${p.discordId}>)` : `<@${p.discordId}>`;
 						return `${medal} ${display} (**${val}**)`;
 					})
@@ -257,9 +266,106 @@ async function handleCommands(interaction, client) {
 				.setColor(0xffd700)
 				.addFields(
 					{ name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
+					{ name: '💀 敗北数 Top 5', value: buildLeaderboard(topLosses, 'losses'), inline: true },
 					{ name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
 				)
 				.setFooter({ text: `※ 通常決闘とロシアン・デスマッチの合算戦績です (登録者: ${players.length}人)` })
+				.setTimestamp();
+
+			await interaction.reply({ embeds: [embed] });
+			return;
+		}
+
+		if (interaction.commandName === 'janken_ranking') {
+			const DATA_FILE = path.join(__dirname, '..', 'janken_data.json');
+			const notionManager = require('../features/notion');
+
+			if (!fs.existsSync(DATA_FILE)) {
+				return interaction.reply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('📊 ランキング')
+							.setDescription('データがまだありません。')
+							.setColor(0x2f3136),
+					],
+					ephemeral: true,
+				});
+			}
+
+			let jankenData = {};
+			try {
+				jankenData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+			} catch (e) {
+				console.error(e);
+				return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
+			}
+
+			// Convert object to array & Sanitize
+			const players = (
+				await Promise.all(
+					Object.entries(jankenData).map(async ([key, data]) => {
+						// データが無効な場合はスキップ
+						if (!data || typeof data !== 'object') return null;
+
+						// キーがNotion名かDiscord IDかを判定（数字のみならID、そうでなければNotion名）
+						const isNotionName = !/^\d+$/.test(key);
+						let discordId = key;
+
+						if (isNotionName) {
+							// Notion名からDiscord IDを取得
+							discordId = (await notionManager.getDiscordId(key)) || key;
+						}
+
+						return {
+							key,
+							discordId,
+							displayName: isNotionName ? key : null,
+							wins: Number(data.wins) || 0,
+							streak: Number(data.streak) || 0,
+							losses: Number(data.losses) || 0,
+							maxStreak: Number(data.maxStreak) || 0,
+						};
+					})
+				)
+			).filter((p) => p !== null); // nullを除外
+
+			// Top Wins
+			const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
+			// Top Streaks (Current)
+			const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
+			// Top Losses
+			const topLosses = [...players].sort((a, b) => b.losses - a.losses).slice(0, 5);
+
+			const buildLeaderboard = (list, type) => {
+				if (list.length === 0) return 'なし';
+				return list
+					.map((p, i) => {
+						if (!p || !p.discordId) return ''; // nullチェック
+						const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+						let val;
+						if (type === 'wins') {
+							val = `${p.wins}勝`;
+						} else if (type === 'losses') {
+							val = `${p.losses}敗`;
+						} else {
+							val = `${p.streak}連勝`;
+						}
+						const display = p.displayName ? `${p.displayName} (<@${p.discordId}>)` : `<@${p.discordId}>`;
+						return `${medal} ${display} (**${val}**)`;
+					})
+					.filter((line) => line !== '')
+					.join('\n'); // 空行を除外
+			};
+
+			const embed = new EmbedBuilder()
+				.setTitle('✂️ じゃんけんランキング')
+				.setColor(0xffa500)
+				.addFields(
+					{ name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
+					{ name: '💀 敗北数 Top 5', value: buildLeaderboard(topLosses, 'losses'), inline: true },
+					{ name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
+				)
+				.setFooter({ text: `※ じゃんけんの戦績です (登録者: ${players.length}人)` })
 				.setTimestamp();
 
 			await interaction.reply({ embeds: [embed] });
@@ -2055,13 +2161,22 @@ async function handleCommands(interaction, client) {
 			const topWins = [...players].sort((a, b) => b.wins - a.wins).slice(0, 5);
 			// Top Streaks (Current)
 			const topStreaks = [...players].sort((a, b) => b.streak - a.streak).slice(0, 5);
+			// Top Losses
+			const topLosses = [...players].sort((a, b) => (b.losses || 0) - (a.losses || 0)).slice(0, 5);
 
 			const buildLeaderboard = (list, type) => {
 				if (list.length === 0) return 'なし';
 				return list
 					.map((p, i) => {
 						const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-						const val = type === 'wins' ? `${p.wins}勝` : `${p.streak}連勝`;
+						let val;
+						if (type === 'wins') {
+							val = `${p.wins || 0}勝`;
+						} else if (type === 'losses') {
+							val = `${p.losses || 0}敗`;
+						} else {
+							val = `${p.streak || 0}連勝`;
+						}
 						return `${medal} <@${p.id}> (**${val}**)`;
 					})
 					.join('\n');
@@ -2072,6 +2187,7 @@ async function handleCommands(interaction, client) {
 				.setColor(0xffd700)
 				.addFields(
 					{ name: '🔥 勝利数 Top 5', value: buildLeaderboard(topWins, 'wins'), inline: true },
+					{ name: '💀 敗北数 Top 5', value: buildLeaderboard(topLosses, 'losses'), inline: true },
 					{ name: '⚡ 現在の連勝記録 Top 5', value: buildLeaderboard(topStreaks, 'streak'), inline: true }
 				)
 				.setFooter({ text: '※ 通常決闘とロシアンルーレットの合算戦績です' })
