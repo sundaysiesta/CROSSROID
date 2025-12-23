@@ -258,6 +258,15 @@ client.once('clientReady', async (client) => {
 			.addUserOption((option) => option.setName('user').setDescription('確認したいユーザー')),
 		new SlashCommandBuilder().setName('romecoin_ranking').setDescription('ロメコインランキングを確認します'),
 		new SlashCommandBuilder()
+			.setName('give')
+			.setDescription('ロメコインを他のユーザーに譲渡します（世代ロール必須）')
+			.addUserOption((option) =>
+				option.setName('user').setDescription('ロメコインを受け取るユーザー').setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option.setName('amount').setDescription('譲渡するロメコインの量').setRequired(true)
+			),
+		new SlashCommandBuilder()
 			.setName('janken')
 			.setDescription('じゃんけんを開始します')
 			.addUserOption((option) =>

@@ -501,10 +501,20 @@ async function interactionCreate(interaction) {
 
 			// コマンド実行者のみが操作できるようにチェック
 			if (interaction.user.id !== commandUserId) {
-				return interaction.reply({
-					content: 'このランキングを表示したユーザーのみが操作できます。',
-					ephemeral: true,
-				});
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						return await interaction.reply({
+							content: 'このランキングを表示したユーザーのみが操作できます。',
+							ephemeral: true,
+						});
+					}
+				} catch (error) {
+					if (error.code !== 10062) {
+						// Unknown interaction以外のエラーはログに記録
+						console.error('ランキングボタン応答エラー:', error);
+					}
+				}
+				return;
 			}
 
 			// データを配列に変換
@@ -583,10 +593,19 @@ async function interactionCreate(interaction) {
 				return row;
 			};
 
-			await interaction.update({
-				embeds: [buildRankingEmbed(newPage)],
-				components: totalPages > 1 ? [buildButtons(newPage, commandUserId)] : [],
-			});
+			try {
+				if (!interaction.replied && !interaction.deferred) {
+					await interaction.update({
+						embeds: [buildRankingEmbed(newPage)],
+						components: totalPages > 1 ? [buildButtons(newPage, commandUserId)] : [],
+					});
+				}
+			} catch (error) {
+				if (error.code !== 10062) {
+					// Unknown interaction以外のエラーはログに記録
+					console.error('ランキング更新エラー:', error);
+				}
+			}
 
 			return;
 		}
@@ -595,13 +614,40 @@ async function interactionCreate(interaction) {
 		if (interaction.customId.startsWith('janken_accept_')) {
 			const progress_id = interaction.customId.split('_')[2];
 
+			// progressが存在しない場合はエラー
+			if (!janken_progress_data[progress_id]) {
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('この勝負は既に終了しているか、無効です。')
+							.setColor(0xff0000);
+						return await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					if (error.code !== 10062) {
+						console.error('じゃんけん受諾エラー応答エラー:', error);
+					}
+				}
+				return;
+			}
+
 			// 被爆ロールチェック：被爆ロールがついている人は受諾できない
 			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('被爆ロールがついているため、対戦を受諾できません。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('被爆ロールがついているため、対戦を受諾できません。')
+							.setColor(0xff0000);
+						return await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					if (error.code !== 10062) {
+						console.error('被爆ロールチェック応答エラー:', error);
+					}
+				}
+				return;
 			}
 
 			if (
@@ -690,18 +736,34 @@ async function interactionCreate(interaction) {
 					}, 60000);
 					janken_progress_data[progress_id].timeout_id = timeout_id;
 				} else {
-					const errorEmbed = new EmbedBuilder()
-						.setTitle('❌ エラー')
-						.setDescription('あなたは現在対戦中のため対戦ボードを承諾できません')
-						.setColor(0xff0000);
-					await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					try {
+						if (!interaction.replied && !interaction.deferred) {
+							const errorEmbed = new EmbedBuilder()
+								.setTitle('❌ エラー')
+								.setDescription('あなたは現在対戦中のため対戦ボードを承諾できません')
+								.setColor(0xff0000);
+							await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+						}
+					} catch (error) {
+						if (error.code !== 10062) {
+							console.error('対戦中エラー応答エラー:', error);
+						}
+					}
 				}
 			} else {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('自分自身やロメコインが不足しているユーザーは対戦できません')
-					.setColor(0xff0000);
-				await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('自分自身やロメコインが不足しているユーザーは対戦できません')
+							.setColor(0xff0000);
+						await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					if (error.code !== 10062) {
+						console.error('対戦不可エラー応答エラー:', error);
+					}
+				}
 			}
 		}
 		// jankenボタンインタラクション処理(手選択)
@@ -711,11 +773,20 @@ async function interactionCreate(interaction) {
 
 			// progressが存在しない、または必要なデータが不足している場合はエラー
 			if (!progress || !progress.user) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('この勝負は既に終了しているか、無効です。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('この勝負は既に終了しているか、無効です。')
+							.setColor(0xff0000);
+						return await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					}
+				} catch (error) {
+					if (error.code !== 10062) {
+						console.error('progress存在チェック応答エラー:', error);
+					}
+				}
+				return;
 			}
 
 			// 既に両方の手が選択されている場合は処理しない
@@ -741,7 +812,10 @@ async function interactionCreate(interaction) {
 						await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
 					}
 				} catch (error) {
-					console.error('手選択応答エラー:', error);
+					if (error.code !== 10062) {
+						// Unknown interaction以外のエラーはログに記録
+						console.error('手選択応答エラー:', error);
+					}
 				}
 			}
 			// 対戦相手の手選択処理
@@ -762,20 +836,25 @@ async function interactionCreate(interaction) {
 						await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
 					}
 				} catch (error) {
-					console.error('手選択応答エラー:', error);
+					if (error.code !== 10062) {
+						// Unknown interaction以外のエラーはログに記録
+						console.error('手選択応答エラー:', error);
+					}
 				}
 			} else {
 				// 該当するユーザーではない場合
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('あなたはこの勝負に参加していません。')
-					.setColor(0xff0000);
 				try {
 					if (!interaction.replied && !interaction.deferred) {
-						return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('あなたはこの勝負に参加していません。')
+							.setColor(0xff0000);
+						return await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
 					}
 				} catch (error) {
-					console.error('エラー応答エラー:', error);
+					if (error.code !== 10062) {
+						console.error('参加していないエラー応答エラー:', error);
+					}
 				}
 				return;
 			}
