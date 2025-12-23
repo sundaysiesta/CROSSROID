@@ -98,11 +98,23 @@ const { getRomecoin, updateRomecoin } = require('./features/romecoin');
 app.get('/api/romecoin/:userId', authenticateAPI, async (req, res) => {
   try {
     const userId = req.params.userId;
+    console.log(`[API] ロメコイン取得リクエスト: userId=${userId}`);
+    
+    if (!userId || userId.trim() === '') {
+      return res.status(400).json({ error: 'ユーザーIDが指定されていません' });
+    }
+    
     const balance = await getRomecoin(userId);
+    console.log(`[API] ロメコイン取得成功: userId=${userId}, balance=${balance}`);
     res.json({ userId, balance });
   } catch (error) {
-    console.error('ロメコイン取得エラー:', error);
-    res.status(500).json({ error: 'ロメコインの取得に失敗しました' });
+    console.error('[API] ロメコイン取得エラー:', error);
+    console.error('[API] エラースタック:', error.stack);
+    res.status(500).json({ 
+      error: 'ロメコインの取得に失敗しました',
+      message: error.message,
+      details: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+    });
   }
 });
 
@@ -139,8 +151,13 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
       newBalance
     });
   } catch (error) {
-    console.error('ロメコイン減額エラー:', error);
-    res.status(500).json({ error: 'ロメコインの減額に失敗しました' });
+    console.error('[API] ロメコイン減額エラー:', error);
+    console.error('[API] エラースタック:', error.stack);
+    res.status(500).json({ 
+      error: 'ロメコインの減額に失敗しました',
+      message: error.message,
+      details: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+    });
   }
 });
 

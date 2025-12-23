@@ -827,10 +827,25 @@ function getRomecoinData() {
 }
 
 async function getRomecoin(userId) {
-    return await getData(userId, romecoin_data, 0);
+    try {
+        // romecoin_dataが初期化されていない場合は空オブジェクトを使用
+        const data = romecoin_data || {};
+        const balance = await getData(userId, data, 0);
+        return balance;
+    } catch (error) {
+        console.error('[getRomecoin] エラー:', error);
+        console.error('[getRomecoin] userId:', userId);
+        console.error('[getRomecoin] romecoin_data存在:', !!romecoin_data);
+        // エラーが発生した場合は0を返す（デフォルト値）
+        return 0;
+    }
 }
 
 async function updateRomecoin(userId, updateFn) {
+    // romecoin_dataが初期化されていない場合は初期化
+    if (!romecoin_data) {
+        romecoin_data = {};
+    }
     await migrateData(userId, romecoin_data);
     await updateData(userId, romecoin_data, updateFn);
 }
