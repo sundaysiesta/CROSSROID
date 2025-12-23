@@ -431,19 +431,46 @@ async function interactionCreate(interaction) {
             // 勝敗判定
             if (progress.user_hand && progress.opponent_hand) {
                 clearTimeout(progress.timeout_id);
-                let result = '';
+                let winner = null;
+                let loser = null;
+                let isDraw = false;
+                
                 if (progress.user_hand === progress.opponent_hand) {
-                    result = '引き分け';
+                    isDraw = true;
                 } else if ((progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') || (progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') || (progress.user_hand === 'paper' && progress.opponent_hand === 'rock')) {
-                    result = `${progress.user}の勝利！\n${progress.user}は${ROMECOIN_EMOJI}${progress.bet}を獲得し、${progress.opponent}は${ROMECOIN_EMOJI}${progress.bet}を失いました`;
+                    winner = progress.user;
+                    loser = progress.opponent;
                     await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
                     await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
                 } else {
-                    result = `${progress.opponent}の勝利！\n${progress.opponent}は${ROMECOIN_EMOJI}${progress.bet}を獲得し、${progress.user}は${ROMECOIN_EMOJI}${progress.bet}を失いました`;
+                    winner = progress.opponent;
+                    loser = progress.user;
                     await updateData(progress.user.id, romecoin_data, (current) => Math.round((current || 0) - progress.bet));
                     await updateData(progress.opponent.id, romecoin_data, (current) => Math.round((current || 0) + progress.bet));
                 }
-                await interaction.channel.send({ content: `# 対戦結果\n${progress.user}の手: ${RSPEnum[progress.user_hand]}\n${progress.opponent}の手: ${RSPEnum[progress.opponent_hand]}\n${result}`, components: [] });
+                
+                const resultEmbed = new EmbedBuilder()
+                    .setTitle(isDraw ? '⚖️ じゃんけん引き分け' : '✂️ じゃんけん決着')
+                    .setColor(isDraw ? 0x99AAB5 : 0xFFD700)
+                    .setDescription(`${progress.user} vs ${progress.opponent}`)
+                    .addFields(
+                        { name: `${progress.user.username}`, value: `${RSPEnum[progress.user_hand]}`, inline: true },
+                        { name: `${progress.opponent.username}`, value: `${RSPEnum[progress.opponent_hand]}`, inline: true },
+                        { name: 'ベット', value: `${ROMECOIN_EMOJI}${progress.bet}`, inline: true }
+                    );
+                
+                if (isDraw) {
+                    resultEmbed.addFields(
+                        { name: '結果', value: '引き分け', inline: false }
+                    );
+                } else {
+                    resultEmbed.addFields(
+                        { name: '🏆 勝利者', value: `${winner}`, inline: false },
+                        { name: '獲得/損失', value: `${winner} は ${ROMECOIN_EMOJI}${progress.bet} を獲得\n${loser} は ${ROMECOIN_EMOJI}${progress.bet} を失いました`, inline: false }
+                    );
+                }
+                
+                await interaction.channel.send({ embeds: [resultEmbed], components: [] });
                 delete janken_progress_data[progress_id];
             }
         }

@@ -239,16 +239,21 @@ async function handleCommands(interaction, client) {
             }
 
             // UI
+            const buttonCustomId = isOpenChallenge 
+                ? `russian_accept_${userId}` 
+                : `russian_accept_${userId}_${opponentUser.id}`;
+            
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('russian_accept').setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('🔫'),
-                new ButtonBuilder().setCustomId('russian_deny').setLabel('逃げる').setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId(buttonCustomId).setLabel('受けて立つ').setStyle(ButtonStyle.Danger).setEmoji('🔫')
             );
 
             const embed = new EmbedBuilder()
                 .setTitle('☠️ ロシアン・デスマッチ')
-                .setDescription(`${opponentUser}！\n${interaction.user} から死のゲームへの招待状です。`)
+                .setDescription(isOpenChallenge 
+                    ? `${interaction.user} が誰でも挑戦可能なロシアンルーレットを開始しました。\n\n**誰でも「受けて立つ」ボタンを押して挑戦できます！**`
+                    : `${opponentUser}\n${interaction.user} から死のゲームへの招待です。`)
                 .addFields(
-                    { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に撃つ', inline: false },
+                    { name: 'ルール', value: '1発の実弾が入ったリボルバーを交互に引き金を引く', inline: false },
                     { name: '敗北時', value: '15分 Timeout', inline: false },
                     { name: '勝利時', value: '24時間「上級ロメダ民」', inline: true }
                 )
@@ -256,12 +261,15 @@ async function handleCommands(interaction, client) {
                 .setThumbnail('https://cdn.discordapp.com/emojis/1198240562545954936.webp');
 
             await interaction.reply({
-                content: `${opponentUser}`,
+                content: isOpenChallenge ? null : `${opponentUser}`,
                 embeds: [embed],
                 components: [row]
             });
 
-            const filter = i => i.user.id === opponentUser.id && (i.customId === 'russian_accept' || i.customId === 'russian_deny');
+            // フィルター: 相手が指定されている場合はその人のみ、指定されていない場合は挑戦者以外なら誰でも
+            const filter = isOpenChallenge
+                ? i => i.user.id !== userId && i.customId === buttonCustomId
+                : i => i.user.id === opponentUser.id && (i.customId.startsWith('russian_accept_') || i.customId.startsWith('russian_deny_'));
             const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
 
             // Timeout Handler for Invite (Russian)
@@ -279,17 +287,26 @@ async function handleCommands(interaction, client) {
                 }
             });
             collector.on('collect', async i => {
-                if (i.customId === 'russian_deny') {
-                    await i.update({ content: '🏳️ デスマッチは回避されました。', components: [] });
-                    // Penalty for cowardice: 5 min timeout
-                    /*const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
-                    if (opponentMember && opponentMember.moderatable) {
-                        try {
-                            await opponentMember.timeout(5 * 60 * 1000, 'Russian Cowardice');
-                            await interaction.channel.send(`👮 ${opponentUser} は敵前逃亡罪で5分間拘束されました。`);
-                        } catch (e) { }
-                    }*/
-                    return;
+                // 受諾したユーザーを取得（open challengeの場合）
+                let actualOpponentUser = opponentUser;
+                let actualOpponentMember = null;
+
+                if (isOpenChallenge) {
+                    actualOpponentUser = i.user;
+                    actualOpponentMember = await interaction.guild.members.fetch(actualOpponentUser.id).catch(() => null);
+                    
+                    if (!actualOpponentMember) {
+                        return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
+                    }
+
+                    if (actualOpponentUser.bot) {
+                        return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
+                    }
+                } else {
+                    actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
+                    if (!actualOpponentMember) {
+                        return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+                    }
                 }
 
                 // Start
@@ -302,21 +319,25 @@ async function handleCommands(interaction, client) {
 
                 let state = {
                     current: 0, // Cylinder Index
-                    turn: Math.random() < 0.5 ? userId : opponentUser.id
+                    turn: userId
                 };
 
+                const triggerCustomId = isOpenChallenge
+                    ? `russian_trigger_${userId}_${actualOpponentUser.id}`
+                    : `russian_trigger_${userId}_${opponentUser.id}`;
+
                 const triggerRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('trigger').setLabel('引金を引く').setStyle(ButtonStyle.Danger).setEmoji('💀')
+                    new ButtonBuilder().setCustomId(triggerCustomId).setLabel('引金を引く').setStyle(ButtonStyle.Danger).setEmoji('💀')
                 );
 
                 const gameEmbed = new EmbedBuilder()
                     .setTitle('🎲 ゲーム開始')
-                    .setDescription(`**現在のシリンダー:** ${state.current + 1}/6\n**ターン:** <@${state.turn}>`)
-                    .setColor(0x36393f); // Dark Grey
+                    .setDescription(`${interaction.user} vs ${actualOpponentUser}\n\n最初のターン: <@${state.turn}>`)
+                    .setColor(0xFF0000);
 
                 await i.update({ content: null, embeds: [gameEmbed], components: [triggerRow] });
 
-                const gameFilter = m => (m.user.id === userId || m.user.id === opponentUser.id) && m.customId === 'trigger';
+                const gameFilter = m => m.user.id === state.turn && m.customId === triggerCustomId;
                 const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
 
                 gameCollector.on('collect', async move => {
@@ -328,7 +349,7 @@ async function handleCommands(interaction, client) {
                     if (isHit) {
                         const deathEmbed = new EmbedBuilder()
                             .setTitle('💥 BANG!!!')
-                            .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝者:** ${move.user.id === userId ? opponentUser : interaction.user}`)
+                            .setDescription(`<@${move.user.id}> の頭部が吹き飛びました。\n\n🏆 **勝者:** ${move.user.id === userId ? actualOpponentUser : interaction.user}`)
                             .setColor(0x880000)
                             .setImage('https://media1.tenor.com/m/X215c2D-i_0AAAAC/gun-gunshot.gif'); // Optional: Add visual flair
 
@@ -337,25 +358,31 @@ async function handleCommands(interaction, client) {
 
                         // Process Death
                         const loserId = move.user.id;
-                        const winnerId = loserId === userId ? opponentUser.id : userId;
+                        const winnerId = loserId === userId ? actualOpponentUser.id : userId;
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
                         // Penalty: Timeout
                         if (loserMember) {
-                            // STANDARD TIMEOUT (15m Cap)
-                            let timeoutDuration = 15 * 60 * 1000; // Default 15m
+                            // STANDARD TIMEOUT (10m)
+                            let timeoutDuration = 10 * 60 * 1000; // 10分
+                            const timeoutMinutes = timeoutDuration / 60000;
 
-                            const deathReportEmbed = new EmbedBuilder()
-                                .setTitle('⚰️ 死亡確認')
-                                .setColor(0x000000)
-                                .addFields(
-                                    { name: '処罰', value: `${timeoutDuration / 60000}分間のタイムアウト`, inline: false }
-                                )
-                                .setTimestamp();
-                            interaction.channel.send({ embeds: [deathReportEmbed] });
                             if (loserMember.moderatable) {
-                                loserMember.timeout(timeoutDuration, 'Russian Deathpoints').catch(() => { });
+                                try {
+                                    await loserMember.timeout(timeoutDuration, 'Russian Deathpoints').catch(() => { });
+                                    
+                                    // タイムアウト完了時にメッセージを送信
+                                    setTimeout(async () => {
+                                        try {
+                                            await interaction.channel.send(`⚰️ ${loserMember} は闇に葬られました...`);
+                                        } catch (e) {
+                                            console.error('タイムアウト完了メッセージ送信エラー:', e);
+                                        }
+                                    }, timeoutDuration);
+                                } catch (e) {
+                                    console.error('タイムアウト適用エラー:', e);
+                                }
                             }
                         }
 
@@ -387,7 +414,7 @@ async function handleCommands(interaction, client) {
                     } else {
                         // Miss - Next Turn
                         state.current++;
-                        state.turn = state.turn === userId ? opponentUser.id : userId;
+                        state.turn = state.turn === userId ? actualOpponentUser.id : userId;
                         const nextEmbed = new EmbedBuilder()
                             .setTitle('💨 Click...')
                             .setDescription('セーフです。')
@@ -1116,6 +1143,15 @@ async function handleCommands(interaction, client) {
                     try {
                         await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.user.id === userId ? actualOpponentUser.tag : interaction.user.tag)}`).catch(() => { });
                         timeoutSuccess = true;
+                        
+                        // タイムアウト完了時にメッセージを送信
+                        setTimeout(async () => {
+                            try {
+                                await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
+                            } catch (e) {
+                                console.error('タイムアウト完了メッセージ送信エラー:', e);
+                            }
+                        }, timeoutMs);
                     } catch (e) {
                         console.error('タイムアウト適用エラー:', e);
                     }
@@ -1139,7 +1175,7 @@ async function handleCommands(interaction, client) {
                 }
 
                 await interaction.editReply({ 
-                    content: timeoutSuccess ? `⚰️ ${loser} は闇に葬られました...` : null,
+                    content: null,
                     embeds: [resultEmbed], 
                     components: [] 
                 });
@@ -1286,17 +1322,24 @@ async function handleCommands(interaction, client) {
 
                         // ペナルティ: タイムアウト
                         if (loserMember) {
-                            const deathReportEmbed = new EmbedBuilder()
-                                .setTitle('⚰️ 死亡確認')
-                                .setColor(0x000000)
-                                .addFields(
-                                    { name: '処罰', value: '10分のタイムアウト', inline: false }
-                                )
-                                .setTimestamp();
-                            interaction.channel.send({ embeds: [deathReportEmbed] });
+                            const timeoutMs = 10 * 60 * 1000; // 10分
+                            const timeoutMinutes = timeoutMs / 60000;
+                            
                             if (loserMember.moderatable) {
-                                const timeoutMs = 10 * 60 * 1000; // 10分
-                                loserMember.timeout(timeoutMs, 'Russian Roulette Death').catch(() => { });
+                                try {
+                                    await loserMember.timeout(timeoutMs, 'Russian Roulette Death').catch(() => { });
+                                    
+                                    // タイムアウト完了時にメッセージを送信
+                                    setTimeout(async () => {
+                                        try {
+                                            await interaction.channel.send(`⚰️ ${loserMember} は闇に葬られました...`);
+                                        } catch (e) {
+                                            console.error('タイムアウト完了メッセージ送信エラー:', e);
+                                        }
+                                    }, timeoutMs);
+                                } catch (e) {
+                                    console.error('タイムアウト適用エラー:', e);
+                                }
                             }
                         }
 
