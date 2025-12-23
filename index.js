@@ -25,9 +25,6 @@ if (process.env.NODE_ENV !== 'production') {
 // Config & Constants
 const { LEVEL_10_ROLE_ID, CURRENT_GENERATION_ROLE_ID, MAIN_CHANNEL_ID, ERRORLOG_CHANNEL_ID } = require('./constants');
 
-// --- CONSOLE PROXY SETUP (Redirect all logs to Webhook) ---
-require('./features/consoleProxy').setup();
-
 // Features
 const timeSignal = require('./features/timeSignal');
 const vcNotify = require('./features/vcNotify');
