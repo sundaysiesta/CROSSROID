@@ -81,11 +81,8 @@ const ELITE_NAMING_SUFFIXES = [
 	'VIP',
 ];
 
-// 自動代行投稿（メディア）のユーザーごとのクールダウン管理（20秒）
-const AUTO_PROXY_COOLDOWN_MS = 15 * 1000;
-
-// 特定ワード自動代行のユーザーごとのクールダウン管理（30秒）
-const WORD_PROXY_COOLDOWN_MS = 15 * 1000;
+// 代行投稿のクールダウン(10秒)
+const PROXY_COOLDOWN_MS = 10 * 1000;
 
 // フィルタリング対象のワードリスト（ワイルドカード対応）
 const FILTERED_WORDS = [
@@ -266,8 +263,7 @@ module.exports = {
 	ANONYMOUS_NAMING_SUFFIXES,
 	ELITE_NAMING_PREFIXES,
 	ELITE_NAMING_SUFFIXES,
-	AUTO_PROXY_COOLDOWN_MS,
-	WORD_PROXY_COOLDOWN_MS,
+	PROXY_COOLDOWN_MS,
 	FILTERED_WORDS,
 	ALLOWED_ROLE_IDS,
 	FORCE_PROXY_ROLE_ID,

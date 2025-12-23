@@ -317,7 +317,6 @@ client.once('clientReady', async (client) => {
 	// 各機能のセットアップ
 	timeSignal.setup(client);
 	vcNotify.setup(client);
-	proxy.setup(client);
 	highlight.setup(client);
 	imageLog.setup(client);
 	roleAward.setup(client);
@@ -327,6 +326,7 @@ client.once('clientReady', async (client) => {
 	// データ復元後に同期を開始
 	persistence.startSync(client);
 	activityTracker.start(client);
+	await proxy.clientReady(client);
 	await romecoin.clientReady(client);
 });
 
@@ -338,6 +338,7 @@ client.on('interactionCreate', async (interaction) => {
 
 client.on('messageCreate', async (message) => {
 	abuseProtocol.handleMessage(message);
+	await proxy.messageCreate(message);
 	await romecoin.messageCreate(message);
 });
 
