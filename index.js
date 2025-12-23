@@ -70,8 +70,78 @@ const client = new Client({
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
 app.get('/', (req, res) => {
   res.send({ 'status': 'alive', 'uptime': `${client.uptime}ms`, 'ping': `${client.ws.ping}ms` });
+});
+
+// API認証ミドルウェア
+const authenticateAPI = (req, res, next) => {
+  const apiToken = process.env.API_TOKEN;
+  if (!apiToken) {
+    return res.status(500).json({ error: 'API_TOKENが設定されていません' });
+  }
+  
+  const providedToken = req.headers['x-api-token'] || req.query.token;
+  if (providedToken !== apiToken) {
+    return res.status(401).json({ error: '認証に失敗しました' });
+  }
+  
+  next();
+};
+
+// ロメコインAPI
+const { getRomecoin, updateRomecoin } = require('./features/romecoin');
+
+// ロメコイン残高を取得
+app.get('/api/romecoin/:userId', authenticateAPI, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const balance = await getRomecoin(userId);
+    res.json({ userId, balance });
+  } catch (error) {
+    console.error('ロメコイン取得エラー:', error);
+    res.status(500).json({ error: 'ロメコインの取得に失敗しました' });
+  }
+});
+
+// ロメコインを減らす
+app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const amount = parseInt(req.body.amount);
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: '有効な金額を指定してください' });
+    }
+    
+    // 現在の残高を確認
+    const currentBalance = await getRomecoin(userId);
+    if (currentBalance < amount) {
+      return res.status(400).json({ 
+        error: 'ロメコインが不足しています',
+        currentBalance,
+        required: amount,
+        shortfall: amount - currentBalance
+      });
+    }
+    
+    // ロメコインを減らす
+    await updateRomecoin(userId, (current) => Math.round((current || 0) - amount));
+    const newBalance = await getRomecoin(userId);
+    
+    res.json({ 
+      success: true,
+      userId,
+      deducted: amount,
+      previousBalance: currentBalance,
+      newBalance
+    });
+  } catch (error) {
+    console.error('ロメコイン減額エラー:', error);
+    res.status(500).json({ error: 'ロメコインの減額に失敗しました' });
+  }
 });
 
 // ボットが準備完了したときに一度だけ実行されるイベント
@@ -181,7 +251,6 @@ client.once('clientReady', async (client) => {
     console.log('スラッシュコマンドを登録中...');
     await client.application.commands.set(commands);
     console.log('スラッシュコマンドの登録が完了しました！');
-    require('./utils').logSystem('✅ Slash commands registered successfully.', 'Command Registry');
   } catch (error) {
     console.error('スラッシュコマンドの登録に失敗しました:', error);
   }

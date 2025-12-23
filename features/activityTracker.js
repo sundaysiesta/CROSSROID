@@ -84,7 +84,6 @@ async function backfill(client) {
         if (lastDeepScan > startOfMonthTimestamp && oldestScanDepth <= startOfMonthTimestamp + (60 * 60 * 1000)) {
             const lastScanDate = new Date(lastDeepScan).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo' });
             console.log(`[ActivityTracker] ✅ Skipping Deep Scan (Already scanned this month at ${lastScanDate}).`);
-            require('../utils').logSystem(`⏩ **Backfill Skipped**\nData is fresh (Last Scan: ${lastScanDate}).\nTracking mode: Real-time only (Monthly baseline secured).`, 'ActivityTracker');
             isBackfilling = false;
             return;
         } else {
@@ -107,7 +106,6 @@ async function backfill(client) {
 
     try {
         const dateStr = new Date(startOfMonthTimestamp).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-        require('../utils').logSystem(`🔄 **Activity Backfill Started**\nChannel: **#${channel.name}**\nTarget: Until ${dateStr} (Start of Month)\n(Timestamp: ${startOfMonthTimestamp})`, 'ActivityTracker');
 
         while (loops < MAX_LOOPS) {
             const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
@@ -157,7 +155,6 @@ async function backfill(client) {
                 const progress = Math.round((loops / MAX_LOOPS) * 100);
                 console.log(`[ActivityTracker] Backfill progress: ${loops * 100} msgs`);
                 if (loops % 100 === 0) {
-                    require('../utils').logSystem(`📊 **Backfill Progress**\nScanned: ${loops * 100} / ${LIMIT_MSGS} messages\n(Bots skipped: ${botCount})`, 'ActivityTracker');
                 }
             }
         }
@@ -167,7 +164,6 @@ async function backfill(client) {
             // CRITICAL FIX: If we hit the limit, consider it "Good Enough" for the month.
             // Otherwise it will re-scan forever because it never reaches the 1st.
             oldestReached = startOfMonthTimestamp;
-            require('../utils').logSystem(`⚠️ **Backfill Limit Reached**\nStopped at ${new Date(oldestReached).toLocaleString()}\nMarking as detailed scan complete to prevent loops.`, 'ActivityTracker');
         }
 
         console.log(`[ActivityTracker] Backfill finish. Oldest reached: ${new Date(oldestReached).toLocaleString()}`);
@@ -181,10 +177,8 @@ async function backfill(client) {
         saveData();
         console.log('[ActivityTracker] Backfill complete.');
         const reachedDateStr = new Date(oldestReached).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-        require('../utils').logSystem(`✅ **Activity Backfill Complete**\nTotal Scanned: ~${loops * 100} messages.\n**Found:** ${loops * 100 - botCount} Humans / ${botCount} Bots\nDepth: ${reachedDateStr}\n(Target was: ${dateStr})`, 'ActivityTracker');
     } catch (e) {
         console.error('[ActivityTracker] Backfill error:', e);
-        require('../utils').logError(e, 'ActivityTracker Backfill');
     } finally {
         isBackfilling = false;
     }

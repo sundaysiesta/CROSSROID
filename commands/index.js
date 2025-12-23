@@ -17,6 +17,7 @@ const {
     ADMIN_ROLE_ID,
     TECHTEAM_ROLE_ID,
     OWNER_ROLE_ID,
+    RADIATION_ROLE_ID,
 } = require('../constants');
 const { generateTimeReportMessage } = require('../features/timeSignal');
 const fs = require('fs');
@@ -25,6 +26,7 @@ const { checkAdmin } = require('../utils');
 const persistence = require('../features/persistence');
 const { getData, updateData, migrateData, getDataWithPrefix, setDataWithPrefix } = require('../features/dataAccess');
 const { getRomecoin, updateRomecoin } = require('../features/romecoin');
+const { isUserInGame, setUserGame, clearUserGame } = require('../utils');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 // コマンドごとのクールダウン管理
@@ -213,7 +215,27 @@ async function handleCommands(interaction, client) {
 
         if (interaction.commandName === 'duel_russian') {
             const userId = interaction.user.id;
+            
+            // 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
+            if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+            
+            // 重複実行チェック
+            if (isUserInGame(userId)) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。')
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+            
             const opponentUser = interaction.options.getUser('対戦相手');
+            const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
             const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
             
             // ロメコインチェック
@@ -329,6 +351,15 @@ async function handleCommands(interaction, client) {
                         return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
                     }
 
+                    // 被爆ロールチェック：受諾者が被爆ロールを持っている場合は受諾できない
+                    if (actualOpponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ エラー')
+                            .setDescription('被爆ロールがついているため、対戦を受諾できません。')
+                            .setColor(0xFF0000);
+                        return i.reply({ embeds: [errorEmbed], ephemeral: true });
+                    }
+
                     if (actualOpponentUser.bot) {
                         return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
                     }
@@ -367,6 +398,10 @@ async function handleCommands(interaction, client) {
 
                 await i.update({ content: null, embeds: [gameEmbed], components: [triggerRow] });
 
+                // ゲーム開始：進行状況を記録
+                setUserGame(userId, 'duel_russian', `russian_${userId}_${actualOpponentUser.id}`);
+                setUserGame(actualOpponentUser.id, 'duel_russian', `russian_${userId}_${actualOpponentUser.id}`);
+
                 const gameFilter = m => m.user.id === state.turn && m.customId === triggerCustomId;
                 const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
 
@@ -389,6 +424,11 @@ async function handleCommands(interaction, client) {
                         // Process Death
                         const loserId = move.user.id;
                         const winnerId = loserId === userId ? actualOpponentUser.id : userId;
+                        
+                        // ゲーム終了：進行状況をクリア
+                        clearUserGame(userId);
+                        clearUserGame(actualOpponentUser.id);
+                        
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
@@ -402,14 +442,12 @@ async function handleCommands(interaction, client) {
                                 try {
                                     await loserMember.timeout(timeoutDuration, 'Russian Deathpoints').catch(() => { });
                                     
-                                    // タイムアウト完了時にメッセージを送信
-                                    setTimeout(async () => {
-                                        try {
-                                            await interaction.channel.send(`⚰️ ${loserMember} は闇に葬られました...`);
-                                        } catch (e) {
-                                            console.error('タイムアウト完了メッセージ送信エラー:', e);
-                                        }
-                                    }, timeoutDuration);
+                                    // タイムアウト適用時にメッセージを送信
+                                    try {
+                                        await interaction.channel.send(`⚰️ ${loserMember} は闇に葬られました...`);
+                                    } catch (e) {
+                                        console.error('メッセージ送信エラー:', e);
+                                    }
                                 } catch (e) {
                                     console.error('タイムアウト適用エラー:', e);
                                 }
@@ -638,8 +676,6 @@ async function handleCommands(interaction, client) {
 
             } catch (error) {
                 console.error('イベント作成エラー:', error);
-                const { logError } = require('../utils');
-                await logError(error, 'Event Creation (/event_create)');
 
                 // Safe Reply/Edit attempt
                 try {
@@ -965,6 +1001,25 @@ async function handleCommands(interaction, client) {
     if (interaction.commandName === 'duel') {
         try {
             const userId = interaction.user.id;
+            
+            // 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
+            if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+            
+            // 重複実行チェック
+            if (isUserInGame(userId)) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ エラー')
+                    .setDescription('あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。')
+                    .setColor(0xFF0000);
+                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+            
             const opponentUser = interaction.options.getUser('対戦相手');
             const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
             const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
@@ -1062,6 +1117,15 @@ async function handleCommands(interaction, client) {
                         return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
                     }
 
+                    // 被爆ロールチェック：受諾者が被爆ロールを持っている場合は受諾できない
+                    if (actualOpponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ エラー')
+                            .setDescription('被爆ロールがついているため、対戦を受諾できません。')
+                            .setColor(0xFF0000);
+                        return i.reply({ embeds: [errorEmbed], ephemeral: true });
+                    }
+
                     // 受諾者のロールチェック
                     const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
                     const isOpponentEligible = actualOpponentMember.roles.cache.some(r => romanRegex.test(r.name)) || actualOpponentMember.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
@@ -1115,6 +1179,10 @@ async function handleCommands(interaction, client) {
                     .setColor(0xFFA500);
 
                 await i.update({ content: null, embeds: [startEmbed], components: [] });
+
+                // ゲーム開始：進行状況を記録
+                setUserGame(userId, 'duel', `duel_${userId}_${actualOpponentUser.id}`);
+                setUserGame(actualOpponentUser.id, 'duel', `duel_${userId}_${actualOpponentUser.id}`);
 
                 await new Promise(r => setTimeout(r, 2000));
 
@@ -1189,6 +1257,10 @@ async function handleCommands(interaction, client) {
                     console.error('決闘データ書き込みエラー:', e);
                 }
 
+                // ゲーム終了：進行状況をクリア
+                clearUserGame(userId);
+                clearUserGame(actualOpponentUser.id);
+
                 // 表示用にデータを取得
                 const winnerData = await getData(winner.user.id, duelData, { wins: 0, losses: 0, streak: 0, maxStreak: 0 });
                 resultMsg += `\n📊 **Stats:** ${winner} (${winnerData.streak}連勝中) vs ${loser}`;
@@ -1222,14 +1294,12 @@ async function handleCommands(interaction, client) {
                         await loser.timeout(timeoutMs, `Dueled with ${rollA === rollB ? 'Unknown' : (loser.user.id === userId ? actualOpponentUser.tag : interaction.user.tag)}`).catch(() => { });
                         timeoutSuccess = true;
                         
-                        // タイムアウト完了時にメッセージを送信
-                        setTimeout(async () => {
-                            try {
-                                await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
-                            } catch (e) {
-                                console.error('タイムアウト完了メッセージ送信エラー:', e);
-                            }
-                        }, timeoutMs);
+                        // タイムアウト適用時にメッセージを送信
+                        try {
+                            await interaction.channel.send(`⚰️ ${loser} は闇に葬られました...`);
+                        } catch (e) {
+                            console.error('メッセージ送信エラー:', e);
+                        }
                     } catch (e) {
                         console.error('タイムアウト適用エラー:', e);
                     }
@@ -1264,6 +1334,11 @@ async function handleCommands(interaction, client) {
             collector.on('end', async collected => {
                 if (collected.size === 0) {
                     await interaction.editReply({ content: '⏰ 時間切れで決闘がキャンセルされました。', components: [], embeds: [] });
+                    // タイムアウト時も進行状況をクリア
+                    clearUserGame(userId);
+                    if (opponentUser) {
+                        clearUserGame(opponentUser.id);
+                    }
                 }
             });
 
@@ -1368,6 +1443,15 @@ async function handleCommands(interaction, client) {
                         return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
                     }
 
+                    // 被爆ロールチェック：受諾者が被爆ロールを持っている場合は受諾できない
+                    if (actualOpponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ エラー')
+                            .setDescription('被爆ロールがついているため、対戦を受諾できません。')
+                            .setColor(0xFF0000);
+                        return i.reply({ embeds: [errorEmbed], ephemeral: true });
+                    }
+
                     if (actualOpponentUser.bot) {
                         return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
                     }
@@ -1417,6 +1501,10 @@ async function handleCommands(interaction, client) {
 
                 await i.update({ content: null, embeds: [startEmbed], components: [triggerRow] });
 
+                // ゲーム開始：進行状況を記録
+                setUserGame(userId, 'duel_russian', `russian_${userId}_${actualOpponentUser.id}`);
+                setUserGame(actualOpponentUser.id, 'duel_russian', `russian_${userId}_${actualOpponentUser.id}`);
+
                 const gameFilter = m => m.user.id === state.turn && m.customId === triggerCustomId;
                 const gameCollector = interaction.channel.createMessageComponentCollector({ filter: gameFilter, time: 300000 });
 
@@ -1446,6 +1534,11 @@ async function handleCommands(interaction, client) {
                         // 死亡処理
                         const loserId = move.user.id;
                         const winnerId = loserId === userId ? actualOpponentUser.id : userId;
+                        
+                        // ゲーム終了：進行状況をクリア
+                        clearUserGame(userId);
+                        clearUserGame(actualOpponentUser.id);
+                        
                         const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
                         const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
                         
@@ -1466,14 +1559,12 @@ async function handleCommands(interaction, client) {
                                 try {
                                     await loserMember.timeout(timeoutMs, 'Russian Roulette Death').catch(() => { });
                                     
-                                    // タイムアウト完了時にメッセージを送信
-                                    setTimeout(async () => {
-                                        try {
-                                            await interaction.channel.send(`⚰️ ${loserMember} は闇に葬られました...`);
-                                        } catch (e) {
-                                            console.error('タイムアウト完了メッセージ送信エラー:', e);
-                                        }
-                                    }, timeoutMs);
+                                    // タイムアウト適用時にメッセージを送信
+                                    try {
+                                        await interaction.channel.send(`⚰️ ${loserMember} は闇に葬られました...`);
+                                    } catch (e) {
+                                        console.error('メッセージ送信エラー:', e);
+                                    }
                                 } catch (e) {
                                     console.error('タイムアウト適用エラー:', e);
                                 }
@@ -1540,6 +1631,9 @@ async function handleCommands(interaction, client) {
                 gameCollector.on('end', (c, reason) => {
                     if (reason !== 'death') {
                         interaction.channel.send('⏰ ゲームは時間切れで中断されました。');
+                        // タイムアウト時も進行状況をクリア
+                        clearUserGame(userId);
+                        clearUserGame(actualOpponentUser.id);
                     }
                 });
             });
@@ -1547,6 +1641,11 @@ async function handleCommands(interaction, client) {
             collector.on('end', async collected => {
                 if (collected.size === 0) {
                     await interaction.editReply({ content: '⏰ 時間切れでロシアンルーレットがキャンセルされました。', components: [], embeds: [] });
+                    // タイムアウト時も進行状況をクリア
+                    clearUserGame(userId);
+                    if (opponentUser) {
+                        clearUserGame(opponentUser.id);
+                    }
                 }
             });
 

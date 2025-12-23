@@ -13,56 +13,37 @@ const {
     ANONYMOUS_NAMING_SUFFIXES,
     ELITE_NAMING_PREFIXES,
     ELITE_NAMING_SUFFIXES,
-    ERROR_WEBHOOK_URL,
     ADMIN_ROLE_ID,
     TECHTEAM_ROLE_ID,
 } = require('./constants');
 const { EmbedBuilder } = require('discord.js');
 
+// ゲーム進行状況管理（duel, duel_russian, jankenの重複実行を防ぐ）
+const gameProgressData = new Map(); // userId -> { type: 'duel' | 'duel_russian' | 'janken', progressId: string }
+
+function isUserInGame(userId) {
+    return gameProgressData.has(userId);
+}
+
+function getUserGameType(userId) {
+    const progress = gameProgressData.get(userId);
+    return progress ? progress.type : null;
+}
+
+function setUserGame(userId, type, progressId) {
+    gameProgressData.set(userId, { type, progressId });
+}
+
+function clearUserGame(userId) {
+    gameProgressData.delete(userId);
+}
+
 async function logError(error, context = 'Unknown Context') {
-    if (!ERROR_WEBHOOK_URL) return;
-    try {
-        const errorStack = error.stack || error.message || String(error);
-        // Truncate to avoid 4000 char limit
-        const safeStack = errorStack.length > 3000 ? errorStack.substring(0, 3000) + '...' : errorStack;
-
-        const embed = {
-            title: `🚨 Error in ${context}`,
-            description: `\`\`\`js\n${safeStack}\n\`\`\``,
-            color: 0xFF0000,
-            timestamp: new Date().toISOString(),
-            footer: { text: 'CROSSROID Error Logger' }
-        };
-
-        await fetch(ERROR_WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ embeds: [embed] })
-        });
-    } catch (e) {
-        console.error('Failed to send error webhook:', e);
-    }
+    // Logging disabled - no-op
 }
 
 async function logSystem(message, context = 'System') {
-    if (!ERROR_WEBHOOK_URL) return;
-    try {
-        const embed = {
-            title: `ℹ️ ${context}`,
-            description: message,
-            color: 0x00BFFF, // Deep Sky Blue
-            timestamp: new Date().toISOString(),
-            footer: { text: 'CROSSROID IoT Logger' }
-        };
-
-        await fetch(ERROR_WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ embeds: [embed] })
-        });
-    } catch (e) {
-        console.error('Failed to send system webhook:', e);
-    }
+    // Logging disabled - no-op
 }
 
 // 祝日判定関数
@@ -299,6 +280,10 @@ async function checkAdmin(member) {
 }
 
 module.exports = {
+    isUserInGame,
+    getUserGameType,
+    setUserGame,
+    clearUserGame,
     isJapaneseHoliday,
     getHolidayName,
     getSchoolVacationType,

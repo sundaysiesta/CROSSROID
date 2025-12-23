@@ -1,5 +1,3 @@
-const { logError } = require('../utils');
-
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
 const NOTION_DATABASE_ID = "15499b1436df801e8ef0cc98d897bc80"
 

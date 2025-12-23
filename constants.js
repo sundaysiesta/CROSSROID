@@ -51,7 +51,7 @@ const FILTERED_WORDS = [
     '*ショタ*', '*しょた*',
     '*低年齢*', '*ガキ*', '*子供*', '*まんこ*', '*マンコ*', '*レイプ*', '*セックス*', '*おっぱい*', "BAN", "エプスタイン",
     '*グルーミング*', '*買春*', '*売春*', '*パパ活*', '*ママ活*', '*P活*', '*JKビジネス*',
-    '*家出*', '*泊めて*', '*神待ち*', '*裏垢*', '*オフパコ*', '*セフレ*'
+    '*家出*', '*泊めて*', '*神待ち*', '*裏垢*', '*オフパコ*', '*セフレ*', '*死*','*殺*','*〒*','*市*','*県*','*都*','*町*','*台*','*080*','*090*','*070*','*大麻*','**',
 ];
 
 // 特定のロールIDのリスト（代行投稿をスキップするロール）
@@ -90,11 +90,11 @@ const LEVEL_10_ROLE_ID = '1431905155871281206';
 const CURRENT_GENERATION_ROLE_ID = '1433777496767074386';
 
 // メインチャンネルID (ロメダメイン雑談)
-const MAIN_CHANNEL_ID = '1433798719752638505';
+const MAIN_CHANNEL_ID = '1451866555750158460';
 
 // 時報機能の設定
 const TIME_REPORT_HOURS = [6, 9, 12, 15, 18, 21, 24, 3]; // 24時は0時として扱う
-const TIME_REPORT_CHANNEL_ID = '1433798719752638505';
+const TIME_REPORT_CHANNEL_ID = '1451866555750158460';
 
 // 部活カテゴリID
 const CLUB_CATEGORY_IDS = [
@@ -157,7 +157,7 @@ module.exports = {
     OWNER_ROLE_ID: '1431905156009693195',
     SECRET_SALT: process.env.SECRET_SALT || 'WiJr8dS5IHdtp1KiCKOLrmoE0gMK0Ib8X1NsplGcQfqcj1CUUdy3J3ok7h0Lu4CDPGbYnIxoq27N08OcLrf4IGK8v6aJ68VTnMh6Iymetm4NOvAio4WG7j17IWN7s8CO',
     ELITE_ROLE_ID,
-    ERROR_WEBHOOK_URL: 'https://discord.com/api/webhooks/1451581546816475279/28nAWpCDNJh_ms9yIl-keP2S35WToKLuD_MWHWXF28qnTkdrgSc_7WBKyR5rHR4kI2eG',
     DATABASE_CHANNEL_ID: '1452275340335382629',
-    ERRORLOG_CHANNEL_ID: '1452304385806700595'
+    ERRORLOG_CHANNEL_ID: '1452304385806700595',
+    RADIATION_ROLE_ID: '1431905155913089124' // 被爆ロール
 };
