@@ -1,15 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const { PermissionFlagsBits, ChannelType } = require('discord.js');
-const { ADMIN_ROLE_ID } = require('../constants');
+const { ADMIN_ROLE_ID, DATABASE_CHANNEL_ID } = require('../constants');
 const https = require('https');
 
 // Config
-const CHANNEL_NAME = '🛡️memory-store';
 const FILES = ['activity_data.json', 'custom_cooldowns.json', 'duel_data.json', 'janken_data.json'];
 const SAVE_INTERVAL = 60 * 1000; // 1 min
-
-let storedMessageId = null;
 
 // --- Helper: Download File ---
 function downloadFile(url, destPath) {
@@ -33,36 +30,41 @@ function downloadFile(url, destPath) {
 // --- Core: Restore ---
 async function restore(client) {
 	console.log('[Persistence] Attempting to restore data from Discord...');
-	const guild = client.guilds.cache.first();
-	if (!guild) return;
-
-	const channel = guild.channels.cache.find((c) => c.name === CHANNEL_NAME);
-	if (!channel) {
-		console.log('[Persistence] No memory store channel found. Starting fresh.');
-		return;
-	}
-
+	
 	try {
-		const messages = await channel.messages.fetch({ limit: 1 });
-		const lastMsg = messages.first();
-		if (!lastMsg || lastMsg.attachments.size === 0) {
-			console.log('[Persistence] No data found in memory store.');
-			storedMessageId = lastMsg?.id;
-			return;
-		}
-
-		storedMessageId = lastMsg.id;
-		console.log(`[Persistence] Found save slot: ${storedMessageId}`);
-
-		// Download Attachments
-		for (const [key, attachment] of lastMsg.attachments) {
-			if (FILES.includes(attachment.name)) {
-				const dest = path.join(__dirname, '..', attachment.name);
-				await downloadFile(attachment.url, dest);
-				console.log(`[Persistence] Restored ${attachment.name}`);
+		const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+		const messages = await db_channel.messages.fetch({ limit: 100, cache: false });
+		
+		// 各ファイルについて最新のメッセージを探す
+		const fileMessages = new Map(); // file -> message
+		
+		for (const [msgId, message] of messages) {
+			for (const [attachmentId, attachment] of message.attachments) {
+				if (FILES.includes(attachment.name)) {
+					// まだ見つかっていない、またはより新しいメッセージの場合
+					if (!fileMessages.has(attachment.name) || message.createdTimestamp > fileMessages.get(attachment.name).createdTimestamp) {
+						fileMessages.set(attachment.name, { message, attachment });
+					}
+				}
 			}
 		}
-		console.log('[Persistence] Restoration complete.');
+
+		// 各ファイルを復元
+		for (const [fileName, { message, attachment }] of fileMessages) {
+			const dest = path.join(__dirname, '..', fileName);
+			try {
+				await downloadFile(attachment.url, dest);
+				console.log(`[Persistence] Restored ${fileName} from message ${message.id}`);
+			} catch (e) {
+				console.error(`[Persistence] ファイル復元失敗: ${fileName}`, e);
+			}
+		}
+
+		if (fileMessages.size === 0) {
+			console.log('[Persistence] No data found in database channel.');
+		} else {
+			console.log(`[Persistence] Restoration complete. Restored ${fileMessages.size} file(s).`);
+		}
 	} catch (e) {
 		console.error('[Persistence] Restore failed:', e);
 	}
@@ -71,73 +73,23 @@ async function restore(client) {
 // --- Core: Save ---
 async function save(client) {
 	// console.log('[Persistence] Saving data...');
-	const guild = client.guilds.cache.first();
-	if (!guild) return;
-
-	let channel = guild.channels.cache.find((c) => c.name === CHANNEL_NAME);
-
-	// Create Channel if missing
-	if (!channel) {
-		try {
-			channel = await guild.channels.create({
-				name: CHANNEL_NAME,
-				type: ChannelType.GuildText,
-				permissionOverwrites: [
-					{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-					{ id: ADMIN_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel] },
-					{
-						id: client.user.id,
-						allow: [
-							PermissionFlagsBits.ViewChannel,
-							PermissionFlagsBits.SendMessages,
-							PermissionFlagsBits.AttachFiles,
-						],
-					},
-				],
-				topic: 'SYSTEM MEMORY - AUTO UPDATED. DO NOT TOUCH.',
-			});
-		} catch (e) {
-			console.error('[Persistence] Failed to create channel:', e);
-			return;
-		}
-	}
-
-	// Prepare Files
-	const uploads = [];
-	for (const file of FILES) {
-		const p = path.join(__dirname, '..', file);
-		if (fs.existsSync(p)) {
-			uploads.push({ attachment: p, name: file });
-		}
-	}
-
-	if (uploads.length === 0) return;
-
 	try {
-		// Overwrite strategy: Edit the known message, or send new if missing
-		if (storedMessageId) {
-			try {
-				const msg = await channel.messages.fetch(storedMessageId);
-				await msg.edit({
-					content: `🧠 **System Memory Bank**\nLast Updated: <t:${Math.floor(Date.now() / 1000)}:R>`,
-					files: uploads,
-				});
-				return;
-			} catch (e) {
-				console.warn('[Persistence] Stored message lost, sending new one.');
-				storedMessageId = null;
+		const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+
+		// Prepare Files
+		const uploads = [];
+		for (const file of FILES) {
+			const p = path.join(__dirname, '..', file);
+			if (fs.existsSync(p)) {
+				uploads.push({ attachment: p, name: file });
 			}
 		}
 
-		// Send New
-		const msg = await channel.send({
-			content: `🧠 **System Memory Bank**\nLast Updated: <t:${Math.floor(Date.now() / 1000)}:R>`,
-			files: uploads,
-		});
-		storedMessageId = msg.id;
+		if (uploads.length === 0) return;
 
-		// Cleanup old messages to keep channel clean?
-		// For now, just keeping one is fine.
+		// ロメコインと同じ方式：新しいメッセージとして送信（編集しない）
+		await db_channel.send({ files: uploads });
+		console.log(`[Persistence] Saved ${uploads.length} file(s) to database channel.`);
 	} catch (e) {
 		console.error('[Persistence] Save failed:', e);
 	}
@@ -186,3 +138,4 @@ function startSync(client) {
 }
 
 module.exports = { restore, startSync, save: safeSave };
+

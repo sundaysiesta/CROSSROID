@@ -322,9 +322,11 @@ client.once('clientReady', async (client) => {
 	imageLog.setup(client);
 	roleAward.setup(client);
 	legacyMigration.setup(client);
+	// データ復元を先に実行（保存処理の前に）
+	await persistence.restore(client);
+	// データ復元後に同期を開始
 	persistence.startSync(client);
 	activityTracker.start(client);
-	await persistence.restore(client);
 	await romecoin.clientReady(client);
 });
 
