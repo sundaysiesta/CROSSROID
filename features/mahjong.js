@@ -374,12 +374,12 @@ async function handleResult(interaction, client) {
 			});
 		}
 
-		// 25000点基準で計算
-		const BASE_SCORE = 25000;
+		// 基準点で計算（サンマ: 35000点、四麻: 25000点）
+		const BASE_SCORE = table.gameType === '四麻' ? 25000 : 35000;
 		const scoreDiffs = scores.map((score) => score - BASE_SCORE);
 
-		// 点数整合性チェック（サンマ: 合計75000点、四麻: 合計100000点）
-		const expectedTotal = table.gameType === '四麻' ? 100000 : 75000;
+		// 点数整合性チェック（サンマ: 合計105000点、四麻: 合計100000点）
+		const expectedTotal = table.gameType === '四麻' ? 100000 : 105000;
 		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
 		if (Math.abs(actualTotal - expectedTotal) > 1) {
 			return interaction.reply({
@@ -518,8 +518,8 @@ async function handleEdit(interaction, client) {
 			});
 		}
 
-		// 点数整合性チェック（サンマ: 合計75000点、四麻: 合計100000点）
-		const expectedTotal = table.gameType === '四麻' ? 100000 : 75000;
+		// 点数整合性チェック（サンマ: 合計105000点、四麻: 合計100000点）
+		const expectedTotal = table.gameType === '四麻' ? 100000 : 105000;
 		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
 		if (Math.abs(actualTotal - expectedTotal) > 1) {
 			return interaction.reply({
@@ -528,13 +528,16 @@ async function handleEdit(interaction, client) {
 			});
 		}
 
+		// 基準点で計算（サンマ: 35000点、四麻: 25000点）
+		const BASE_SCORE = table.gameType === '四麻' ? 25000 : 35000;
+
 		// 旧記録のロメコイン変更を元に戻す（既に結果が入力されている場合のみ）
 		if (table.completedAt && table.scoreDiffs && table.scoreDiffs.length > 0) {
 			const oldScoreDiffs = table.scoreDiffs;
 			for (let i = 0; i < allPlayers.length; i++) {
 				const playerId = allPlayers[i];
 				const oldDiff = oldScoreDiffs[i] || 0;
-				const oldRomecoinChange = oldDiff * table.rate;
+				const oldRomecoinChange = Math.round(oldDiff * table.rate);
 
 				// 旧変更を元に戻す
 				const currentBalance = await require('./romecoin').getRomecoin(playerId);
@@ -557,7 +560,6 @@ async function handleEdit(interaction, client) {
 		}
 
 		// 新記録でロメコイン計算と更新
-		const BASE_SCORE = 25000;
 		const scoreDiffs = scores.map((score) => score - BASE_SCORE);
 
 		const results = [];
