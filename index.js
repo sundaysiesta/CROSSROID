@@ -455,6 +455,7 @@ client.once('clientReady', async (client) => {
 		new SlashCommandBuilder().setName('backpack').setDescription('購入済みの商品を確認します'),
 		new SlashCommandBuilder()
 			.setName('stock')
+			.setDescription('株関連のコマンド')
 			.addSubcommand((subcommand) =>
 				subcommand
 					.setName('info')
