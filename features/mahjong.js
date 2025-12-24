@@ -80,6 +80,27 @@ async function createTable(interaction, client) {
 			});
 		}
 
+		// 所持金チェック（-50000を超えている場合は参加不可）
+		const MIN_BALANCE = -50000;
+		const allParticipants = [host, ...players];
+		const balanceChecks = await Promise.all(
+			allParticipants.map(async (participant) => {
+				const balance = await require('./romecoin').getRomecoin(participant.id);
+				return { participant, balance };
+			})
+		);
+
+		const insufficientBalanceUsers = balanceChecks.filter((check) => check.balance <= MIN_BALANCE);
+		if (insufficientBalanceUsers.length > 0) {
+			const userList = insufficientBalanceUsers
+				.map((check) => `<@${check.participant.id}> (${ROMECOIN_EMOJI}${check.balance.toLocaleString()})`)
+				.join('\n');
+			return interaction.reply({
+				content: `所持金が${ROMECOIN_EMOJI}-50,000を超えているため、以下のユーザーは麻雀に参加できません：\n${userList}`,
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
 		const gameType = player3 ? '四麻' : 'サンマ';
 		const tableId = `mahjong_${host.id}_${Date.now()}`;
 
