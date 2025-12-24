@@ -808,6 +808,14 @@ client.on('interactionCreate', async (interaction) => {
 		if (interaction.isButton() && interaction.customId.startsWith('mahjong_cancel_')) {
 			await mahjong.handleCancel(interaction, client);
 		}
+
+		// 借金ボタンインタラクション
+		if (interaction.isButton() && interaction.customId.startsWith('loan_agree_')) {
+			await bank.handleLoanAgreement(interaction, client);
+		}
+		if (interaction.isButton() && interaction.customId.startsWith('loan_cancel_')) {
+			await bank.handleLoanCancel(interaction, client);
+		}
 	} catch (error) {
 		// Unknown interactionエラー（コード10062, 40060）は無視
 		if (error.code === 10062 || error.code === 40060) {

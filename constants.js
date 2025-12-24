@@ -9,8 +9,8 @@ const ANONYMOUS_COOLDOWN_TIERS = [
 	{ limit: Infinity, time: 30 * 60 * 1000 }, // 21回目以降: 30分
 ];
 
-// 「ダサい名札」用の単語リスト
-const ANONYMOUS_NAMING_PREFIXES = [
+// 名札用の単語リスト（ダサい名札と上級名札を統合）
+const NAMING_PREFIXES = [
 	'弱そうな',
 	'陰湿な',
 	'間の抜けた',
@@ -29,26 +29,6 @@ const ANONYMOUS_NAMING_PREFIXES = [
 	'アスペっぽい',
 	'オナニーずっとしてそうな',
 	'ガチゲイ',
-];
-
-const ANONYMOUS_NAMING_SUFFIXES = [
-	'スライム',
-	'ゴブリン',
-	'囚人',
-	'ピエロ',
-	'量産型',
-	'ニート',
-	'オタク',
-	'こどおじ',
-	'ネット弁慶',
-	'かまってちゃん',
-	'被害妄想',
-	'見習い',
-	'モブ',
-	'弱者男性',
-];
-
-const ELITE_NAMING_PREFIXES = [
 	'高貴な',
 	'選ばれし',
 	'優雅な',
@@ -65,7 +45,21 @@ const ELITE_NAMING_PREFIXES = [
 	'エリート',
 ];
 
-const ELITE_NAMING_SUFFIXES = [
+const NAMING_SUFFIXES = [
+	'スライム',
+	'ゴブリン',
+	'囚人',
+	'ピエロ',
+	'量産型',
+	'ニート',
+	'オタク',
+	'こどおじ',
+	'ネット弁慶',
+	'かまってちゃん',
+	'被害妄想',
+	'見習い',
+	'モブ',
+	'弱者男性',
 	'貴族',
 	'騎士',
 	'英雄',
@@ -267,10 +261,13 @@ const RANDOM_MENTION_COOLDOWN_MS = 30 * 1000; // 30秒
 module.exports = {
 	ANONYMOUS_COOLDOWN_MS,
 	ANONYMOUS_COOLDOWN_TIERS,
-	ANONYMOUS_NAMING_PREFIXES,
-	ANONYMOUS_NAMING_SUFFIXES,
-	ELITE_NAMING_PREFIXES,
-	ELITE_NAMING_SUFFIXES,
+	NAMING_PREFIXES,
+	NAMING_SUFFIXES,
+	// 後方互換性のため、旧名もエクスポート
+	ANONYMOUS_NAMING_PREFIXES: NAMING_PREFIXES,
+	ANONYMOUS_NAMING_SUFFIXES: NAMING_SUFFIXES,
+	ELITE_NAMING_PREFIXES: NAMING_PREFIXES,
+	ELITE_NAMING_SUFFIXES: NAMING_SUFFIXES,
 	PROXY_COOLDOWN_MS,
 	FILTERED_WORDS,
 	ALLOWED_ROLE_IDS,

@@ -6,10 +6,8 @@ const {
 	ALLOWED_ROLE_IDS,
 	FORCE_PROXY_ROLE_ID,
 	SECRET_SALT,
-	ANONYMOUS_NAMING_PREFIXES,
-	ANONYMOUS_NAMING_SUFFIXES,
-	ELITE_NAMING_PREFIXES,
-	ELITE_NAMING_SUFFIXES,
+	NAMING_PREFIXES,
+	NAMING_SUFFIXES,
 	ADMIN_ROLE_ID,
 	TECHTEAM_ROLE_ID,
 } = require('./constants');
@@ -197,24 +195,19 @@ function isImageOrVideo(attachment) {
 	return imageExtensions.includes(extension) || videoExtensions.includes(extension);
 }
 
-// ハッシュから「ダサい名前」を生成する関数
-// ハッシュから「ダサい名前」を生成する関数
+// ハッシュから名札を生成する関数（ダサい名札と上級名札を統合）
 function getAnonymousName(dailyId) {
 	const num = parseInt(dailyId, 36);
 	if (isNaN(num)) return '名無しのバグ';
 
-	// すべてのプレフィックスとサフィックスを統合（エリートかどうかに関係なく完全ランダム）
-	const allPrefixes = [...ANONYMOUS_NAMING_PREFIXES, ...ELITE_NAMING_PREFIXES];
-	const allSuffixes = [...ANONYMOUS_NAMING_SUFFIXES, ...ELITE_NAMING_SUFFIXES];
-
-	const pLen = allPrefixes.length;
-	const sLen = allSuffixes.length;
+	const pLen = NAMING_PREFIXES.length;
+	const sLen = NAMING_SUFFIXES.length;
 
 	// 偏りを減らすために少し混ぜる
 	const prefixIndex = num % pLen;
 	const suffixIndex = Math.floor(num / pLen) % sLen;
 
-	return `${allPrefixes[prefixIndex]}${allSuffixes[suffixIndex]}`;
+	return `${NAMING_PREFIXES[prefixIndex]}${NAMING_SUFFIXES[suffixIndex]}`;
 }
 
 // ワイルドカード対応のワードマッチング関数
