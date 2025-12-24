@@ -13,9 +13,6 @@ const {
 	RANDOM_MENTION_COOLDOWN_MS,
 	MAIN_CHANNEL_ID,
 	CURRENT_GENERATION_ROLE_ID,
-	EVENT_CATEGORY_ID,
-	EVENT_NOTIFY_CHANNEL_ID,
-	EVENT_ADMIN_ROLE_ID,
 	HIGHLIGHT_CHANNEL_ID,
 	ELITE_ROLE_ID,
 	ADMIN_ROLE_ID,
@@ -829,207 +826,6 @@ async function handleCommands(interaction, client) {
 			return;
 		}
 
-		if (interaction.commandName === 'event_create') {
-			try {
-				// Robust Defer: Catch 10062 (Unknown Interaction) immediately
-				try {
-					await interaction.deferReply({ flags: 64 }); // 64 = MessageFlags.Ephemeral
-				} catch (deferErr) {
-					if (deferErr.code === 10062 || deferErr.code === 40060) {
-						console.warn('[EventCreate] Interaction expired before defer (10062/40060). Aborting.');
-						return;
-					}
-					throw deferErr; // Re-throw other errors
-				}
-
-				// 権限チェック (管理者 または 特定ロール)
-				const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-				const hasRole = member && member.roles.cache.has(EVENT_ADMIN_ROLE_ID);
-				const isAdmin = member && member.permissions.has(PermissionFlagsBits.Administrator);
-				const isDev = interaction.user.id === '1122179390403510335';
-
-				console.log(
-					`[EventCreate] User: ${interaction.user.id}, Role: ${hasRole}, Admin: ${isAdmin}, Dev: ${isDev}`
-				);
-
-				if (!hasRole && !isAdmin && !isDev) {
-					return interaction.editReply({ content: '⛔ 権限がありません。' });
-				}
-				// Defer was already called at start
-				// await interaction.deferReply({ ephemeral: true }); // Removed redundant call
-
-				const eventName = interaction.options.getString('イベント名');
-				const eventContent = interaction.options.getString('内容');
-				const eventDate = interaction.options.getString('日時') || '未定';
-				const eventPlace = interaction.options.getString('場所') || '未定';
-
-				const guild = interaction.guild;
-				if (!guild) return interaction.editReply('サーバー内でのみ使用可能です。');
-
-				// 1. チャンネル作成
-				// 1. チャンネル作成
-				let newChannel;
-				try {
-					newChannel = await guild.channels.create({
-						name: eventName,
-						type: 0, // GUILD_TEXT
-						parent: EVENT_CATEGORY_ID,
-						topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`,
-						permissionOverwrites: [
-							{
-								id: guild.id, // @everyone
-								allow: [PermissionFlagsBits.ViewChannel],
-								deny: [
-									PermissionFlagsBits.SendMessages,
-									PermissionFlagsBits.EmbedLinks,
-									PermissionFlagsBits.AttachFiles,
-									PermissionFlagsBits.CreatePrivateThreads,
-									PermissionFlagsBits.CreatePublicThreads,
-									PermissionFlagsBits.SendPolls,
-									PermissionFlagsBits.SendMessagesInThreads,
-								],
-							},
-							{
-								id: interaction.user.id, // Host
-								allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-							},
-							{
-								id: ADMIN_ROLE_ID, // Admin Role
-								allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-							},
-							{
-								id: client.user.id, // Bot itself
-								allow: [
-									PermissionFlagsBits.ViewChannel,
-									PermissionFlagsBits.SendMessages,
-									PermissionFlagsBits.EmbedLinks,
-									PermissionFlagsBits.AttachFiles,
-									PermissionFlagsBits.ReadMessageHistory,
-									PermissionFlagsBits.ManageChannels,
-								],
-							},
-						],
-					});
-				} catch (err) {
-					console.error('Channel creation error:', err);
-					if (err.code == 50013) {
-						// Fallback: Create without category
-						console.warn('Category permission missing, creating in root.');
-						try {
-							newChannel = await guild.channels.create({
-								name: eventName,
-								type: 0,
-								// No parent
-								topic: `イベント: ${eventName} | 作成者: ${interaction.user.username} (カテゴリ権限エラーによりルートに作成)`,
-								permissionOverwrites: [
-									{
-										id: guild.id,
-										allow: [PermissionFlagsBits.ViewChannel],
-										deny: [PermissionFlagsBits.SendMessages],
-									},
-									{
-										id: client.user.id,
-										allow: [
-											PermissionFlagsBits.ViewChannel,
-											PermissionFlagsBits.SendMessages,
-											PermissionFlagsBits.Administrator,
-										],
-									},
-								],
-							});
-							await interaction
-								.followUp({
-									content:
-										'⚠️ イベントカテゴリへのアクセス権限がありませんでした。チャンネルをカテゴリ外に作成しました。',
-									ephemeral: true,
-								})
-								.catch((e) => console.error('FollowUp failed:', e));
-						} catch (fallbackErr) {
-							console.error('Fallback creation failed:', fallbackErr);
-							throw fallbackErr;
-						}
-					} else {
-						throw err;
-					}
-				}
-
-				// 2. イベント詳細Embed (新チャンネル用)
-				const detailEmbed = new EmbedBuilder()
-					.setTitle(`📅 イベント: ${eventName}`)
-					.setDescription(eventContent)
-					.addFields(
-						{ name: '⏰ 日時', value: eventDate, inline: true },
-						{ name: '📍 場所', value: eventPlace, inline: true },
-						{ name: '主催者', value: interaction.user.toString(), inline: true }
-					)
-					.setColor(0x00ff00) // Green
-					.setTimestamp()
-					.setFooter({ text: 'CROSSROID Event System', iconURL: client.user.displayAvatarURL() });
-
-				await newChannel.send({
-					content: '新しいイベントが作成されました！',
-					embeds: [detailEmbed],
-				});
-
-				// 3. 告知Embed (告知チャンネル用)
-				const notifyChannel = guild.channels.cache.get(EVENT_NOTIFY_CHANNEL_ID);
-				if (notifyChannel) {
-					const notifyEmbed = new EmbedBuilder()
-						.setTitle('📢 新規イベント開催のお知らせ')
-						.setDescription(
-							`新しいイベント **[${eventName}](${newChannel.url})** が作成されました！\n詳細はリンク先のチャンネルを確認してください。`
-						)
-						.addFields(
-							{
-								name: 'イベント内容',
-								value: eventContent.length > 100 ? eventContent.slice(0, 97) + '...' : eventContent,
-								inline: false,
-							},
-							{ name: '日時', value: eventDate, inline: true },
-							{ name: 'チャンネル', value: newChannel.toString(), inline: true }
-						)
-						.setColor(0xffa500) // Orange
-						.setThumbnail(interaction.user.displayAvatarURL())
-						.setTimestamp();
-
-					try {
-						await notifyChannel.send({ embeds: [notifyEmbed] });
-					} catch (e) {
-						console.error('Failed to send notification:', e);
-						// Continue even if notification fails
-						await interaction
-							.followUp({
-								content:
-									'⚠️ 告知チャンネルへの通知に失敗しました (権限不足)。イベントチャンネルは作成されました。',
-								ephemeral: true,
-							})
-							.catch(() => {});
-					}
-				}
-
-				await interaction.editReply({
-					content: `✅ イベントチャンネルを作成しました: ${newChannel}\n告知メッセージを送信しました。`,
-				});
-			} catch (error) {
-				console.error('イベント作成エラー:', error);
-
-				// Safe Reply/Edit attempt
-				try {
-					if (interaction.deferred || interaction.replied) {
-						await interaction.editReply('イベント作成中にエラーが発生しました。');
-					} else {
-						await interaction.reply({ content: 'イベント作成中にエラーが発生しました。', ephemeral: true });
-					}
-				} catch (replyErr) {
-					// If interaction is dead (10062), ignore.
-					if (replyErr.code !== 10062 && replyErr.code !== 40060) {
-						console.error('Failed to report error to user:', replyErr);
-					}
-				}
-			}
-			return;
-		}
-
 		// === ADMIN SUITE ===
 		const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics', 'activity_backfill'];
 		if (ADMIN_COMMANDS.includes(interaction.commandName)) {
@@ -1375,6 +1171,132 @@ async function handleCommands(interaction, client) {
 						console.error('Backfill Error:', e);
 					});
 				}
+			}
+			return;
+		}
+
+		// === 月間ランキング賞金付与コマンド ===
+		if (interaction.commandName === 'monthly_ranking_rewards') {
+			// 権限チェック
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+			}
+
+			try {
+				await interaction.deferReply({ ephemeral: true });
+
+				// 賞金額の定義（MDファイルの通り）
+				const rewards = {
+					1: 15000,
+					2: 12000,
+					3: 10000,
+					4: 8000,
+					5: 6000,
+					6: 5000,
+					7: 4000,
+					8: 3000,
+					9: 2500,
+					10: 2000,
+				};
+
+				// 1位から10位までのユーザーを取得
+				const rewardsList = [];
+				let totalRewardAmount = 0;
+
+				for (let rank = 1; rank <= 10; rank++) {
+					const user = interaction.options.getUser(`rank${rank}`);
+					if (user) {
+						const rewardAmount = rewards[rank];
+						if (rewardAmount) {
+							rewardsList.push({ rank, user, rewardAmount });
+							totalRewardAmount += rewardAmount;
+						}
+					}
+				}
+
+				if (rewardsList.length === 0) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ 少なくとも1人以上のユーザーを指定してください。'),
+						],
+					});
+				}
+
+				// 各ユーザーにロメコインを付与
+				const results = [];
+				for (const { rank, user, rewardAmount } of rewardsList) {
+					try {
+						await updateRomecoin(user.id, (current) => Math.round((current || 0) + rewardAmount));
+						const newBalance = await getRomecoin(user.id);
+						results.push({
+							rank,
+							user,
+							rewardAmount,
+							newBalance,
+							success: true,
+						});
+					} catch (error) {
+						console.error(`[MonthlyRewards] エラー (${rank}位: ${user.id}):`, error);
+						results.push({
+							rank,
+							user,
+							rewardAmount,
+							success: false,
+							error: error.message,
+						});
+					}
+				}
+
+				// 結果を表示
+				const successCount = results.filter((r) => r.success).length;
+				const failCount = results.filter((r) => !r.success).length;
+
+				const resultEmbed = new EmbedBuilder()
+					.setTitle('✅ 賞金一括付与完了')
+					.setColor(successCount === rewardsList.length ? 0x00ff00 : 0xffa500)
+					.setDescription(
+						`月間ランキング賞金の一括付与を実行しました\n成功: ${successCount}人 / 失敗: ${failCount}人\n合計賞金額: ${ROMECOIN_EMOJI}${totalRewardAmount.toLocaleString()}`
+					);
+
+				// 成功したユーザーの詳細（最大10件）
+				const successResults = results.filter((r) => r.success).slice(0, 10);
+				if (successResults.length > 0) {
+					const details = successResults
+						.map(
+							(r) =>
+								`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+						)
+						.join('\n');
+					resultEmbed.addFields({ name: '付与詳細', value: details, inline: false });
+				}
+
+				// 失敗したユーザーの詳細
+				const failResults = results.filter((r) => !r.success);
+				if (failResults.length > 0) {
+					const failDetails = failResults
+						.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
+						.join('\n');
+					resultEmbed.addFields({ name: '❌ エラー', value: failDetails, inline: false });
+				}
+
+				resultEmbed.setTimestamp();
+
+				await interaction.editReply({ embeds: [resultEmbed] });
+			} catch (error) {
+				console.error('月間ランキング賞金付与エラー:', error);
+				await interaction.editReply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setColor(0xff0000)
+							.setDescription(`賞金付与中にエラーが発生しました: ${error.message}`),
+					],
+				});
+			}
+			return;
+		}
 			} catch (error) {
 				console.error('Admin Command Error:', error);
 				await interaction.editReply({
@@ -1383,6 +1305,129 @@ async function handleCommands(interaction, client) {
 							.setTitle('Admin Error')
 							.setColor(0xff0000)
 							.setDescription(`⚠ エラーが発生しました: ${error.message}`),
+					],
+				});
+			}
+			return;
+		}
+
+		// === 人気者選手権賞金付与コマンド ===
+		if (interaction.commandName === 'popularity_championship_rewards') {
+			// 権限チェック
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+			}
+
+			try {
+				await interaction.deferReply({ ephemeral: true });
+
+				// 月間ランキングの賞金額の2倍（MDファイルの通り）
+				const rewards = {
+					1: 30000, // 15,000 × 2
+					2: 24000, // 12,000 × 2
+					3: 20000, // 10,000 × 2
+					4: 16000, // 8,000 × 2
+					5: 12000, // 6,000 × 2
+					6: 10000, // 5,000 × 2
+					7: 8000, // 4,000 × 2
+					8: 6000, // 3,000 × 2
+					9: 5000, // 2,500 × 2
+					10: 4000, // 2,000 × 2
+				};
+
+				// 1位から10位までのユーザーを取得
+				const rewardsList = [];
+				let totalRewardAmount = 0;
+
+				for (let rank = 1; rank <= 10; rank++) {
+					const user = interaction.options.getUser(`rank${rank}`);
+					if (user) {
+						const rewardAmount = rewards[rank];
+						if (rewardAmount) {
+							rewardsList.push({ rank, user, rewardAmount });
+							totalRewardAmount += rewardAmount;
+						}
+					}
+				}
+
+				if (rewardsList.length === 0) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ 少なくとも1人以上のユーザーを指定してください。'),
+						],
+					});
+				}
+
+				// 各ユーザーにロメコインを付与
+				const results = [];
+				for (const { rank, user, rewardAmount } of rewardsList) {
+					try {
+						await updateRomecoin(user.id, (current) => Math.round((current || 0) + rewardAmount));
+						const newBalance = await getRomecoin(user.id);
+						results.push({
+							rank,
+							user,
+							rewardAmount,
+							newBalance,
+							success: true,
+						});
+					} catch (error) {
+						console.error(`[PopularityChampionshipRewards] エラー (${rank}位: ${user.id}):`, error);
+						results.push({
+							rank,
+							user,
+							rewardAmount,
+							success: false,
+							error: error.message,
+						});
+					}
+				}
+
+				// 結果を表示
+				const successCount = results.filter((r) => r.success).length;
+				const failCount = results.filter((r) => !r.success).length;
+
+				const resultEmbed = new EmbedBuilder()
+					.setTitle('✅ 人気者選手権賞金一括付与完了')
+					.setColor(successCount === rewardsList.length ? 0x00ff00 : 0xffa500)
+					.setDescription(
+						`人気者選手権賞金の一括付与を実行しました\n成功: ${successCount}人 / 失敗: ${failCount}人\n合計賞金額: ${ROMECOIN_EMOJI}${totalRewardAmount.toLocaleString()}`
+					);
+
+				// 成功したユーザーの詳細（最大10件）
+				const successResults = results.filter((r) => r.success).slice(0, 10);
+				if (successResults.length > 0) {
+					const details = successResults
+						.map(
+							(r) =>
+								`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+						)
+						.join('\n');
+					resultEmbed.addFields({ name: '付与詳細', value: details, inline: false });
+				}
+
+				// 失敗したユーザーの詳細
+				const failResults = results.filter((r) => !r.success);
+				if (failResults.length > 0) {
+					const failDetails = failResults
+						.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
+						.join('\n');
+					resultEmbed.addFields({ name: '❌ エラー', value: failDetails, inline: false });
+				}
+
+				resultEmbed.setTimestamp();
+
+				await interaction.editReply({ embeds: [resultEmbed] });
+			} catch (error) {
+				console.error('人気者選手権賞金付与エラー:', error);
+				await interaction.editReply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setColor(0xff0000)
+							.setDescription(`賞金付与中にエラーが発生しました: ${error.message}`),
 					],
 				});
 			}
@@ -2305,96 +2350,6 @@ async function handleCommands(interaction, client) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });
 			}
 			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
-		}
-		return;
-	}
-
-	// event_create コマンド
-	if (interaction.commandName === 'event_create') {
-		try {
-			// 権限チェック (管理者 または 特定ロール)
-			const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-			const hasRole = member && member.roles.cache.has(EVENT_ADMIN_ROLE_ID);
-			const isAdmin = member && member.permissions.has(PermissionFlagsBits.Administrator);
-			const isDev = interaction.user.id === '1122179390403510335';
-
-			console.log(
-				`[EventCreate] User: ${interaction.user.id}, Role: ${hasRole}, Admin: ${isAdmin}, Dev: ${isDev}`
-			);
-
-			if (!hasRole && !isAdmin && !isDev) {
-				return interaction.reply({ content: 'このコマンドを実行する権限がありません。', ephemeral: true });
-			}
-
-			await interaction.deferReply({ ephemeral: true });
-
-			const eventName = interaction.options.getString('イベント名');
-			const eventContent = interaction.options.getString('内容');
-			const eventDate = interaction.options.getString('日時') || '未定';
-			const eventPlace = interaction.options.getString('場所') || '未定';
-
-			const guild = interaction.guild;
-			if (!guild) return interaction.editReply('サーバー内でのみ使用可能です。');
-
-			// 1. チャンネル作成
-			const newChannel = await guild.channels.create({
-				name: eventName,
-				type: 0, // GUILD_TEXT
-				parent: EVENT_CATEGORY_ID,
-				topic: `イベント: ${eventName} | 作成者: ${interaction.user.username}`,
-			});
-
-			// 2. イベント詳細Embed (新チャンネル用)
-			const detailEmbed = new EmbedBuilder()
-				.setTitle(`📅 イベント: ${eventName}`)
-				.setDescription(eventContent)
-				.addFields(
-					{ name: '⏰ 日時', value: eventDate, inline: true },
-					{ name: '📍 場所', value: eventPlace, inline: true },
-					{ name: '主催者', value: interaction.user.toString(), inline: true }
-				)
-				.setColor(0x00ff00) // Green
-				.setTimestamp()
-				.setFooter({ text: 'CROSSROID Event System', iconURL: client.user.displayAvatarURL() });
-
-			await newChannel.send({
-				content: '@everyone 新しいイベントが作成されました！',
-				embeds: [detailEmbed],
-			});
-
-			// 3. 告知Embed (告知チャンネル用)
-			const notifyChannel = guild.channels.cache.get(EVENT_NOTIFY_CHANNEL_ID);
-			if (notifyChannel) {
-				const notifyEmbed = new EmbedBuilder()
-					.setTitle('📢 新規イベント開催のお知らせ')
-					.setDescription(
-						`新しいイベント **[${eventName}](${newChannel.url})** が作成されました！\n詳細はリンク先のチャンネルを確認してください。`
-					)
-					.addFields(
-						{
-							name: 'イベント内容',
-							value: eventContent.length > 100 ? eventContent.slice(0, 97) + '...' : eventContent,
-							inline: false,
-						},
-						{ name: '日時', value: eventDate, inline: true },
-						{ name: 'チャンネル', value: newChannel.toString(), inline: true }
-					)
-					.setColor(0xffa500) // Orange
-					.setThumbnail(interaction.user.displayAvatarURL())
-					.setTimestamp();
-
-				await notifyChannel.send({ embeds: [notifyEmbed] });
-			}
-
-			await interaction.editReply({
-				content: `✅ イベントチャンネルを作成しました: ${newChannel}\n告知メッセージを送信しました。`,
-			});
-		} catch (error) {
-			console.error('イベント作成エラー:', error);
-			if (interaction.deferred || interaction.replied) {
-				return interaction.editReply('イベント作成中にエラーが発生しました。');
-			}
-			return interaction.reply({ content: 'イベント作成中にエラーが発生しました。', ephemeral: true });
 		}
 		return;
 	}

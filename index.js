@@ -241,18 +241,6 @@ client.once('clientReady', async (client) => {
 		new SlashCommandBuilder().setName('duel_ranking').setDescription('決闘のランキングを表示します'),
 		new SlashCommandBuilder().setName('janken_ranking').setDescription('じゃんけんのランキングを表示します'),
 		new SlashCommandBuilder()
-			.setName('event_create')
-			.setDescription('イベント用チャンネルを作成し、告知を行います')
-			.addStringOption((option) =>
-				option
-					.setName('イベント名')
-					.setDescription('イベントのタイトル（チャンネル名になります）')
-					.setRequired(true)
-			)
-			.addStringOption((option) => option.setName('内容').setDescription('イベントの詳細内容').setRequired(true))
-			.addStringOption((option) => option.setName('日時').setDescription('開催日時（任意）'))
-			.addStringOption((option) => option.setName('場所').setDescription('開催場所')),
-		new SlashCommandBuilder()
 			.setName('romecoin')
 			.setDescription('ロメコインの所持数を確認します')
 			.addUserOption((option) => option.setName('user').setDescription('確認したいユーザー')),
@@ -288,6 +276,32 @@ client.once('clientReady', async (client) => {
 			.addUserOption((option) =>
 				option.setName('user').setDescription('引き継ぎ対象のユーザー').setRequired(true)
 			),
+		new SlashCommandBuilder()
+			.setName('monthly_ranking_rewards')
+			.setDescription('月間ランキングの上位10人に賞金を一括付与します（運営専用）')
+			.addUserOption((option) => option.setName('rank1').setDescription('1位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank2').setDescription('2位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank3').setDescription('3位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank4').setDescription('4位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank5').setDescription('5位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank6').setDescription('6位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank7').setDescription('7位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank8').setDescription('8位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank9').setDescription('9位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank10').setDescription('10位のユーザー').setRequired(false)),
+		new SlashCommandBuilder()
+			.setName('popularity_championship_rewards')
+			.setDescription('人気者選手権の上位10人に賞金を一括付与します（運営専用）')
+			.addUserOption((option) => option.setName('rank1').setDescription('1位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank2').setDescription('2位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank3').setDescription('3位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank4').setDescription('4位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank5').setDescription('5位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank6').setDescription('6位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank7').setDescription('7位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank8').setDescription('8位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank9').setDescription('9位のユーザー').setRequired(false))
+			.addUserOption((option) => option.setName('rank10').setDescription('10位のユーザー').setRequired(false)),
 		new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message),
 	].map((command) => command.toJSON());
 
