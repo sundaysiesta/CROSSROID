@@ -34,7 +34,6 @@ const legacyMigration = require('./features/legacyMigration');
 const persistence = require('./features/persistence');
 const activityTracker = require('./features/activityTracker');
 const abuseProtocol = require('./features/abuseProtocol');
-const stock = require('./features/stock');
 const daily = require('./features/daily');
 const bank = require('./features/bank');
 

@@ -120,8 +120,7 @@ async function createTable(interaction, client) {
 			});
 		}
 
-		// 所持金チェック（-50000を超えている場合は参加不可）
-		const MIN_BALANCE = -50000;
+		// 所持金チェック（マイナスの場合は参加不可）
 		const balanceChecks = await Promise.all(
 			allParticipants.map(async (participant) => {
 				const balance = await require('./romecoin').getRomecoin(participant.id);
@@ -129,13 +128,13 @@ async function createTable(interaction, client) {
 			})
 		);
 
-		const insufficientBalanceUsers = balanceChecks.filter((check) => check.balance <= MIN_BALANCE);
+		const insufficientBalanceUsers = balanceChecks.filter((check) => check.balance < 0);
 		if (insufficientBalanceUsers.length > 0) {
 			const userList = insufficientBalanceUsers
 				.map((check) => `<@${check.participant.id}> (${ROMECOIN_EMOJI}${check.balance.toLocaleString()})`)
 				.join('\n');
 			return interaction.reply({
-				content: `所持金が${ROMECOIN_EMOJI}-50,000を超えているため、以下のユーザーは麻雀に参加できません：\n${userList}`,
+				content: `所持金がマイナスのため、以下のユーザーは麻雀に参加できません：\n${userList}`,
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
@@ -276,6 +275,15 @@ async function handleAgreement(interaction, client) {
 		if (table.agreedPlayers.includes(playerId)) {
 			return interaction.reply({
 				content: 'あなたは既に同意しています。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		// 所持金チェック（マイナスの場合は同意不可）
+		const balance = await require('./romecoin').getRomecoin(interaction.user.id);
+		if (balance < 0) {
+			return interaction.reply({
+				content: `所持金がマイナス(${ROMECOIN_EMOJI}${balance.toLocaleString()})のため、同意できません。`,
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
