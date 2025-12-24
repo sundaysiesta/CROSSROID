@@ -184,22 +184,34 @@ async function interactionCreate(interaction) {
 				ephemeral: false,
 			});
 		} else if (interaction.commandName === 'janken') {
+			// 既に応答済みの場合は処理をスキップ
+			if (interaction.replied || interaction.deferred) {
+				return;
+			}
+
 			const bet = interaction.options.getInteger('bet') ? interaction.options.getInteger('bet') : 100;
-			if (bet < 100)
-				return interaction.reply({
-					content: 'ベットは100以上の整数で指定してください',
-					flags: [MessageFlags.Ephemeral],
-				});
+			if (bet < 100) {
+				if (!interaction.replied && !interaction.deferred) {
+					return interaction.reply({
+						content: 'ベットは100以上の整数で指定してください',
+						flags: [MessageFlags.Ephemeral],
+					}).catch(() => {});
+				}
+				return;
+			}
 
 			// 重複実行チェック（最初にチェック）
 			if (isUserInGame(interaction.user.id)) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription(
-						'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
-					)
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+				if (!interaction.replied && !interaction.deferred) {
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription(
+							'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
+						)
+						.setColor(0xff0000);
+					return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+				}
+				return;
 			}
 
 			// 即座にロックをかける（重複対戦を防ぐ）
@@ -210,11 +222,14 @@ async function interactionCreate(interaction) {
 				// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
 				if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
 					clearUserGame(interaction.user.id);
-					const errorEmbed = new EmbedBuilder()
-						.setTitle('❌ エラー')
-						.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
-						.setColor(0xff0000);
-					return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+					if (!interaction.replied && !interaction.deferred) {
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+							.setColor(0xff0000);
+						return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+					}
+					return;
 				}
 
 			if (
@@ -234,19 +249,22 @@ async function interactionCreate(interaction) {
 							const botRomecoin = await getData(interaction.client.user.id, romecoin_data, 0);
 							if (botRomecoin < bet) {
 								clearUserGame(interaction.user.id);
-								const errorEmbed = new EmbedBuilder()
-									.setTitle('❌ エラー')
-									.setDescription('クロスロイドのロメコインが不足しています')
-									.addFields(
-										{
-											name: 'クロスロイドの現在の所持ロメコイン',
-											value: `${ROMECOIN_EMOJI}${botRomecoin}`,
-											inline: true,
-										},
-										{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
-									)
-									.setColor(0xff0000);
-								return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+								if (!interaction.replied && !interaction.deferred) {
+									const errorEmbed = new EmbedBuilder()
+										.setTitle('❌ エラー')
+										.setDescription('クロスロイドのロメコインが不足しています')
+										.addFields(
+											{
+												name: 'クロスロイドの現在の所持ロメコイン',
+												value: `${ROMECOIN_EMOJI}${botRomecoin}`,
+												inline: true,
+											},
+											{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+										)
+										.setColor(0xff0000);
+									return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+								}
+								return;
 							}
 							
 							// 手選択ボタンを表示
@@ -280,12 +298,27 @@ async function interactionCreate(interaction) {
 								.setColor(0xffa500)
 								.setThumbnail(interaction.user.displayAvatarURL());
 
+							if (interaction.replied || interaction.deferred) {
+								clearUserGame(interaction.user.id);
+								return;
+							}
+
 							const replyMessage = await interaction.reply({
 								content: `${opponent}`,
 								embeds: [embed],
 								components: [row],
 								fetchReply: true,
+							}).catch((error) => {
+								clearUserGame(interaction.user.id);
+								if (error.code !== 10062 && error.code !== 40060) {
+									console.error('[Janken] 応答エラー:', error);
+								}
+								return null;
 							});
+
+							if (!replyMessage) {
+								return;
+							}
 							janken_progress_data[progress_id] = {
 								user: interaction.user,
 								opponent: opponent,
@@ -302,11 +335,15 @@ async function interactionCreate(interaction) {
 							// 被爆ロールチェック：対戦相手が被爆ロールを持っている場合は挑戦できない
 							const opponentMember = await interaction.guild.members.fetch(opponent.id).catch(() => null);
 							if (opponentMember && opponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
-								const errorEmbed = new EmbedBuilder()
-									.setTitle('❌ エラー')
-									.setDescription('対戦相手が被爆ロールを持っているため、挑戦できません。')
-									.setColor(0xff0000);
-								return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+								clearUserGame(interaction.user.id);
+								if (!interaction.replied && !interaction.deferred) {
+									const errorEmbed = new EmbedBuilder()
+										.setTitle('❌ エラー')
+										.setDescription('対戦相手が被爆ロールを持っているため、挑戦できません。')
+										.setColor(0xff0000);
+									return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+								}
+								return;
 							}
 
 							if ((await getData(opponent.id, romecoin_data, 0)) >= bet) {
@@ -345,12 +382,27 @@ async function interactionCreate(interaction) {
 									.setColor(0xffa500)
 									.setThumbnail(interaction.user.displayAvatarURL());
 
+								if (interaction.replied || interaction.deferred) {
+									clearUserGame(interaction.user.id);
+									return;
+								}
+
 								const select_message = await interaction.reply({
 									content: `${opponent}`,
 									embeds: [embed],
 									components: [row],
 									fetchReply: true,
+								}).catch((error) => {
+									clearUserGame(interaction.user.id);
+									if (error.code !== 10062 && error.code !== 40060) {
+										console.error('[Janken] 応答エラー:', error);
+									}
+									return null;
 								});
+
+								if (!select_message) {
+									return;
+								}
 
 								// ゲーム開始：進行状況を記録
 								setUserGame(interaction.user.id, 'janken', progress_id);
@@ -383,26 +435,32 @@ async function interactionCreate(interaction) {
 									message: select_message,
 								};
 							} else {
-								const errorEmbed = new EmbedBuilder()
-									.setTitle('❌ エラー')
-									.setDescription(`対戦相手のロメコインが不足しています`)
-									.addFields(
-										{
-											name: `${opponent}の現在の所持ロメコイン`,
-											value: `${ROMECOIN_EMOJI}${await getData(opponent.id, romecoin_data, 0)}`,
-											inline: true,
-										},
-										{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
-									)
-									.setColor(0xff0000);
-								await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+								clearUserGame(interaction.user.id);
+								if (!interaction.replied && !interaction.deferred) {
+									const errorEmbed = new EmbedBuilder()
+										.setTitle('❌ エラー')
+										.setDescription(`対戦相手のロメコインが不足しています`)
+										.addFields(
+											{
+												name: `${opponent}の現在の所持ロメコイン`,
+												value: `${ROMECOIN_EMOJI}${await getData(opponent.id, romecoin_data, 0)}`,
+												inline: true,
+											},
+											{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+										)
+										.setColor(0xff0000);
+									await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+								}
 							}
 						} else {
-							const errorEmbed = new EmbedBuilder()
-								.setTitle('❌ エラー')
-								.setDescription('自分自身やクロスロイド以外のBotと対戦することはできません')
-								.setColor(0xff0000);
-							await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+							clearUserGame(interaction.user.id);
+							if (!interaction.replied && !interaction.deferred) {
+								const errorEmbed = new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setDescription('自分自身やクロスロイド以外のBotと対戦することはできません')
+									.setColor(0xff0000);
+								await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+							}
 						}
 					}
 					// 対戦相手が指定されていない場合は対戦募集ボードを表示
@@ -426,12 +484,27 @@ async function interactionCreate(interaction) {
 							.setColor(0xffa500)
 							.setThumbnail(interaction.user.displayAvatarURL());
 
+						if (interaction.replied || interaction.deferred) {
+							clearUserGame(interaction.user.id);
+							return;
+						}
+
 						const replyMessage = await interaction.reply({
 							content: null,
 							embeds: [embed],
 							components: [row],
 							fetchReply: true,
+						}).catch((error) => {
+							clearUserGame(interaction.user.id);
+							if (error.code !== 10062 && error.code !== 40060) {
+								console.error('[Janken] 応答エラー:', error);
+							}
+							return null;
 						});
+
+						if (!replyMessage) {
+							return;
+						}
 						// ゲーム開始：進行状況を記録（募集段階）
 						setUserGame(interaction.user.id, 'janken', progress_id);
 						const timeout_id = setTimeout(async () => {
@@ -493,7 +566,25 @@ async function interactionCreate(interaction) {
 			}
 			} catch (error) {
 				clearUserGame(interaction.user.id);
+				// Unknown interactionエラー（コード10062, 40060）は無視
+				if (error.code === 10062 || error.code === 40060) {
+					return;
+				}
 				console.error('jankenコマンドエラー:', error);
+				// エラーが発生した場合、まだ応答していなければエラーメッセージを送信
+				if (!interaction.replied && !interaction.deferred) {
+					try {
+						await interaction.reply({
+							content: 'エラーが発生しました。',
+							flags: [MessageFlags.Ephemeral],
+						}).catch(() => {});
+					} catch (replyError) {
+						// 応答エラーも無視（インタラクションが既に期限切れの可能性）
+						if (replyError.code !== 10062 && replyError.code !== 40060) {
+							console.error('[Janken] 応答エラー:', replyError);
+						}
+					}
+				}
 				// Unknown interactionエラー（コード10062）は無視（インタラクションが既に期限切れ）
 				if (error.code === 10062 || error.code === 40060) {
 					return;
