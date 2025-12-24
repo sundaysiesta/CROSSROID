@@ -263,6 +263,9 @@ function hasForceProxyRole(member) {
 }
 
 async function checkAdmin(member) {
+	if (!member) return false;
+	// ロールキャッシュが正しく読み込まれているか確認
+	if (!member.roles || !member.roles.cache) return false;
 	if (member.roles.cache.has(ADMIN_ROLE_ID)) return true;
 	if (member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
 	return false;

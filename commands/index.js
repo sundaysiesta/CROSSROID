@@ -830,6 +830,9 @@ async function handleCommands(interaction, client) {
 		const ADMIN_COMMANDS = ['admin_control', 'admin_user_mgmt', 'admin_logistics', 'activity_backfill'];
 		if (ADMIN_COMMANDS.includes(interaction.commandName)) {
 			// Permission Check
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+			}
 			if (!(await checkAdmin(interaction.member))) {
 				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
 			}
@@ -1188,6 +1191,9 @@ async function handleCommands(interaction, client) {
 		// === 月間ランキング賞金付与コマンド ===
 		if (interaction.commandName === 'monthly_ranking_rewards') {
 			// 権限チェック
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+			}
 			if (!(await checkAdmin(interaction.member))) {
 				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
 			}
@@ -1311,6 +1317,9 @@ async function handleCommands(interaction, client) {
 		// === 人気者選手権賞金付与コマンド ===
 		if (interaction.commandName === 'popularity_championship_rewards') {
 			// 権限チェック
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+			}
 			if (!(await checkAdmin(interaction.member))) {
 				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
 			}

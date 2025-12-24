@@ -18,7 +18,8 @@ async function messageCreate(message) {
 
 	// 画像・動画ファイルがあったorフィルタリングワードが含まれていたら画像代理投稿処理
 	const hasMedia = Array.from(message.attachments?.values() ?? []).some((attachment) => isImageOrVideo(attachment));
-	if (hasMedia || containsFilteredWords(message.content)) {
+	const hasFilteredWords = containsFilteredWords(message.content);
+	if (hasMedia || hasFilteredWords) {
 		// クールダウン中だったら代理投稿しない
 		const lastProxiedAt = messageProxyCooldowns.get(message.author.id) || 0;
 		if (Date.now() - lastProxiedAt < PROXY_COOLDOWN_MS) return;
@@ -66,7 +67,17 @@ async function messageCreate(message) {
 			.setEmoji('🗑️');
 		const row = new ActionRowBuilder().addComponents(deleteButton);
 
-		// 代理投稿を送信（削除前に試行）
+		// ワードフィルターまたは画像代行投稿の場合、元のメッセージを即座に削除（BAN回避のため）
+		try {
+			await message.delete();
+			console.log(`[代理投稿] 元メッセージ削除成功: MessageID=${messageId} (削除優先)`);
+		} catch (deleteError) {
+			console.error(`[代理投稿] 元メッセージ削除エラー: MessageID=${messageId}`, deleteError);
+			// 削除に失敗した場合は処理を中断
+			return;
+		}
+
+		// 代理投稿を送信（削除後に実行）
 		let proxiedMessage;
 		try {
 			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, files=${files.length}件`);
@@ -88,31 +99,23 @@ async function messageCreate(message) {
 				displayName,
 				hasAvatarURL: !!avatarURL,
 			});
-			// Webhook送信に失敗した場合は処理を中断（元メッセージは削除しない）
-			return;
+			// Webhook送信に失敗しても、元のメッセージは既に削除されている
 		}
 
-		// Webhook送信成功後に元のメッセージを削除
-		try {
-			await message.delete();
-			console.log(`[代理投稿] 元メッセージ削除成功: MessageID=${messageId}`);
-		} catch (deleteError) {
-			console.error(`[代理投稿] 元メッセージ削除エラー: MessageID=${messageId}`, deleteError);
-			// 削除に失敗しても、Webhook送信は成功しているので処理は続行
+		// 削除情報を保存（Webhook送信が成功した場合のみ）
+		if (proxiedMessage) {
+			deletedMessageInfo.set(proxiedMessage.id, {
+				content: messageContent,
+				author: messageAuthor,
+				attachments: messageAttachments,
+				channel: messageChannel,
+				originalMessageId: messageId,
+				timestamp: Date.now(),
+			});
+
+			// クールダウンを更新（送信成功時のみ）
+			messageProxyCooldowns.set(messageAuthorId, Date.now());
 		}
-
-		// 削除情報を保存
-		deletedMessageInfo.set(proxiedMessage.id, {
-			content: messageContent,
-			author: messageAuthor,
-			attachments: messageAttachments,
-			channel: messageChannel,
-			originalMessageId: messageId,
-			timestamp: Date.now(),
-		});
-
-		// クールダウンを更新
-		messageProxyCooldowns.set(messageAuthorId, Date.now());
 	}
 }
 
