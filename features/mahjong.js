@@ -8,6 +8,7 @@ const {
 const fs = require('fs');
 const path = require('path');
 const { updateRomecoin } = require('./romecoin');
+const { checkAdmin } = require('../utils');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 const MAHJONG_DATA_FILE = path.join(__dirname, '..', 'mahjong_data.json');
@@ -234,7 +235,7 @@ async function handleAgreement(interaction, client) {
 			data[tableId] = {
 				tableId: tableId,
 				host: table.host,
-				players: allPlayers,
+				players: table.players, // 部屋主を含まない元のplayers配列を保存
 				gameType: table.gameType,
 				rate: table.rate,
 				createdAt: table.createdAt,
@@ -473,6 +474,19 @@ async function handleResult(interaction, client) {
 }
 
 async function handleEdit(interaction, client) {
+	// 処理に時間がかかるため、先にdeferReplyを呼び出す
+	let deferred = false;
+	try {
+		if (!interaction.deferred && !interaction.replied) {
+			await interaction.deferReply({ ephemeral: false });
+			deferred = true;
+		}
+	} catch (e) {
+		if (e.code !== 10062 && e.code !== 40060) {
+			console.error('[麻雀] deferReplyエラー:', e);
+		}
+	}
+
 	try {
 		const tableId = interaction.options.getString('table_id');
 		const hostScore = interaction.options.getInteger('player1_score');
@@ -485,15 +499,36 @@ async function handleEdit(interaction, client) {
 		const table = data[tableId];
 
 		if (!table) {
+			if (deferred) {
+				return interaction.editReply({
+					content: 'テーブルが見つかりませんでした。',
+				});
+			}
 			return interaction.reply({
 				content: 'テーブルが見つかりませんでした。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
-		if (interaction.user.id !== table.host) {
+		// 部屋主または管理者のみが記録を修正可能
+		const isHost = interaction.user.id === table.host;
+		let isAdmin = false;
+		if (interaction.member) {
+			try {
+				isAdmin = await checkAdmin(interaction.member);
+			} catch (e) {
+				console.error('[麻雀] 管理者権限チェックエラー:', e);
+			}
+		}
+		
+		if (!isHost && !isAdmin) {
+			if (deferred) {
+				return interaction.editReply({
+					content: '部屋主または管理者のみが記録を修正できます。',
+				});
+			}
 			return interaction.reply({
-				content: '部屋主のみが記録を修正できます。',
+				content: '部屋主または管理者のみが記録を修正できます。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
@@ -502,6 +537,11 @@ async function handleEdit(interaction, client) {
 		const scores = [hostScore, player1Score, player2Score];
 		if (table.gameType === '四麻') {
 			if (player3Score === null || player3Score === undefined) {
+				if (deferred) {
+					return interaction.editReply({
+						content: '四麻の場合は4人全員の点数を入力してください。',
+					});
+				}
 				return interaction.reply({
 					content: '四麻の場合は4人全員の点数を入力してください。',
 					flags: [MessageFlags.Ephemeral],
@@ -512,6 +552,11 @@ async function handleEdit(interaction, client) {
 
 		// 点数バリデーション
 		if (scores.some((s) => s === null || s === undefined)) {
+			if (deferred) {
+				return interaction.editReply({
+					content: 'すべてのプレイヤーの点数を入力してください。',
+				});
+			}
 			return interaction.reply({
 				content: 'すべてのプレイヤーの点数を入力してください。',
 				flags: [MessageFlags.Ephemeral],
@@ -522,6 +567,11 @@ async function handleEdit(interaction, client) {
 		const expectedTotal = table.gameType === '四麻' ? 100000 : 105000;
 		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
 		if (Math.abs(actualTotal - expectedTotal) > 1) {
+			if (deferred) {
+				return interaction.editReply({
+					content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+				});
+			}
 			return interaction.reply({
 				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
 				flags: [MessageFlags.Ephemeral],
@@ -539,23 +589,28 @@ async function handleEdit(interaction, client) {
 				const oldDiff = oldScoreDiffs[i] || 0;
 				const oldRomecoinChange = Math.round(oldDiff * table.rate);
 
-				// 旧変更を元に戻す
-				const currentBalance = await require('./romecoin').getRomecoin(playerId);
-				const revertedBalance = Math.max(0, currentBalance - oldRomecoinChange);
+				try {
+					// 旧変更を元に戻す
+					const currentBalance = await require('./romecoin').getRomecoin(playerId);
+					const revertedBalance = Math.max(0, currentBalance - oldRomecoinChange);
 
-				await updateRomecoin(
-					playerId,
-					(current) => revertedBalance,
-					{
-						log: true,
-						client: client,
-						reason: `賭け麻雀記録修正（元に戻す）: ${table.scores[i]}点`,
-						metadata: {
-							commandName: 'mahjong_edit',
-							targetUserId: playerId,
-						},
-					}
-				);
+					await updateRomecoin(
+						playerId,
+						(current) => revertedBalance,
+						{
+							log: true,
+							client: client,
+							reason: `賭け麻雀記録修正（元に戻す）: ${table.scores[i]}点`,
+							metadata: {
+								commandName: 'mahjong_edit',
+								targetUserId: playerId,
+							},
+						}
+					);
+				} catch (e) {
+					console.error(`[麻雀] ロメコイン元に戻しエラー (playerId: ${playerId}):`, e);
+					// エラーが発生しても処理を続行
+				}
 			}
 		}
 
@@ -568,30 +623,43 @@ async function handleEdit(interaction, client) {
 			const diff = scoreDiffs[i];
 			const romecoinChange = Math.round(diff * table.rate);
 
-			const currentBalance = await require('./romecoin').getRomecoin(playerId);
-			const newBalance = Math.max(0, currentBalance + romecoinChange);
+			try {
+				const currentBalance = await require('./romecoin').getRomecoin(playerId);
+				const newBalance = Math.max(0, currentBalance + romecoinChange);
 
-			await updateRomecoin(
-				playerId,
-				(current) => newBalance,
-				{
-					log: true,
-					client: client,
-					reason: `賭け麻雀記録修正: ${scores[i]}点`,
-					metadata: {
-						commandName: 'mahjong_edit',
-						targetUserId: playerId,
-					},
-				}
-			);
+				await updateRomecoin(
+					playerId,
+					(current) => newBalance,
+					{
+						log: true,
+						client: client,
+						reason: `賭け麻雀記録修正: ${scores[i]}点`,
+						metadata: {
+							commandName: 'mahjong_edit',
+							targetUserId: playerId,
+						},
+					}
+				);
 
-			results.push({
-				player: playerId,
-				score: scores[i],
-				diff: diff,
-				romecoinChange: romecoinChange,
-				newBalance: newBalance,
-			});
+				results.push({
+					player: playerId,
+					score: scores[i],
+					diff: diff,
+					romecoinChange: romecoinChange,
+					newBalance: newBalance,
+				});
+			} catch (e) {
+				console.error(`[麻雀] ロメコイン更新エラー (playerId: ${playerId}):`, e);
+				// エラーが発生した場合でも結果に追加（エラー表示用）
+				results.push({
+					player: playerId,
+					score: scores[i],
+					diff: diff,
+					romecoinChange: romecoinChange,
+					newBalance: 'エラー',
+					error: e.message,
+				});
+			}
 		}
 
 		// 記録を更新
@@ -618,17 +686,28 @@ async function handleEdit(interaction, client) {
 			.setColor(0x00ff00)
 			.setTimestamp();
 
-		await interaction.reply({ embeds: [resultEmbed] });
+		if (deferred) {
+			await interaction.editReply({ embeds: [resultEmbed] });
+		} else {
+			await interaction.reply({ embeds: [resultEmbed] });
+		}
 	} catch (error) {
 		console.error('[麻雀] 記録修正エラー:', error);
-		if (!interaction.replied && !interaction.deferred) {
-			try {
+		try {
+			if (interaction.deferred || interaction.replied) {
+				await interaction.editReply({
+					content: 'エラーが発生しました。',
+				});
+			} else {
 				await interaction.reply({
 					content: 'エラーが発生しました。',
 					flags: [MessageFlags.Ephemeral],
 				});
-			} catch (e) {
-				// エラーを無視
+			}
+		} catch (e) {
+			// インタラクションがタイムアウトしている場合は無視
+			if (e.code !== 10062 && e.code !== 40060) {
+				console.error('[麻雀] エラーレスポンス送信エラー:', e);
 			}
 		}
 	}
