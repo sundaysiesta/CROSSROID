@@ -395,6 +395,146 @@ async function handleResult(interaction, client) {
 	}
 }
 
+async function handleEdit(interaction, client) {
+	try {
+		const tableId = interaction.options.getString('table_id');
+		const hostScore = interaction.options.getInteger('player1_score');
+		const player1Score = interaction.options.getInteger('player2_score');
+		const player2Score = interaction.options.getInteger('player3_score');
+		const player3Score = interaction.options.getInteger('player4_score');
+
+		// データベースから読み込む
+		const data = loadMahjongData();
+		const table = data[tableId];
+
+		if (!table) {
+			return interaction.reply({
+				content: 'テーブルが見つかりませんでした。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		if (interaction.user.id !== table.host) {
+			return interaction.reply({
+				content: '部屋主のみが記録を修正できます。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		const allPlayers = [table.host, ...table.players];
+		const scores = [hostScore, player1Score, player2Score];
+		if (table.gameType === '四麻') {
+			if (player3Score === null || player3Score === undefined) {
+				return interaction.reply({
+					content: '四麻の場合は4人全員の点数を入力してください。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
+			scores.push(player3Score);
+		}
+
+		// 旧記録のロメコイン変更を元に戻す
+		const oldScoreDiffs = table.scoreDiffs || [];
+		for (let i = 0; i < allPlayers.length; i++) {
+			const playerId = allPlayers[i];
+			const oldDiff = oldScoreDiffs[i] || 0;
+			const oldRomecoinChange = oldDiff * table.rate;
+
+			// 旧変更を元に戻す
+			const currentBalance = await require('./romecoin').getRomecoin(playerId);
+			const revertedBalance = Math.max(0, currentBalance - oldRomecoinChange);
+
+			await updateRomecoin(
+				playerId,
+				(current) => revertedBalance,
+				{
+					log: true,
+					client: client,
+					reason: `賭け麻雀記録修正（元に戻す）: ${table.scores[i]}点`,
+					metadata: {
+						commandName: 'mahjong_edit',
+						targetUserId: playerId,
+					},
+				}
+			);
+		}
+
+		// 新記録でロメコイン計算と更新
+		const BASE_SCORE = 25000;
+		const scoreDiffs = scores.map((score) => score - BASE_SCORE);
+
+		const results = [];
+		for (let i = 0; i < allPlayers.length; i++) {
+			const playerId = allPlayers[i];
+			const diff = scoreDiffs[i];
+			const romecoinChange = diff * table.rate;
+
+			const currentBalance = await require('./romecoin').getRomecoin(playerId);
+			const newBalance = Math.max(0, currentBalance + romecoinChange);
+
+			await updateRomecoin(
+				playerId,
+				(current) => newBalance,
+				{
+					log: true,
+					client: client,
+					reason: `賭け麻雀記録修正: ${scores[i]}点`,
+					metadata: {
+						commandName: 'mahjong_edit',
+						targetUserId: playerId,
+					},
+				}
+			);
+
+			results.push({
+				player: playerId,
+				score: scores[i],
+				diff: diff,
+				romecoinChange: romecoinChange,
+				newBalance: newBalance,
+			});
+		}
+
+		// 記録を更新
+		table.scores = scores;
+		table.scoreDiffs = scoreDiffs;
+		table.romecoinChanges = results.map((r) => r.romecoinChange);
+		table.editedAt = Date.now();
+		table.editedBy = interaction.user.id;
+
+		data[tableId] = table;
+		saveMahjongData(data);
+
+		// 結果を表示
+		const resultEmbed = new EmbedBuilder()
+			.setTitle('🀄 試合記録修正完了')
+			.setDescription(
+				`**部屋主:** <@${table.host}>\n**レート:** ${table.rate}ロメコイン/点\n**ゲームタイプ:** ${table.gameType}\n\n**修正後の結果:**\n${results
+					.map(
+						(r, i) =>
+							`${i + 1}. <@${r.player}>: ${r.score}点 (${r.diff > 0 ? '+' : ''}${r.diff}点) → ${r.romecoinChange > 0 ? '+' : ''}${ROMECOIN_EMOJI}${r.romecoinChange.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+					)
+					.join('\n')}\n\n✅ **記録が修正されました。**`
+			)
+			.setColor(0x00ff00)
+			.setTimestamp();
+
+		await interaction.reply({ embeds: [resultEmbed] });
+	} catch (error) {
+		console.error('[麻雀] 記録修正エラー:', error);
+		if (!interaction.replied && !interaction.deferred) {
+			try {
+				await interaction.reply({
+					content: 'エラーが発生しました。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		}
+	}
+}
+
 module.exports = {
 	createTable,
 	handleAgreement,
