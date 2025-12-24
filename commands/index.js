@@ -1171,6 +1171,16 @@ async function handleCommands(interaction, client) {
 						console.error('Backfill Error:', e);
 					});
 				}
+			} catch (error) {
+				console.error('Admin Command Error:', error);
+				await interaction.editReply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('Admin Error')
+							.setColor(0xff0000)
+							.setDescription(`⚠ エラーが発生しました: ${error.message}`),
+					],
+				});
 			}
 			return;
 		}
@@ -1292,19 +1302,6 @@ async function handleCommands(interaction, client) {
 							.setTitle('❌ エラー')
 							.setColor(0xff0000)
 							.setDescription(`賞金付与中にエラーが発生しました: ${error.message}`),
-					],
-				});
-			}
-			return;
-		}
-			} catch (error) {
-				console.error('Admin Command Error:', error);
-				await interaction.editReply({
-					embeds: [
-						new EmbedBuilder()
-							.setTitle('Admin Error')
-							.setColor(0xff0000)
-							.setDescription(`⚠ エラーが発生しました: ${error.message}`),
 					],
 				});
 			}

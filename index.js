@@ -158,6 +158,43 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 	}
 });
 
+// ロメコインを追加
+app.post('/api/romecoin/:userId/add', authenticateAPI, async (req, res) => {
+	try {
+		const userId = req.params.userId;
+		const amount = parseInt(req.body.amount);
+
+		if (!amount || amount <= 0) {
+			return res.status(400).json({ error: '有効な金額を指定してください' });
+		}
+
+		// 現在の残高を取得
+		const previousBalance = await romecoin.getRomecoin(userId);
+
+		// ロメコインを追加
+		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) + amount));
+		const newBalance = await romecoin.getRomecoin(userId);
+
+		console.log(`[API] ロメコイン追加: userId=${userId}, amount=${amount}, previousBalance=${previousBalance}, newBalance=${newBalance}`);
+
+		res.json({
+			success: true,
+			userId,
+			added: amount,
+			previousBalance,
+			balance: newBalance,
+		});
+	} catch (error) {
+		console.error('[API] ロメコイン追加エラー:', error);
+		console.error('[API] エラースタック:', error.stack);
+		res.status(500).json({
+			error: 'ロメコインの追加に失敗しました',
+			message: error.message,
+			details: process.env.NODE_ENV !== 'production' ? error.stack : undefined,
+		});
+	}
+});
+
 // 404ハンドラー（デバッグ用）
 app.use((req, res) => {
 	console.log(`[404] リクエストが見つかりません: ${req.method} ${req.path}`);
@@ -167,7 +204,7 @@ app.use((req, res) => {
 		error: 'エンドポイントが見つかりません',
 		method: req.method,
 		path: req.path,
-		availableEndpoints: ['GET /', 'GET /api/romecoin/:userId', 'POST /api/romecoin/:userId/deduct'],
+		availableEndpoints: ['GET /', 'GET /api/romecoin/:userId', 'POST /api/romecoin/:userId/deduct', 'POST /api/romecoin/:userId/add'],
 	});
 });
 
