@@ -223,16 +223,19 @@ async function handleAgreement(interaction, client) {
 				.setTimestamp();
 
 			// ボタンを更新（同意済みのボタンを無効化）
-			const buttons = table.players.map((player) => {
+			const buttonPromises = table.players.map(async (player) => {
 				const isAgreed = table.agreedPlayers.includes(player.id);
+				const user = await client.users.fetch(player).catch(() => null);
+				const displayName = user ? user.displayName : `ユーザー${player}`;
 				return new ButtonBuilder()
 					.setCustomId(`mahjong_agree_${tableId}_${player.id}`)
-					.setLabel(`${(await client.users.fetch(player)).displayName}が同意`)
+					.setLabel(`${displayName}が同意`)
 					.setStyle(isAgreed ? ButtonStyle.Secondary : ButtonStyle.Success)
 					.setEmoji('✅')
 					.setDisabled(isAgreed);
 			});
 
+			const buttons = await Promise.all(buttonPromises);
 			const row = new ActionRowBuilder().addComponents(buttons);
 
 			await interaction.update({ embeds: [embed], components: [row] });
