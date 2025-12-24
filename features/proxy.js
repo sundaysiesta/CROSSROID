@@ -37,41 +37,61 @@ async function messageCreate(message) {
 			});
 		}
 
-		const files = message.attachments.map((attachment) => ({
+		// 元のメッセージを削除（優先処理）
+		const messageContent = message.content;
+		const messageAuthor = message.author;
+		const messageAttachments = Array.from(message.attachments.values());
+		const messageChannel = message.channel;
+		const displayName = message.member?.nickname || message.author.displayName;
+		const avatarURL = message.author.displayAvatarURL();
+
+		try {
+			await message.delete();
+			console.log(`[代理投稿] 元メッセージ削除成功: MessageID=${messageId}`);
+		} catch (deleteError) {
+			console.error(`[代理投稿] 元メッセージ削除エラー: MessageID=${messageId}`, deleteError);
+			// 削除に失敗した場合は処理を中断
+			return;
+		}
+
+		// 削除情報を保存（削除成功後に保存）
+		const files = messageAttachments.map((attachment) => ({
 			attachment: attachment.url,
 			name: attachment.name,
 		}));
 
 		// 代理投稿を送信
 		const deleteButton = new ButtonBuilder()
-			.setCustomId(`delete_${message.author.id}_${Date.now()}`)
+			.setCustomId(`delete_${messageAuthor.id}_${Date.now()}`)
 			.setLabel('削除')
 			.setStyle(ButtonStyle.Danger)
 			.setEmoji('🗑️');
 		const row = new ActionRowBuilder().addComponents(deleteButton);
-		const displayName = message.member?.nickname || message.author.displayName;
-		const proxiedMessage = await webhook.send({
-			content: message.content,
-			username: displayName,
-			avatarURL: message.author.displayAvatarURL(),
-			files: files,
-			components: [row],
-			allowedMentions: { parse: [] },
-		});
-		console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
 
-		// 元のメッセージを削除
-		await message.delete();
+		try {
+			const proxiedMessage = await webhook.send({
+				content: messageContent,
+				username: displayName,
+				avatarURL: avatarURL,
+				files: files,
+				components: [row],
+				allowedMentions: { parse: [] },
+			});
+			console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
 
-		// 削除情報を保存
-		deletedMessageInfo.set(proxiedMessage.id, {
-			content: message.content,
-			author: message.author,
-			attachments: Array.from(message.attachments.values()),
-			channel: message.channel,
-			originalMessageId: message.id,
-			timestamp: Date.now(),
-		});
+			// 削除情報を保存
+			deletedMessageInfo.set(proxiedMessage.id, {
+				content: messageContent,
+				author: messageAuthor,
+				attachments: messageAttachments,
+				channel: messageChannel,
+				originalMessageId: messageId,
+				timestamp: Date.now(),
+			});
+		} catch (webhookError) {
+			console.error(`[代理投稿] Webhook送信エラー: MessageID=${messageId}`, webhookError);
+			// Webhook送信に失敗しても、元のメッセージは既に削除されている
+		}
 
 		// クールダウンを更新
 		messageProxyCooldowns.set(message.author.id, Date.now());
