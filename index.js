@@ -35,6 +35,7 @@ const persistence = require('./features/persistence');
 const activityTracker = require('./features/activityTracker');
 const abuseProtocol = require('./features/abuseProtocol');
 const stock = require('./features/stock');
+const daily = require('./features/daily');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -489,6 +490,7 @@ client.once('clientReady', async (client) => {
 			.addSubcommand((subcommand) =>
 				subcommand.setName('portfolio').setDescription('自分の株式ポートフォリオを確認します(作成中)')
 			),
+		new SlashCommandBuilder().setName('daily').setDescription('デイリーログインボーナスを受け取ります'),
 		new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message),
 	].map((command) => command.toJSON());
 
@@ -545,6 +547,11 @@ client.on('interactionCreate', async (interaction) => {
 	await handleCommands(interaction, client);
 	await romecoin.interactionCreate(interaction);
 	await stock.interactionCreate(interaction);
+	
+	// デイリーログインボーナス
+	if (interaction.isChatInputCommand() && interaction.commandName === 'daily') {
+		await daily.handleDaily(interaction, client);
+	}
 
 	// 麻雀ボタンインタラクション
 	if (interaction.isButton() && interaction.customId.startsWith('mahjong_agree_')) {

@@ -412,7 +412,7 @@ async function handleResult(interaction, client) {
 			const romecoinChange = Math.round(diff * table.rate);
 
 			const currentBalance = await require('./romecoin').getRomecoin(playerId);
-			const newBalance = Math.max(0, currentBalance + romecoinChange);
+			const newBalance = currentBalance + romecoinChange;
 
 			await updateRomecoin(
 				playerId,
@@ -622,9 +622,9 @@ async function handleEdit(interaction, client) {
 				const oldRomecoinChange = Math.round(oldDiff * table.rate);
 
 				try {
-					// 旧変更を元に戻す
-					const currentBalance = await require('./romecoin').getRomecoin(playerId);
-					const revertedBalance = Math.max(0, currentBalance - oldRomecoinChange);
+				// 旧変更を元に戻す
+				const currentBalance = await require('./romecoin').getRomecoin(playerId);
+				const revertedBalance = currentBalance - oldRomecoinChange;
 
 					await updateRomecoin(
 						playerId,
@@ -774,13 +774,31 @@ async function handleCancel(interaction, client) {
 		// テーブルを削除
 		activeTables.delete(tableId);
 
+		// 同意済みプレイヤー情報を取得
+		const agreedPlayersList = table.agreedPlayers.length > 0 
+			? `\n\n**同意済み:** ${table.agreedPlayers.map((p) => `<@${p}>`).join(', ')}`
+			: '';
+
 		const embed = new EmbedBuilder()
 			.setTitle('❌ 開催中止')
-			.setDescription(`部屋主により、このテーブルは中止されました。`)
+			.setDescription(`部屋主により、このテーブルは中止されました。${agreedPlayersList}`)
 			.setColor(0xff0000)
 			.setTimestamp();
 
-		await interaction.update({ embeds: [embed], components: [] });
+		try {
+			await interaction.update({ embeds: [embed], components: [] });
+		} catch (e) {
+			// インタラクションがタイムアウトしている場合はメッセージを編集
+			if (e.code === 10062 || e.code === 40060) {
+				try {
+					const message = await interaction.message.edit({ embeds: [embed], components: [] });
+				} catch (editError) {
+					console.error('[麻雀] キャンセルメッセージ編集エラー:', editError);
+				}
+			} else {
+				throw e;
+			}
+		}
 	} catch (error) {
 		console.error('[麻雀] キャンセル処理エラー:', error);
 		if (error.code !== 10062 && error.code !== 40060) {
