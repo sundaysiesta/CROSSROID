@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { PermissionFlagsBits } = require('discord.js');
 const { JAPANESE_HOLIDAYS_2024, JAPANESE_HOLIDAYS_2025, SCHOOL_VACATIONS } = require('./holidays');
 const {
 	FILTERED_WORDS,
@@ -263,11 +264,15 @@ function hasForceProxyRole(member) {
 }
 
 async function checkAdmin(member) {
-	if (!member) return false;
-	// ロールキャッシュが正しく読み込まれているか確認
-	if (!member.roles || !member.roles.cache) return false;
-	if (member.roles.cache.has(ADMIN_ROLE_ID)) return true;
-	if (member.roles.cache.has(TECHTEAM_ROLE_ID)) return true;
+	if (!member) {
+		return false;
+	}
+	
+	// Discordのサーバー管理者権限をチェック
+	if (member.permissions && member.permissions.has(PermissionFlagsBits.Administrator)) {
+		return true;
+	}
+	
 	return false;
 }
 
