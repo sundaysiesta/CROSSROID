@@ -339,6 +339,24 @@ client.once('clientReady', async (client) => {
 			.addUserOption((option) => option.setName('rank8').setDescription('8位のユーザー').setRequired(false))
 			.addUserOption((option) => option.setName('rank9').setDescription('9位のユーザー').setRequired(false))
 			.addUserOption((option) => option.setName('rank10').setDescription('10位のユーザー').setRequired(false)),
+		new SlashCommandBuilder()
+			.setName('admin_romecoin_add')
+			.setDescription('指定ユーザーのロメコインを増額します（管理者専用）')
+			.addUserOption((option) =>
+				option.setName('user').setDescription('ロメコインを増額するユーザー').setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option.setName('amount').setDescription('増額するロメコインの量').setRequired(true)
+			),
+		new SlashCommandBuilder()
+			.setName('admin_romecoin_deduct')
+			.setDescription('指定ユーザーのロメコインを減額します（管理者専用）')
+			.addUserOption((option) =>
+				option.setName('user').setDescription('ロメコインを減額するユーザー').setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option.setName('amount').setDescription('減額するロメコインの量').setRequired(true)
+			),
 		new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message),
 	].map((command) => command.toJSON());
 

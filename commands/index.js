@@ -1503,6 +1503,192 @@ async function handleCommands(interaction, client) {
 			}
 			return;
 		}
+
+		// === 管理者専用ロメコイン操作コマンド ===
+		if (interaction.commandName === 'admin_romecoin_add') {
+			// 権限チェック
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+			}
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+			}
+
+			try {
+				await interaction.deferReply({ ephemeral: true });
+
+				const targetUser = interaction.options.getUser('user');
+				const amount = interaction.options.getInteger('amount');
+
+				if (!targetUser) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ ユーザーを指定してください。'),
+						],
+					});
+				}
+
+				if (!amount || amount <= 0) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ 有効な金額（1以上）を指定してください。'),
+						],
+					});
+				}
+
+				// 現在の残高を取得
+				const previousBalance = await getRomecoin(targetUser.id);
+
+				// ロメコインを増額
+				await updateRomecoin(targetUser.id, (current) => Math.round((current || 0) + amount));
+				const newBalance = await getRomecoin(targetUser.id);
+
+				const successEmbed = new EmbedBuilder()
+					.setTitle('✅ ロメコイン増額成功')
+					.setDescription(`${targetUser} のロメコインを ${ROMECOIN_EMOJI}${amount.toLocaleString()} 増額しました`)
+					.addFields(
+						{
+							name: '増額前の残高',
+							value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '増額後の残高',
+							value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '増額額',
+							value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+							inline: true,
+						}
+					)
+					.setColor(0x00ff00)
+					.setTimestamp()
+					.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+				await interaction.editReply({ embeds: [successEmbed] });
+			} catch (error) {
+				console.error('ロメコイン増額エラー:', error);
+				await interaction.editReply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setColor(0xff0000)
+							.setDescription(`ロメコインの増額中にエラーが発生しました: ${error.message}`),
+					],
+				});
+			}
+			return;
+		}
+
+		if (interaction.commandName === 'admin_romecoin_deduct') {
+			// 権限チェック
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+			}
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+			}
+
+			try {
+				await interaction.deferReply({ ephemeral: true });
+
+				const targetUser = interaction.options.getUser('user');
+				const amount = interaction.options.getInteger('amount');
+
+				if (!targetUser) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ ユーザーを指定してください。'),
+						],
+					});
+				}
+
+				if (!amount || amount <= 0) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ 有効な金額（1以上）を指定してください。'),
+						],
+					});
+				}
+
+				// 現在の残高を取得
+				const previousBalance = await getRomecoin(targetUser.id);
+
+				if (previousBalance < amount) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setTitle('❌ エラー')
+								.setDescription('ユーザーのロメコインが不足しています')
+								.addFields(
+									{
+										name: '現在の所持ロメコイン',
+										value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`,
+										inline: true,
+									},
+									{
+										name: '減額しようとする額',
+										value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+										inline: true,
+									}
+								)
+								.setColor(0xff0000),
+						],
+					});
+				}
+
+				// ロメコインを減額
+				await updateRomecoin(targetUser.id, (current) => Math.round((current || 0) - amount));
+				const newBalance = await getRomecoin(targetUser.id);
+
+				const successEmbed = new EmbedBuilder()
+					.setTitle('✅ ロメコイン減額成功')
+					.setDescription(`${targetUser} のロメコインを ${ROMECOIN_EMOJI}${amount.toLocaleString()} 減額しました`)
+					.addFields(
+						{
+							name: '減額前の残高',
+							value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '減額後の残高',
+							value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '減額額',
+							value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+							inline: true,
+						}
+					)
+					.setColor(0xffa500)
+					.setTimestamp()
+					.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+				await interaction.editReply({ embeds: [successEmbed] });
+			} catch (error) {
+				console.error('ロメコイン減額エラー:', error);
+				await interaction.editReply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setColor(0xff0000)
+							.setDescription(`ロメコインの減額中にエラーが発生しました: ${error.message}`),
+					],
+				});
+			}
+			return;
+		}
 	} else if (interaction.isMessageContextMenuCommand()) {
 		if (interaction.commandName === '匿名開示 (運営専用)') {
 			try {
