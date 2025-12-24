@@ -207,8 +207,24 @@ async function interactionCreate(interaction) {
 					if (opponent) {
 						// クロスロイドと対戦
 						if (opponent.id === interaction.client.user.id) {
-							const hands = ['rock', 'scissors', 'paper'];
-							const opponentHand = hands[Math.floor(Math.random() * hands.length)];
+							// クロスロイドのロメコイン残高をチェック
+							const botRomecoin = await getData(interaction.client.user.id, romecoin_data, 0);
+							if (botRomecoin < bet) {
+								const errorEmbed = new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setDescription('クロスロイドのロメコインが不足しています')
+									.addFields(
+										{
+											name: 'クロスロイドの現在の所持ロメコイン',
+											value: `${ROMECOIN_EMOJI}${botRomecoin}`,
+											inline: true,
+										},
+										{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+									)
+									.setColor(0xff0000);
+								return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+							}
+							
 							// 手選択ボタンを表示
 							const rockButton = new ButtonBuilder()
 								.setCustomId(`janken_rock_${progress_id}`)
@@ -252,7 +268,7 @@ async function interactionCreate(interaction) {
 								bet: bet,
 								timeout_id: null,
 								user_hand: null,
-								opponent_hand: opponentHand,
+								opponent_hand: null, // ユーザーが手を選ぶタイミングでランダムに決定
 								status: 'selecting_hands',
 								message: replyMessage,
 							};
@@ -735,6 +751,13 @@ async function interactionCreate(interaction) {
 					return;
 				}
 				progress.user_hand = interaction.customId.split('_')[1];
+				
+				// クロスロイドと対戦する場合、ユーザーが手を選んだタイミングでクロスロイドの手をランダムに決定
+				if (progress.opponent && progress.opponent.id === interaction.client.user.id && !progress.opponent_hand) {
+					const hands = ['rock', 'scissors', 'paper'];
+					progress.opponent_hand = hands[Math.floor(Math.random() * hands.length)];
+				}
+				
 				const handEmbed = new EmbedBuilder()
 					.setTitle('✂️ 手を選択しました')
 					.setDescription(
