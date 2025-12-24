@@ -66,46 +66,53 @@ async function messageCreate(message) {
 			.setEmoji('🗑️');
 		const row = new ActionRowBuilder().addComponents(deleteButton);
 
-		// 元のメッセージを削除（優先処理）
+		// 代理投稿を送信（削除前に試行）
+		let proxiedMessage;
+		try {
+			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, files=${files.length}件`);
+			proxiedMessage = await webhook.send({
+				content: messageContent,
+				username: displayName,
+				avatarURL: avatarURL,
+				files: files.length > 0 ? files : undefined,
+				components: [row],
+				allowedMentions: { parse: [] },
+			});
+			console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
+		} catch (webhookError) {
+			console.error(`[代理投稿] Webhook送信エラー: MessageID=${messageId}`, webhookError);
+			console.error(`[代理投稿] エラー詳細:`, webhookError.stack || webhookError);
+			console.error(`[代理投稿] 送信データ:`, {
+				contentLength: messageContent?.length || 0,
+				filesCount: files.length,
+				displayName,
+				hasAvatarURL: !!avatarURL,
+			});
+			// Webhook送信に失敗した場合は処理を中断（元メッセージは削除しない）
+			return;
+		}
+
+		// Webhook送信成功後に元のメッセージを削除
 		try {
 			await message.delete();
 			console.log(`[代理投稿] 元メッセージ削除成功: MessageID=${messageId}`);
 		} catch (deleteError) {
 			console.error(`[代理投稿] 元メッセージ削除エラー: MessageID=${messageId}`, deleteError);
-			// 削除に失敗した場合は処理を中断
-			return;
+			// 削除に失敗しても、Webhook送信は成功しているので処理は続行
 		}
 
-		// 代理投稿を送信（削除後に実行）
-		try {
-			const proxiedMessage = await webhook.send({
-				content: messageContent,
-				username: displayName,
-				avatarURL: avatarURL,
-				files: files,
-				components: [row],
-				allowedMentions: { parse: [] },
-			});
-			console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
+		// 削除情報を保存
+		deletedMessageInfo.set(proxiedMessage.id, {
+			content: messageContent,
+			author: messageAuthor,
+			attachments: messageAttachments,
+			channel: messageChannel,
+			originalMessageId: messageId,
+			timestamp: Date.now(),
+		});
 
-			// 削除情報を保存
-			deletedMessageInfo.set(proxiedMessage.id, {
-				content: messageContent,
-				author: messageAuthor,
-				attachments: messageAttachments,
-				channel: messageChannel,
-				originalMessageId: messageId,
-				timestamp: Date.now(),
-			});
-
-			// クールダウンを更新（送信成功時のみ）
-			messageProxyCooldowns.set(messageAuthorId, Date.now());
-		} catch (webhookError) {
-			console.error(`[代理投稿] Webhook送信エラー: MessageID=${messageId}`, webhookError);
-			console.error(`[代理投稿] エラー詳細:`, webhookError.stack || webhookError);
-			// Webhook送信に失敗しても、元のメッセージは既に削除されている
-			// クールダウンは更新しない（再試行可能にする）
-		}
+		// クールダウンを更新
+		messageProxyCooldowns.set(messageAuthorId, Date.now());
 	}
 }
 
