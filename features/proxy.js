@@ -1,10 +1,41 @@
-const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+const { ButtonBuilder, ButtonStyle, ActionRowBuilder, AttachmentBuilder } = require('discord.js');
 const { PROXY_COOLDOWN_MS } = require('../constants');
 const { isImageOrVideo, containsFilteredWords } = require('../utils');
+const https = require('https');
+const http = require('http');
 
 // 状態管理
 let messageProxyCooldowns = new Map(); // key: userId, value: lastUsedEpochMs
 const deletedMessageInfo = new Map(); // key: messageId, value: { content, author, attachments, channel }
+
+// ファイルをダウンロードするヘルパー関数
+function downloadFile(url) {
+	return new Promise((resolve, reject) => {
+		const protocol = url.startsWith('https') ? https : http;
+		protocol
+			.get(url, (response) => {
+				if (response.statusCode !== 200) {
+					reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+					return;
+				}
+
+				const chunks = [];
+				response.on('data', (chunk) => chunks.push(chunk));
+				response.on('end', () => {
+					resolve(Buffer.concat(chunks));
+				});
+				response.on('error', (error) => {
+					reject(error);
+				});
+			})
+			.on('error', (error) => {
+				reject(error);
+			})
+			.setTimeout(10000, () => {
+				reject(new Error('Download timeout'));
+			});
+	});
+}
 
 // 30分ごとにクールダウンをクリア
 async function clientReady(client) {
@@ -35,11 +66,41 @@ async function messageCreate(message) {
 		const displayName = message.member?.nickname || message.author.displayName;
 		const avatarURL = message.author.displayAvatarURL();
 
-		// ファイル情報を事前に準備
-		const files = messageAttachments.map((attachment) => ({
-			attachment: attachment.url,
-			name: attachment.name,
-		}));
+		// ファイルを削除前にダウンロードして保存（削除後URLが無効になる可能性があるため）
+		const downloadedFiles = [];
+		if (messageAttachments.length > 0) {
+			try {
+				for (const attachment of messageAttachments) {
+					try {
+						const buffer = await downloadFile(attachment.url);
+						if (buffer) {
+							downloadedFiles.push(
+								new AttachmentBuilder(buffer, {
+									name: attachment.name || 'file',
+									description: attachment.description || undefined,
+								})
+							);
+						}
+					} catch (downloadError) {
+						console.error(`[代理投稿] ファイルダウンロードエラー: ${attachment.name || 'unknown'}`, downloadError);
+						// ダウンロードに失敗した場合は元のURLを使用（削除前なので有効な可能性がある）
+						downloadedFiles.push({
+							attachment: attachment.url,
+							name: attachment.name,
+						});
+					}
+				}
+			} catch (error) {
+				console.error(`[代理投稿] ファイル処理エラー: MessageID=${messageId}`, error);
+				// ファイル処理に失敗した場合は元のURLを使用
+				downloadedFiles.push(
+					...messageAttachments.map((attachment) => ({
+						attachment: attachment.url,
+						name: attachment.name,
+					}))
+				);
+			}
+		}
 
 		// Webhookを取得または作成（削除前に準備）
 		let webhook;
@@ -80,12 +141,12 @@ async function messageCreate(message) {
 		// 代理投稿を送信（削除後に実行）
 		let proxiedMessage;
 		try {
-			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, files=${files.length}件`);
+			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, files=${downloadedFiles.length}件`);
 			proxiedMessage = await webhook.send({
 				content: messageContent,
 				username: displayName,
 				avatarURL: avatarURL,
-				files: files.length > 0 ? files : undefined,
+				files: downloadedFiles.length > 0 ? downloadedFiles : undefined,
 				components: [row],
 				allowedMentions: { parse: [] },
 			});
@@ -95,7 +156,7 @@ async function messageCreate(message) {
 			console.error(`[代理投稿] エラー詳細:`, webhookError.stack || webhookError);
 			console.error(`[代理投稿] 送信データ:`, {
 				contentLength: messageContent?.length || 0,
-				filesCount: files.length,
+				filesCount: downloadedFiles.length,
 				displayName,
 				hasAvatarURL: !!avatarURL,
 			});

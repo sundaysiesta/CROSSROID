@@ -391,6 +391,8 @@ client.once('clientReady', async (client) => {
 			.addIntegerOption((option) =>
 				option.setName('amount').setDescription('減額するロメコインの量').setRequired(true)
 			),
+		new SlashCommandBuilder().setName('shop').setDescription('ロメコインショップを表示します'),
+		new SlashCommandBuilder().setName('backpack').setDescription('購入済みの商品を確認します'),
 		new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message),
 	].map((command) => command.toJSON());
 

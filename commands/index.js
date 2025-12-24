@@ -19,6 +19,7 @@ const {
 	TECHTEAM_ROLE_ID,
 	OWNER_ROLE_ID,
 	RADIATION_ROLE_ID,
+	SHOP_LOG_VIEWER_ROLE_ID,
 } = require('../constants');
 const fs = require('fs');
 const path = require('path');
@@ -34,6 +35,7 @@ const anonymousCooldowns = new Map();
 const anonymousUsageCounts = new Map();
 const bumpCooldowns = new Map();
 const randomMentionCooldowns = new Map();
+const shopBuyCooldowns = new Map(); // サーバー間クールダウン（30秒）
 const processingCommands = new Set();
 
 async function handleCommands(interaction, client) {
@@ -2727,6 +2729,409 @@ async function handleCommands(interaction, client) {
 		}
 		return;
 	}
+
+	// ショップコマンド
+	if (interaction.commandName === 'shop') {
+		try {
+			// 購入履歴を確認
+			let shopData = {};
+			try {
+				const shopDataFile = path.join(__dirname, '../data/shop_data.json');
+				if (fs.existsSync(shopDataFile)) {
+					shopData = JSON.parse(fs.readFileSync(shopDataFile, 'utf8'));
+				}
+			} catch (e) {
+				console.error('[ショップ] 購入履歴読み込みエラー:', e);
+			}
+
+			const userId = interaction.user.id;
+			const hasLogViewerRole = shopData[userId] && shopData[userId]['log_viewer_role'];
+
+			const buyButton = new ButtonBuilder()
+				.setCustomId('shop_buy_log_viewer_role')
+				.setLabel('購入する')
+				.setStyle(ButtonStyle.Primary)
+				.setEmoji('🛒')
+				.setDisabled(hasLogViewerRole);
+
+			const row = new ActionRowBuilder().addComponents(buyButton);
+
+			const embed = new EmbedBuilder()
+				.setTitle('🛒 ロメコインショップ')
+				.setColor(0x00ff00)
+				.setDescription('ロメコインを使って特別な権限やアイテムを購入できます！')
+				.addFields({
+					name: '📜 ログ閲覧権限ロール',
+					value: `<@&${SHOP_LOG_VIEWER_ROLE_ID}>\n\n**価格:** ${ROMECOIN_EMOJI}25,000\n**説明:** ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。\n**注意:** 一回の買い切りです。${hasLogViewerRole ? '\n\n✅ **購入済み**' : ''}`,
+					inline: false,
+				})
+				.setFooter({ text: '※ 商品は一度購入すると再度購入できません' })
+				.setTimestamp();
+
+			await interaction.reply({ embeds: [embed], components: [row] });
+		} catch (error) {
+			console.error('ショップコマンドエラー:', error);
+			if (interaction.deferred || interaction.replied) {
+				return interaction.editReply({ content: 'エラーが発生しました。' });
+			}
+			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+		}
+		return;
+	}
+
+	// バックパックコマンド（購入済み商品を表示）
+	if (interaction.commandName === 'backpack') {
+		try {
+			// 購入履歴を確認
+			let shopData = {};
+			try {
+				const shopDataFile = path.join(__dirname, '../data/shop_data.json');
+				if (fs.existsSync(shopDataFile)) {
+					shopData = JSON.parse(fs.readFileSync(shopDataFile, 'utf8'));
+				}
+			} catch (e) {
+				console.error('[バックパック] 購入履歴読み込みエラー:', e);
+			}
+
+			const userId = interaction.user.id;
+			const userPurchases = shopData[userId] || {};
+
+			// 商品情報
+			const items = {
+				log_viewer_role: {
+					name: 'ログ閲覧権限ロール',
+					roleId: SHOP_LOG_VIEWER_ROLE_ID,
+				},
+			};
+
+			const purchasedItems = [];
+			for (const [itemId, purchaseData] of Object.entries(userPurchases)) {
+				if (items[itemId]) {
+					const purchaseDate = new Date(purchaseData.purchasedAt);
+					purchasedItems.push({
+						name: items[itemId].name,
+						roleId: items[itemId].roleId,
+						purchasedAt: purchaseDate,
+					});
+				}
+			}
+
+			if (purchasedItems.length === 0) {
+				const embed = new EmbedBuilder()
+					.setTitle('🎒 バックパック')
+					.setColor(0x99aab5)
+					.setDescription('購入済みの商品はありません。\n`/shop`で商品を確認できます。')
+					.setTimestamp();
+
+				return interaction.reply({ embeds: [embed], ephemeral: true });
+			}
+
+			const itemsList = purchasedItems
+				.map((item) => {
+					const dateStr = item.purchasedAt.toLocaleString('ja-JP');
+					return `📦 **${item.name}**\n<@&${item.roleId}>\n購入日: ${dateStr}`;
+				})
+				.join('\n\n');
+
+			const embed = new EmbedBuilder()
+				.setTitle('🎒 バックパック')
+				.setColor(0x00ff00)
+				.setDescription(`購入済みの商品 (${purchasedItems.length}件)\n\n${itemsList}`)
+				.setTimestamp();
+
+			await interaction.reply({ embeds: [embed], ephemeral: true });
+		} catch (error) {
+			console.error('バックパックコマンドエラー:', error);
+			if (interaction.deferred || interaction.replied) {
+				return interaction.editReply({ content: 'エラーが発生しました。' });
+			}
+			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+		}
+		return;
+	}
+
+	// ボタンインタラクション処理
+	if (interaction.isButton()) {
+		// ショップ購入ボタン
+		if (interaction.customId === 'shop_buy_log_viewer_role') {
+			try {
+				const userId = interaction.user.id;
+				const guildId = interaction.guild.id;
+
+				// サーバー間クールダウン（30秒）
+				const cooldownKey = `shop_buy_${guildId}`;
+				const lastUsed = shopBuyCooldowns.get(cooldownKey) || 0;
+				const cooldownTime = 30 * 1000; // 30秒
+				const elapsed = Date.now() - lastUsed;
+
+				if (elapsed < cooldownTime) {
+					const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
+					return interaction.reply({
+						content: `⏰ サーバー間クールダウン中です（残り${remainSec}秒）`,
+						ephemeral: true,
+					});
+				}
+
+				// 購入履歴を確認
+				let shopData = {};
+				try {
+					const shopDataFile = path.join(__dirname, '../data/shop_data.json');
+					if (fs.existsSync(shopDataFile)) {
+						shopData = JSON.parse(fs.readFileSync(shopDataFile, 'utf8'));
+					}
+				} catch (e) {
+					console.error('[ショップ] 購入履歴読み込みエラー:', e);
+				}
+
+				// 商品情報
+				const item = {
+					id: 'log_viewer_role',
+					name: 'ログ閲覧権限ロール',
+					price: 25000,
+					roleId: SHOP_LOG_VIEWER_ROLE_ID,
+					description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+				};
+
+				// 既に購入済みかチェック
+				if (!shopData[userId]) {
+					shopData[userId] = {};
+				}
+				if (shopData[userId][item.id]) {
+					return interaction.reply({
+						content: `❌ この商品は既に購入済みです。`,
+						ephemeral: true,
+					});
+				}
+
+				// ロメコイン残高を確認
+				const balance = await getRomecoin(userId);
+				if (balance < item.price) {
+					return interaction.reply({
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						ephemeral: true,
+					});
+				}
+
+				// 確認Embed
+				const confirmEmbed = new EmbedBuilder()
+					.setTitle('⚠️ 購入確認')
+					.setColor(0xffa500)
+					.setDescription(`**${item.name}** を購入しますか？`)
+					.addFields(
+						{ name: '価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '現在の残高', value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`, inline: true },
+						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${(balance - item.price).toLocaleString()}`, inline: true },
+						{ name: '説明', value: item.description, inline: false }
+					)
+					.setFooter({ text: '※ この商品は一度購入すると再度購入できません' })
+					.setTimestamp();
+
+				const confirmButton = new ButtonBuilder()
+					.setCustomId('shop_confirm_log_viewer_role')
+					.setLabel('購入を確定')
+					.setStyle(ButtonStyle.Success)
+					.setEmoji('✅');
+
+				const cancelButton = new ButtonBuilder()
+					.setCustomId('shop_cancel')
+					.setLabel('キャンセル')
+					.setStyle(ButtonStyle.Danger)
+					.setEmoji('❌');
+
+				const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+				await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
+			} catch (error) {
+				console.error('ショップ購入ボタンエラー:', error);
+				if (interaction.deferred || interaction.replied) {
+					return interaction.editReply({ content: 'エラーが発生しました。' });
+				}
+				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			}
+			return;
+		}
+
+		// 購入確認ボタン
+		if (interaction.customId === 'shop_confirm_log_viewer_role') {
+			try {
+				const userId = interaction.user.id;
+				const guildId = interaction.guild.id;
+
+				// サーバー間クールダウン（30秒）
+				const cooldownKey = `shop_buy_${guildId}`;
+				const lastUsed = shopBuyCooldowns.get(cooldownKey) || 0;
+				const cooldownTime = 30 * 1000; // 30秒
+				const elapsed = Date.now() - lastUsed;
+
+				if (elapsed < cooldownTime) {
+					const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
+					return interaction.reply({
+						content: `⏰ サーバー間クールダウン中です（残り${remainSec}秒）`,
+						ephemeral: true,
+					});
+				}
+
+				// 購入履歴を確認
+				let shopData = {};
+				try {
+					const shopDataFile = path.join(__dirname, '../data/shop_data.json');
+					if (fs.existsSync(shopDataFile)) {
+						shopData = JSON.parse(fs.readFileSync(shopDataFile, 'utf8'));
+					}
+				} catch (e) {
+					console.error('[ショップ] 購入履歴読み込みエラー:', e);
+				}
+
+				// 商品情報
+				const item = {
+					id: 'log_viewer_role',
+					name: 'ログ閲覧権限ロール',
+					price: 25000,
+					roleId: SHOP_LOG_VIEWER_ROLE_ID,
+					description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+				};
+
+				// 既に購入済みかチェック
+				if (!shopData[userId]) {
+					shopData[userId] = {};
+				}
+				if (shopData[userId][item.id]) {
+					return interaction.reply({
+						content: `❌ この商品は既に購入済みです。`,
+						ephemeral: true,
+					});
+				}
+
+				// ロメコイン残高を確認
+				const balance = await getRomecoin(userId);
+				if (balance < item.price) {
+					return interaction.reply({
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						ephemeral: true,
+					});
+				}
+
+				// ロールを付与
+				const member = await interaction.guild.members.fetch(userId).catch(() => null);
+				if (!member) {
+					return interaction.reply({
+						content: '❌ メンバー情報を取得できませんでした。',
+						ephemeral: true,
+					});
+				}
+
+				// 既にロールを持っているかチェック
+				if (member.roles.cache.has(item.roleId)) {
+					// 既にロールを持っている場合は購入履歴に記録するだけ
+					shopData[userId][item.id] = {
+						purchasedAt: Date.now(),
+						alreadyHadRole: true,
+					};
+				} else {
+					// ロールを付与
+					await member.roles.add(item.roleId);
+					shopData[userId][item.id] = {
+						purchasedAt: Date.now(),
+						alreadyHadRole: false,
+					};
+				}
+
+				// 購入履歴を保存
+				try {
+					const shopDataFile = path.join(__dirname, '../data/shop_data.json');
+					const dataDir = path.dirname(shopDataFile);
+					if (!fs.existsSync(dataDir)) {
+						fs.mkdirSync(dataDir, { recursive: true });
+					}
+					fs.writeFileSync(shopDataFile, JSON.stringify(shopData, null, 2), 'utf8');
+				} catch (e) {
+					console.error('[ショップ] 購入履歴保存エラー:', e);
+				}
+
+				// ユーザーのロメコインを減額（ログ付き）
+				const previousBalance = balance;
+				await updateRomecoin(
+					userId,
+					(current) => Math.round((current || 0) - item.price),
+					{
+						log: true,
+						client: client,
+						reason: `ショップ購入: ${item.name}`,
+						metadata: {
+							commandName: 'shop_buy',
+							itemId: item.id,
+						},
+					}
+				);
+				const newBalance = await getRomecoin(userId);
+
+				// クロスロイドのロメコインを増額（ログ付き）
+				const botUserId = client.user.id;
+				const botPreviousBalance = await getRomecoin(botUserId);
+				await updateRomecoin(
+					botUserId,
+					(current) => Math.round((current || 0) + item.price),
+					{
+						log: true,
+						client: client,
+						reason: `ショップ収益: ${item.name} (購入者: ${interaction.user.tag})`,
+						metadata: {
+							commandName: 'shop_revenue',
+							itemId: item.id,
+							buyerId: userId,
+						},
+					}
+				);
+				const botNewBalance = await getRomecoin(botUserId);
+
+				// クールダウンを更新
+				shopBuyCooldowns.set(cooldownKey, Date.now());
+
+				// 成功メッセージ
+				const successEmbed = new EmbedBuilder()
+					.setTitle('✅ 購入完了')
+					.setColor(0x00ff00)
+					.setDescription(`**${item.name}** の購入が完了しました！`)
+					.addFields(
+						{ name: '支払額', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '購入前の残高', value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`, inline: true },
+						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`, inline: true }
+					)
+					.setFooter({ text: '※ この商品は一度購入すると再度購入できません' })
+					.setTimestamp();
+
+				await interaction.update({ embeds: [successEmbed], components: [] });
+			} catch (error) {
+				console.error('ショップ購入確認エラー:', error);
+				if (interaction.deferred || interaction.replied) {
+					return interaction.editReply({ content: 'エラーが発生しました。' });
+				}
+				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			}
+			return;
+		}
+
+		// キャンセルボタン
+		if (interaction.customId === 'shop_cancel') {
+			try {
+				const cancelEmbed = new EmbedBuilder()
+					.setTitle('❌ 購入をキャンセルしました')
+					.setColor(0xff0000)
+					.setDescription('購入処理をキャンセルしました。')
+					.setTimestamp();
+
+				await interaction.update({ embeds: [cancelEmbed], components: [] });
+			} catch (error) {
+				console.error('ショップキャンセルエラー:', error);
+				if (interaction.deferred || interaction.replied) {
+					return interaction.editReply({ content: 'エラーが発生しました。' });
+				}
+				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			}
+			return;
+		}
+	}
+
 }
 
 // 30分ごとのクリーンアップ
@@ -2737,6 +3142,9 @@ setInterval(() => {
 	}
 	for (const [userId, lastBump] of bumpCooldowns.entries()) {
 		if (lastBump < oneHourAgo) bumpCooldowns.delete(userId);
+	}
+	for (const [key, lastUsed] of shopBuyCooldowns.entries()) {
+		if (lastUsed < oneHourAgo) shopBuyCooldowns.delete(key);
 	}
 	for (const [id] of processingCommands) {
 		processingCommands.delete(id);

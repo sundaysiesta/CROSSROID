@@ -1041,8 +1041,18 @@ async function messageCreate(message) {
 
 	// 返信先のユーザーにも付与
 	if (message.reference) {
-		const reference = await message.fetchReference();
+		let reference;
+		try {
+			reference = await message.fetchReference();
+		} catch (error) {
+			// 参照先のメッセージが存在しない場合（削除されたメッセージへの返信など）はスキップ
+			console.log('[ロメコイン] 返信先メッセージの取得に失敗しました（削除された可能性があります）:', error.message);
+			return;
+		}
+		
 		if (
+			reference &&
+			reference.guild &&
 			reference.guild.id === message.guild.id &&
 			!reference.author.bot &&
 			reference.author.id !== message.author.id
@@ -1159,6 +1169,48 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 		const logChannel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch(() => null);
 		if (!logChannel) return;
 
+		// ユーザー情報を取得
+		let userTag = userId;
+		let executorTag = metadata.executorId || '';
+		let targetUserTag = metadata.targetUserId || '';
+
+		try {
+			const user = await client.users.fetch(userId).catch(() => null);
+			if (user) {
+				userTag = `${user.tag} (<@${userId}>)`;
+			} else {
+				userTag = `<@${userId}>`;
+			}
+		} catch (e) {
+			userTag = `<@${userId}>`;
+		}
+
+		if (metadata.executorId) {
+			try {
+				const executor = await client.users.fetch(metadata.executorId).catch(() => null);
+				if (executor) {
+					executorTag = `${executor.tag} (<@${metadata.executorId}>)`;
+				} else {
+					executorTag = `<@${metadata.executorId}>`;
+				}
+			} catch (e) {
+				executorTag = `<@${metadata.executorId}>`;
+			}
+		}
+
+		if (metadata.targetUserId && metadata.targetUserId !== userId) {
+			try {
+				const targetUser = await client.users.fetch(metadata.targetUserId).catch(() => null);
+				if (targetUser) {
+					targetUserTag = `${targetUser.tag} (<@${metadata.targetUserId}>)`;
+				} else {
+					targetUserTag = `<@${metadata.targetUserId}>`;
+				}
+			} catch (e) {
+				targetUserTag = `<@${metadata.targetUserId}>`;
+			}
+		}
+
 		const change = newBalance - previousBalance;
 		const changeType = change > 0 ? '増額' : change < 0 ? '減額' : '変更なし';
 		const changeEmoji = change > 0 ? '➕' : change < 0 ? '➖' : '➡️';
@@ -1167,7 +1219,7 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 			.setTitle(`${changeEmoji} ロメコイン${changeType}`)
 			.setColor(change > 0 ? 0x00ff00 : change < 0 ? 0xffa500 : 0x99aab5)
 			.addFields(
-				{ name: 'ユーザー', value: `<@${userId}>`, inline: true },
+				{ name: 'ユーザー', value: userTag, inline: true },
 				{ name: '変更前', value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`, inline: true },
 				{ name: '変更後', value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`, inline: true },
 				{ name: '変動額', value: `${change > 0 ? '+' : ''}${ROMECOIN_EMOJI}${change.toLocaleString()}`, inline: true },
@@ -1177,10 +1229,10 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 
 		// 追加情報がある場合は追加
 		if (metadata.executorId) {
-			embed.addFields({ name: '実行者', value: `<@${metadata.executorId}>`, inline: true });
+			embed.addFields({ name: '実行者', value: executorTag, inline: true });
 		}
 		if (metadata.targetUserId && metadata.targetUserId !== userId) {
-			embed.addFields({ name: '対象ユーザー', value: `<@${metadata.targetUserId}>`, inline: true });
+			embed.addFields({ name: '対象ユーザー', value: targetUserTag, inline: true });
 		}
 		if (metadata.commandName) {
 			embed.setFooter({ text: `コマンド: ${metadata.commandName}` });
