@@ -7,6 +7,7 @@ const {
 	ChannelType,
 	StringSelectMenuBuilder,
 	StringSelectMenuOptionBuilder,
+	MessageFlags,
 } = require('discord.js');
 const { generateWacchoi, generateDailyUserId, getAnonymousName } = require('../utils');
 const {
@@ -2752,6 +2753,7 @@ async function handleCommands(interaction, client) {
 			const hasEmojiCreatorRole = shopData[userId] && shopData[userId]['emoji_creator_role'];
 
 			// 商品選択セレクトメニュー
+			// デフォルト値は最大1つまでしか設定できないため、最初の購入済み商品のみデフォルトにする
 			const selectMenu = new StringSelectMenuBuilder()
 				.setCustomId('shop_select_item')
 				.setPlaceholder('購入する商品を選択してください')
@@ -2761,13 +2763,13 @@ async function handleCommands(interaction, client) {
 						.setDescription(`${ROMECOIN_EMOJI}25,000 - ロメダの管理ログ・廃部ログ・過去ログが読めるようになります`)
 						.setValue('log_viewer_role')
 						.setEmoji('📜')
-						.setDefault(hasLogViewerRole),
+						.setDefault(hasLogViewerRole && !hasEmojiCreatorRole), // 最初の購入済み商品のみデフォルト
 					new StringSelectMenuOptionBuilder()
 						.setLabel('絵文字作成権ロール')
 						.setDescription(`${ROMECOIN_EMOJI}30,000 - サーバーで絵文字を作成できるようになります`)
 						.setValue('emoji_creator_role')
 						.setEmoji('🎨')
-						.setDefault(hasEmojiCreatorRole)
+						.setDefault(hasEmojiCreatorRole && !hasLogViewerRole) // 最初の購入済み商品のみデフォルト
 				);
 
 			const row = new ActionRowBuilder().addComponents(selectMenu);
