@@ -1279,13 +1279,29 @@ async function handleCommands(interaction, client) {
 				// 成功したユーザーの詳細（最大10件）
 				const successResults = results.filter((r) => r.success).slice(0, 10);
 				if (successResults.length > 0) {
-					const details = successResults
-						.map(
-							(r) =>
-								`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
-						)
-						.join('\n');
-					resultEmbed.addFields({ name: '付与詳細', value: details, inline: false });
+					// フィールドを分割（1-5位と6-10位）
+					const top5 = successResults.slice(0, 5);
+					const top6to10 = successResults.slice(5, 10);
+
+					if (top5.length > 0) {
+						const details1to5 = top5
+							.map(
+								(r) =>
+									`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+							)
+							.join('\n');
+						resultEmbed.addFields({ name: '付与詳細 (1-5位)', value: details1to5, inline: false });
+					}
+
+					if (top6to10.length > 0) {
+						const details6to10 = top6to10
+							.map(
+								(r) =>
+									`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+							)
+							.join('\n');
+						resultEmbed.addFields({ name: '付与詳細 (6-10位)', value: details6to10, inline: false });
+					}
 				}
 
 				// 失敗したユーザーの詳細
@@ -1294,7 +1310,23 @@ async function handleCommands(interaction, client) {
 					const failDetails = failResults
 						.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
 						.join('\n');
-					resultEmbed.addFields({ name: '❌ エラー', value: failDetails, inline: false });
+					// 失敗詳細も1024文字制限を考慮して分割
+					if (failDetails.length > 1024) {
+						const failDetails1 = failResults
+							.slice(0, Math.ceil(failResults.length / 2))
+							.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
+							.join('\n');
+						const failDetails2 = failResults
+							.slice(Math.ceil(failResults.length / 2))
+							.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
+							.join('\n');
+						resultEmbed.addFields({ name: '❌ エラー (1)', value: failDetails1, inline: false });
+						if (failDetails2) {
+							resultEmbed.addFields({ name: '❌ エラー (2)', value: failDetails2, inline: false });
+						}
+					} else {
+						resultEmbed.addFields({ name: '❌ エラー', value: failDetails, inline: false });
+					}
 				}
 
 				resultEmbed.setTimestamp();
@@ -1405,13 +1437,29 @@ async function handleCommands(interaction, client) {
 				// 成功したユーザーの詳細（最大10件）
 				const successResults = results.filter((r) => r.success).slice(0, 10);
 				if (successResults.length > 0) {
-					const details = successResults
-						.map(
-							(r) =>
-								`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
-						)
-						.join('\n');
-					resultEmbed.addFields({ name: '付与詳細', value: details, inline: false });
+					// フィールドを分割（1-5位と6-10位）
+					const top5 = successResults.slice(0, 5);
+					const top6to10 = successResults.slice(5, 10);
+
+					if (top5.length > 0) {
+						const details1to5 = top5
+							.map(
+								(r) =>
+									`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+							)
+							.join('\n');
+						resultEmbed.addFields({ name: '付与詳細 (1-5位)', value: details1to5, inline: false });
+					}
+
+					if (top6to10.length > 0) {
+						const details6to10 = top6to10
+							.map(
+								(r) =>
+									`**${r.rank}位:** ${r.user} - ${ROMECOIN_EMOJI}${r.rewardAmount.toLocaleString()} (残高: ${ROMECOIN_EMOJI}${r.newBalance.toLocaleString()})`
+							)
+							.join('\n');
+						resultEmbed.addFields({ name: '付与詳細 (6-10位)', value: details6to10, inline: false });
+					}
 				}
 
 				// 失敗したユーザーの詳細
@@ -1420,7 +1468,23 @@ async function handleCommands(interaction, client) {
 					const failDetails = failResults
 						.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
 						.join('\n');
-					resultEmbed.addFields({ name: '❌ エラー', value: failDetails, inline: false });
+					// 失敗詳細も1024文字制限を考慮して分割
+					if (failDetails.length > 1024) {
+						const failDetails1 = failResults
+							.slice(0, Math.ceil(failResults.length / 2))
+							.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
+							.join('\n');
+						const failDetails2 = failResults
+							.slice(Math.ceil(failResults.length / 2))
+							.map((r) => `**${r.rank}位:** ${r.user} - エラー: ${r.error}`)
+							.join('\n');
+						resultEmbed.addFields({ name: '❌ エラー (1)', value: failDetails1, inline: false });
+						if (failDetails2) {
+							resultEmbed.addFields({ name: '❌ エラー (2)', value: failDetails2, inline: false });
+						}
+					} else {
+						resultEmbed.addFields({ name: '❌ エラー', value: failDetails, inline: false });
+					}
 				}
 
 				resultEmbed.setTimestamp();
