@@ -763,6 +763,9 @@ client.once('clientReady', async (client) => {
 	activityTracker.start(client);
 	await proxy.clientReady(client);
 	await romecoin.clientReady(client);
+	
+	// クロスロイドの所持金を黒須銀行の預金として移行
+	await bank.migrateBotBalanceToBank(client);
 });
 
 // コマンド処理

@@ -261,18 +261,39 @@ async function interactionCreate(interaction) {
 					if (opponent) {
 						// クロスロイドと対戦
 						if (opponent.id === interaction.client.user.id) {
-							// クロスロイドのロメコイン残高をチェック
-							const botRomecoin = await getData(interaction.client.user.id, romecoin_data, 0);
-							if (botRomecoin < bet) {
+							// クロスロイドのロメコイン残高をチェック（銀行の預金から）
+							const bank = require('./bank');
+							const bankData = bank.loadBankData();
+							const { getData: getBankData } = require('./dataAccess');
+							const botBankData = await getBankData(interaction.client.user.id, bankData, {
+								deposit: 0,
+								lastInterestTime: Date.now(),
+							});
+							
+							// 利子を計算して追加
+							const INTEREST_RATE_PER_HOUR = 0.001;
+							const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+							const now = Date.now();
+							const hoursPassed = (now - botBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+							if (hoursPassed > 0) {
+								const interest = Math.round(botBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+								if (interest > 0) {
+									botBankData.deposit += interest;
+									botBankData.lastInterestTime = now;
+								}
+							}
+							
+							const botBalance = botBankData.deposit;
+							if (botBalance < bet) {
 								clearUserGame(interaction.user.id);
 								if (!interaction.replied && !interaction.deferred) {
 									const errorEmbed = new EmbedBuilder()
 										.setTitle('❌ エラー')
-										.setDescription('クロスロイドのロメコインが不足しています')
+										.setDescription('クロスロイドのロメコイン（銀行預金）が不足しています')
 										.addFields(
 											{
-												name: 'クロスロイドの現在の所持ロメコイン',
-												value: `${ROMECOIN_EMOJI}${botRomecoin}`,
+												name: 'クロスロイドの現在の預金額',
+												value: `${ROMECOIN_EMOJI}${botBalance.toLocaleString()}`,
 												inline: true,
 											},
 											{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
@@ -1018,19 +1039,64 @@ async function interactionCreate(interaction) {
 							},
 						}
 					);
-					await updateRomecoin(
-						progress.opponent.id,
-						(current) => Math.round((current || 0) - progress.bet),
-						{
-							log: true,
-							client: interaction.client,
-							reason: `じゃんけん敗北: ${progress.user.tag} との対戦`,
-							metadata: {
-								targetUserId: progress.user.id,
-								commandName: 'janken',
-							},
+					
+					// クロスロイドが負けた場合、銀行の預金から引き出す
+					if (progress.opponent.id === interaction.client.user.id) {
+						const bank = require('./bank');
+						const bankData = bank.loadBankData();
+						const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
+						
+						// 利子を計算して追加
+						const INTEREST_RATE_PER_HOUR = 0.001;
+						const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+						const now = Date.now();
+						const botBankData = await getBankData(interaction.client.user.id, bankData, {
+							deposit: 0,
+							lastInterestTime: Date.now(),
+						});
+						const hoursPassed = (now - botBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+						if (hoursPassed > 0) {
+							const interest = Math.round(botBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+							if (interest > 0) {
+								botBankData.deposit += interest;
+								botBankData.lastInterestTime = now;
+							}
 						}
-					);
+						
+						// 預金から引き出す
+						botBankData.deposit -= progress.bet;
+						await updateBankData(interaction.client.user.id, bankData, () => botBankData);
+						bank.saveBankData(bankData);
+						
+						// ロメコインを減らす（預金から引き出したので、所持金は0のまま）
+						await updateRomecoin(
+							interaction.client.user.id,
+							() => 0,
+							{
+								log: true,
+								client: interaction.client,
+								reason: `じゃんけん敗北: ${progress.user.tag} との対戦（銀行預金から引き出し）`,
+								metadata: {
+									targetUserId: progress.user.id,
+									commandName: 'janken',
+								},
+							}
+						);
+					} else {
+						await updateRomecoin(
+							progress.opponent.id,
+							(current) => Math.round((current || 0) - progress.bet),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `じゃんけん敗北: ${progress.user.tag} との対戦`,
+								metadata: {
+									targetUserId: progress.user.id,
+									commandName: 'janken',
+								},
+							}
+						);
+					}
 				} else {
 					winner = progress.opponent;
 					loser = progress.user;
@@ -1047,19 +1113,64 @@ async function interactionCreate(interaction) {
 							},
 						}
 					);
-					await updateRomecoin(
-						progress.opponent.id,
-						(current) => Math.round((current || 0) + progress.bet),
-						{
-							log: true,
-							client: interaction.client,
-							reason: `じゃんけん勝利: ${progress.user.tag} との対戦`,
-							metadata: {
-								targetUserId: progress.user.id,
-								commandName: 'janken',
-							},
+					
+					// クロスロイドが勝った場合、ユーザーから受け取ったロメコインを預金に追加
+					if (progress.opponent.id === interaction.client.user.id) {
+						const bank = require('./bank');
+						const bankData = bank.loadBankData();
+						const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
+						
+						// 利子を計算して追加
+						const INTEREST_RATE_PER_HOUR = 0.001;
+						const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+						const now = Date.now();
+						const botBankData = await getBankData(interaction.client.user.id, bankData, {
+							deposit: 0,
+							lastInterestTime: Date.now(),
+						});
+						const hoursPassed = (now - botBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+						if (hoursPassed > 0) {
+							const interest = Math.round(botBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+							if (interest > 0) {
+								botBankData.deposit += interest;
+								botBankData.lastInterestTime = now;
+							}
 						}
-					);
+						
+						// ユーザーから受け取ったロメコインを預金に追加
+						botBankData.deposit += progress.bet;
+						await updateBankData(interaction.client.user.id, bankData, () => botBankData);
+						bank.saveBankData(bankData);
+						
+						// ロメコインは0のまま（所持金＝預金）
+						await updateRomecoin(
+							interaction.client.user.id,
+							() => 0,
+							{
+								log: true,
+								client: interaction.client,
+								reason: `じゃんけん勝利: ${progress.user.tag} との対戦（預金に追加）`,
+								metadata: {
+									targetUserId: progress.user.id,
+									commandName: 'janken',
+								},
+							}
+						);
+					} else {
+						await updateRomecoin(
+							progress.opponent.id,
+							(current) => Math.round((current || 0) + progress.bet),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `じゃんけん勝利: ${progress.user.tag} との対戦`,
+								metadata: {
+									targetUserId: progress.user.id,
+									commandName: 'janken',
+								},
+							}
+						);
+					}
 				}
 
 				// じゃんけんの勝敗記録（引き分け以外の場合のみ）
