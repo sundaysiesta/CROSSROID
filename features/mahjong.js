@@ -242,50 +242,56 @@ async function handleAgreement(interaction, client) {
 	try {
 		const parts = interaction.customId.split('|');
 		if (parts.length !== 2) {
+			if (interaction.replied || interaction.deferred) return;
 			return interaction.reply({
 				content: '無効なボタンです。',
 				flags: [MessageFlags.Ephemeral],
-			});
+			}).catch(() => {});
 		}
 		const tableId = parts[0].replace('mahjong_agree_', '');
 		const playerId = parts[1];
 		const table = activeTables.get(tableId);
 
 		if (!table) {
+			if (interaction.replied || interaction.deferred) return;
 			return interaction.reply({
 				content: 'このテーブルは既に終了しています。',
 				flags: [MessageFlags.Ephemeral],
-			});
+			}).catch(() => {});
 		}
 
 		if (table.status !== 'waiting') {
+			if (interaction.replied || interaction.deferred) return;
 			return interaction.reply({
 				content: 'このテーブルは既に開始されています。',
 				flags: [MessageFlags.Ephemeral],
-			});
+			}).catch(() => {});
 		}
 
 		if (interaction.user.id !== playerId) {
+			if (interaction.replied || interaction.deferred) return;
 			return interaction.reply({
 				content: 'あなたはこのテーブルの参加メンバーではありません。',
 				flags: [MessageFlags.Ephemeral],
-			});
+			}).catch(() => {});
 		}
 
 		if (table.agreedPlayers.includes(playerId)) {
+			if (interaction.replied || interaction.deferred) return;
 			return interaction.reply({
 				content: 'あなたは既に同意しています。',
 				flags: [MessageFlags.Ephemeral],
-			});
+			}).catch(() => {});
 		}
 
 		// 所持金チェック（マイナスの場合は同意不可）
 		const balance = await require('./romecoin').getRomecoin(interaction.user.id);
 		if (balance < 0) {
+			if (interaction.replied || interaction.deferred) return;
 			return interaction.reply({
 				content: `所持金がマイナス(${ROMECOIN_EMOJI}${balance.toLocaleString()})のため、同意できません。`,
 				flags: [MessageFlags.Ephemeral],
-			});
+			}).catch(() => {});
 		}
 
 		table.agreedPlayers.push(playerId);
@@ -323,7 +329,8 @@ async function handleAgreement(interaction, client) {
 				.setColor(0x00ff00)
 				.setTimestamp();
 
-			await interaction.update({ embeds: [embed], components: [] });
+			if (interaction.replied || interaction.deferred) return;
+			await interaction.update({ embeds: [embed], components: [] }).catch(() => {});
 		} else {
 			// まだ同意待ち
 			const embed = new EmbedBuilder()
@@ -358,7 +365,8 @@ async function handleAgreement(interaction, client) {
 				.setEmoji('❌');
 			const row = new ActionRowBuilder().addComponents([...buttons, cancelButton]);
 
-			await interaction.update({ embeds: [embed], components: [row] });
+			if (interaction.replied || interaction.deferred) return;
+			await interaction.update({ embeds: [embed], components: [row] }).catch(() => {});
 		}
 
 		activeTables.set(tableId, table);

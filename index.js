@@ -772,7 +772,6 @@ client.on('interactionCreate', async (interaction) => {
 	try {
 		await handleCommands(interaction, client);
 		await romecoin.interactionCreate(interaction);
-		await stock.interactionCreate(interaction);
 		
 		// デイリーログインボーナス
 		if (interaction.isChatInputCommand() && interaction.commandName === 'daily') {
