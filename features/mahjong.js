@@ -99,14 +99,23 @@ async function createTable(interaction, client) {
 
 		// 同意ボタンを作成
 		const buttons = players.map((player) => {
+			// Discordのボタンラベルは80文字制限
+			const label = `${player.displayName}が同意`.substring(0, 80);
 			return new ButtonBuilder()
-				.setCustomId(`mahjong_agree_${tableId}_${player.id}`)
-				.setLabel(`${player.displayName}が同意`)
+				.setCustomId(`mahjong_agree_${tableId}|${player.id}`)
+				.setLabel(label)
 				.setStyle(ButtonStyle.Success)
 				.setEmoji('✅');
 		});
 
-		const row = new ActionRowBuilder().addComponents(buttons);
+		// キャンセルボタンを追加（部屋主のみ）
+		const cancelButton = new ButtonBuilder()
+			.setCustomId(`mahjong_cancel_${tableId}`)
+			.setLabel('開催中止')
+			.setStyle(ButtonStyle.Danger)
+			.setEmoji('❌');
+
+		const row = new ActionRowBuilder().addComponents([...buttons, cancelButton]);
 
 		const embed = new EmbedBuilder()
 			.setTitle('🀄 賭け麻雀テーブル作成')
@@ -116,7 +125,11 @@ async function createTable(interaction, client) {
 			.setColor(0x00ff00)
 			.setTimestamp();
 
+		// 参加メンバーをメンション
+		const mentions = players.map((p) => `<@${p.id}>`).join(' ');
+
 		const reply = await interaction.reply({
+			content: `${mentions} 賭け麻雀テーブルへの参加に同意してください。`,
 			embeds: [embed],
 			components: [row],
 		});
@@ -125,22 +138,29 @@ async function createTable(interaction, client) {
 		activeTables.set(tableId, table);
 
 		// タイムアウト処理
-		setTimeout(() => {
+		setTimeout(async () => {
 			const currentTable = activeTables.get(tableId);
 			if (currentTable && currentTable.status === 'waiting') {
-				const remainingPlayers = players.filter(
-					(p) => !currentTable.agreedPlayers.includes(p.id)
+				const remainingPlayers = currentTable.players.filter(
+					(playerId) => !currentTable.agreedPlayers.includes(playerId)
 				);
 				if (remainingPlayers.length > 0) {
 					const embed = new EmbedBuilder()
 						.setTitle('⏰ タイムアウト')
 						.setDescription(
-							`以下のメンバーの同意が得られなかったため、テーブルはキャンセルされました。\n${remainingPlayers.map((p) => `<@${p.id}>`).join(', ')}`
+							`以下のメンバーの同意が得られなかったため、テーブルはキャンセルされました。\n${remainingPlayers.map((playerId) => `<@${playerId}>`).join(', ')}`
 						)
 						.setColor(0xff0000)
 						.setTimestamp();
 
-					interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+					try {
+						const message = await interaction.channel.messages.fetch(currentTable.message).catch(() => null);
+						if (message) {
+							await message.edit({ embeds: [embed], components: [] });
+						}
+					} catch (e) {
+						console.error('[麻雀] タイムアウトメッセージ編集エラー:', e);
+					}
 					activeTables.delete(tableId);
 				}
 			}
@@ -162,7 +182,15 @@ async function createTable(interaction, client) {
 
 async function handleAgreement(interaction, client) {
 	try {
-		const [, , tableId, playerId] = interaction.customId.split('_');
+		const parts = interaction.customId.split('|');
+		if (parts.length !== 2) {
+			return interaction.reply({
+				content: '無効なボタンです。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+		const tableId = parts[0].replace('mahjong_agree_', '');
+		const playerId = parts[1];
 		const table = activeTables.get(tableId);
 
 		if (!table) {
@@ -223,20 +251,28 @@ async function handleAgreement(interaction, client) {
 				.setTimestamp();
 
 			// ボタンを更新（同意済みのボタンを無効化）
-			const buttonPromises = table.players.map(async (player) => {
-				const isAgreed = table.agreedPlayers.includes(player.id);
-				const user = await client.users.fetch(player).catch(() => null);
-				const displayName = user ? user.displayName : `ユーザー${player}`;
+			const buttonPromises = table.players.map(async (playerId) => {
+				const isAgreed = table.agreedPlayers.includes(playerId);
+				const user = await client.users.fetch(playerId).catch(() => null);
+				const displayName = user ? user.displayName : `ユーザー${playerId}`;
+				// Discordのボタンラベルは80文字制限
+				const label = `${displayName}が同意`.substring(0, 80);
 				return new ButtonBuilder()
-					.setCustomId(`mahjong_agree_${tableId}_${player.id}`)
-					.setLabel(`${displayName}が同意`)
+					.setCustomId(`mahjong_agree_${tableId}|${playerId}`)
+					.setLabel(label)
 					.setStyle(isAgreed ? ButtonStyle.Secondary : ButtonStyle.Success)
 					.setEmoji('✅')
 					.setDisabled(isAgreed);
 			});
 
 			const buttons = await Promise.all(buttonPromises);
-			const row = new ActionRowBuilder().addComponents(buttons);
+			// キャンセルボタンも追加
+			const cancelButton = new ButtonBuilder()
+				.setCustomId(`mahjong_cancel_${tableId}`)
+				.setLabel('開催中止')
+				.setStyle(ButtonStyle.Danger)
+				.setEmoji('❌');
+			const row = new ActionRowBuilder().addComponents([...buttons, cancelButton]);
 
 			await interaction.update({ embeds: [embed], components: [row] });
 		}
@@ -286,6 +322,14 @@ async function handleResult(interaction, client) {
 		if (interaction.user.id !== table.host) {
 			return interaction.reply({
 				content: '部屋主のみが点数を入力できます。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		// 既に結果が入力されているかチェック
+		if (table.completedAt) {
+			return interaction.reply({
+				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
@@ -436,6 +480,14 @@ async function handleEdit(interaction, client) {
 			scores.push(player3Score);
 		}
 
+		// 点数バリデーション
+		if (scores.some((s) => s === null || s === undefined)) {
+			return interaction.reply({
+				content: 'すべてのプレイヤーの点数を入力してください。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
 		// 旧記録のロメコイン変更を元に戻す
 		const oldScoreDiffs = table.scoreDiffs || [];
 		for (let i = 0; i < allPlayers.length; i++) {
@@ -538,11 +590,65 @@ async function handleEdit(interaction, client) {
 	}
 }
 
+async function handleCancel(interaction, client) {
+	try {
+		const tableId = interaction.customId.replace('mahjong_cancel_', '');
+		const table = activeTables.get(tableId);
+
+		if (!table) {
+			return interaction.reply({
+				content: 'このテーブルは既に終了しています。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		if (interaction.user.id !== table.host) {
+			return interaction.reply({
+				content: '部屋主のみが開催を中止できます。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		if (table.status !== 'waiting') {
+			return interaction.reply({
+				content: 'このテーブルは既に開始されています。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		// テーブルを削除
+		activeTables.delete(tableId);
+
+		const embed = new EmbedBuilder()
+			.setTitle('❌ 開催中止')
+			.setDescription(`部屋主により、このテーブルは中止されました。`)
+			.setColor(0xff0000)
+			.setTimestamp();
+
+		await interaction.update({ embeds: [embed], components: [] });
+	} catch (error) {
+		console.error('[麻雀] キャンセル処理エラー:', error);
+		if (error.code !== 10062 && error.code !== 40060) {
+			try {
+				if (!interaction.replied && !interaction.deferred) {
+					await interaction.reply({
+						content: 'エラーが発生しました。',
+						flags: [MessageFlags.Ephemeral],
+					});
+				}
+			} catch (e) {
+				// エラーを無視
+			}
+		}
+	}
+}
+
 module.exports = {
 	createTable,
 	handleAgreement,
 	handleResult,
 	handleEdit,
+	handleCancel,
 	loadMahjongData,
 };
 

@@ -548,6 +548,9 @@ client.on('interactionCreate', async (interaction) => {
 	if (interaction.isButton() && interaction.customId.startsWith('mahjong_agree_')) {
 		await mahjong.handleAgreement(interaction, client);
 	}
+	if (interaction.isButton() && interaction.customId.startsWith('mahjong_cancel_')) {
+		await mahjong.handleCancel(interaction, client);
+	}
 });
 
 client.on('messageCreate', async (message) => {
