@@ -34,6 +34,7 @@ const legacyMigration = require('./features/legacyMigration');
 const persistence = require('./features/persistence');
 const activityTracker = require('./features/activityTracker');
 const abuseProtocol = require('./features/abuseProtocol');
+const stock = require('./features/stock');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -123,37 +124,29 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 		}
 
 		// ロメコインを減らす（ログ付き）
-		await romecoin.updateRomecoin(
-			userId,
-			(current) => Math.round((current || 0) - amount),
-			{
-				log: true,
-				client: client,
-				reason: `API経由での減額`,
-				metadata: {
-					commandName: 'api_deduct',
-				},
-			}
-		);
+		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) - amount), {
+			log: true,
+			client: client,
+			reason: `API経由での減額`,
+			metadata: {
+				commandName: 'api_deduct',
+			},
+		});
 		const newBalance = await romecoin.getRomecoin(userId);
 
 		// Botアカウントにロメコインを追加（部活作成費用など）
 		const botUserId = client.user?.id;
 		if (botUserId) {
 			try {
-				await romecoin.updateRomecoin(
-					botUserId,
-					(current) => Math.round((current || 0) + amount),
-					{
-						log: true,
-						client: client,
-						reason: `API経由での減額に伴うBotアカウントへの追加`,
-						metadata: {
-							targetUserId: userId,
-							commandName: 'api_deduct',
-						},
-					}
-				);
+				await romecoin.updateRomecoin(botUserId, (current) => Math.round((current || 0) + amount), {
+					log: true,
+					client: client,
+					reason: `API経由での減額に伴うBotアカウントへの追加`,
+					metadata: {
+						targetUserId: userId,
+						commandName: 'api_deduct',
+					},
+				});
 				console.log(`[API] Botアカウントに${amount}ロメコインを追加しました`);
 			} catch (botError) {
 				console.error('[API] Botアカウントへのロメコイン追加エラー:', botError);
@@ -196,21 +189,19 @@ app.post('/api/romecoin/:userId/add', authenticateAPI, async (req, res) => {
 		const previousBalance = await romecoin.getRomecoin(userId);
 
 		// ロメコインを追加（ログ付き）
-		await romecoin.updateRomecoin(
-			userId,
-			(current) => Math.round((current || 0) + amount),
-			{
-				log: true,
-				client: client,
-				reason: `API経由での増額`,
-				metadata: {
-					commandName: 'api_add',
-				},
-			}
-		);
+		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) + amount), {
+			log: true,
+			client: client,
+			reason: `API経由での増額`,
+			metadata: {
+				commandName: 'api_add',
+			},
+		});
 		const newBalance = await romecoin.getRomecoin(userId);
 
-		console.log(`[API] ロメコイン追加: userId=${userId}, amount=${amount}, previousBalance=${previousBalance}, newBalance=${newBalance}`);
+		console.log(
+			`[API] ロメコイン追加: userId=${userId}, amount=${amount}, previousBalance=${previousBalance}, newBalance=${newBalance}`
+		);
 
 		res.json({
 			success: true,
@@ -239,7 +230,12 @@ app.use((req, res) => {
 		error: 'エンドポイントが見つかりません',
 		method: req.method,
 		path: req.path,
-		availableEndpoints: ['GET /', 'GET /api/romecoin/:userId', 'POST /api/romecoin/:userId/deduct', 'POST /api/romecoin/:userId/add'],
+		availableEndpoints: [
+			'GET /',
+			'GET /api/romecoin/:userId',
+			'POST /api/romecoin/:userId/deduct',
+			'POST /api/romecoin/:userId/add',
+		],
 	});
 });
 
@@ -356,44 +352,24 @@ client.once('clientReady', async (client) => {
 					.setDescription('参加メンバー1（サンマの場合は2人、四麻の場合は3人必要）')
 					.setRequired(true)
 			)
+			.addUserOption((option) => option.setName('player2').setDescription('参加メンバー2').setRequired(true))
 			.addUserOption((option) =>
-				option
-					.setName('player2')
-					.setDescription('参加メンバー2')
-					.setRequired(true)
-			)
-			.addUserOption((option) =>
-				option
-					.setName('player3')
-					.setDescription('参加メンバー3（四麻の場合のみ必要）')
-					.setRequired(false)
+				option.setName('player3').setDescription('参加メンバー3（四麻の場合のみ必要）').setRequired(false)
 			),
 		new SlashCommandBuilder()
 			.setName('mahjong_result')
 			.setDescription('賭け麻雀の試合結果を入力します')
 			.addStringOption((option) =>
-				option
-					.setName('table_id')
-					.setDescription('テーブルID（試合開始時に表示されます）')
-					.setRequired(true)
+				option.setName('table_id').setDescription('テーブルID（試合開始時に表示されます）').setRequired(true)
 			)
 			.addIntegerOption((option) =>
-				option
-					.setName('player1_score')
-					.setDescription('部屋主の点数')
-					.setRequired(true)
+				option.setName('player1_score').setDescription('部屋主の点数').setRequired(true)
 			)
 			.addIntegerOption((option) =>
-				option
-					.setName('player2_score')
-					.setDescription('プレイヤー1の点数')
-					.setRequired(true)
+				option.setName('player2_score').setDescription('プレイヤー1の点数').setRequired(true)
 			)
 			.addIntegerOption((option) =>
-				option
-					.setName('player3_score')
-					.setDescription('プレイヤー2の点数')
-					.setRequired(true)
+				option.setName('player3_score').setDescription('プレイヤー2の点数').setRequired(true)
 			)
 			.addIntegerOption((option) =>
 				option
@@ -405,28 +381,16 @@ client.once('clientReady', async (client) => {
 			.setName('mahjong_edit')
 			.setDescription('賭け麻雀の試合記録を修正します（部屋主のみ）')
 			.addStringOption((option) =>
-				option
-					.setName('table_id')
-					.setDescription('修正するテーブルID')
-					.setRequired(true)
+				option.setName('table_id').setDescription('修正するテーブルID').setRequired(true)
 			)
 			.addIntegerOption((option) =>
-				option
-					.setName('player1_score')
-					.setDescription('部屋主の点数（修正後）')
-					.setRequired(true)
+				option.setName('player1_score').setDescription('部屋主の点数（修正後）').setRequired(true)
 			)
 			.addIntegerOption((option) =>
-				option
-					.setName('player2_score')
-					.setDescription('プレイヤー1の点数（修正後）')
-					.setRequired(true)
+				option.setName('player2_score').setDescription('プレイヤー1の点数（修正後）').setRequired(true)
 			)
 			.addIntegerOption((option) =>
-				option
-					.setName('player3_score')
-					.setDescription('プレイヤー2の点数（修正後）')
-					.setRequired(true)
+				option.setName('player3_score').setDescription('プレイヤー2の点数（修正後）').setRequired(true)
 			)
 			.addIntegerOption((option) =>
 				option
@@ -489,6 +453,41 @@ client.once('clientReady', async (client) => {
 			),
 		new SlashCommandBuilder().setName('shop').setDescription('ロメコインショップを表示します'),
 		new SlashCommandBuilder().setName('backpack').setDescription('購入済みの商品を確認します'),
+		new SlashCommandBuilder()
+			.setName('stock')
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('info')
+					.setDescription('指定した株式コードの株価情報を取得します')
+					.addStringOption((option) =>
+						option.setName('code').setDescription('株式コード(例: 7203.T)').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('buy')
+					.setDescription('指定した株式コードの株を購入します(デモ)')
+					.addStringOption((option) =>
+						option.setName('code').setDescription('株式コード(例: 7203.T)').setRequired(true)
+					)
+					.addIntegerOption((option) =>
+						option.setName('quantity').setDescription('購入する株数').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('sell')
+					.setDescription('指定した株式コードの株を売却します(デモ)')
+					.addStringOption((option) =>
+						option.setName('code').setDescription('株式コード(例: 7203.T)').setRequired(true)
+					)
+					.addIntegerOption((option) =>
+						option.setName('quantity').setDescription('売却する株数').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand.setName('portfolio').setDescription('自分の株式ポートフォリオを確認します(作成中)')
+			),
 		new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message),
 	].map((command) => command.toJSON());
 
@@ -544,7 +543,8 @@ client.once('clientReady', async (client) => {
 client.on('interactionCreate', async (interaction) => {
 	await handleCommands(interaction, client);
 	await romecoin.interactionCreate(interaction);
-	
+	await stock.interactionCreate(interaction);
+
 	// 麻雀ボタンインタラクション
 	if (interaction.isButton() && interaction.customId.startsWith('mahjong_agree_')) {
 		await mahjong.handleAgreement(interaction, client);
