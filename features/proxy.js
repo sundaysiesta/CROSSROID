@@ -25,26 +25,48 @@ async function messageCreate(message) {
 
 		const messageId = message.id;
 
-		// Webhookを取得または作成
-		let webhook;
-		const webhooks = await message.channel.fetchWebhooks();
-		webhook = webhooks.find((wh) => wh.name === 'CROSSROID');
-
-		if (!webhook) {
-			webhook = await message.channel.createWebhook({
-				name: 'CROSSROID',
-				avatar: message.client.user.displayAvatarURL(),
-			});
-		}
-
-		// 元のメッセージを削除（優先処理）
+		// 削除前にすべての必要な情報を保存
 		const messageContent = message.content;
 		const messageAuthor = message.author;
+		const messageAuthorId = message.author.id;
 		const messageAttachments = Array.from(message.attachments.values());
 		const messageChannel = message.channel;
 		const displayName = message.member?.nickname || message.author.displayName;
 		const avatarURL = message.author.displayAvatarURL();
 
+		// ファイル情報を事前に準備
+		const files = messageAttachments.map((attachment) => ({
+			attachment: attachment.url,
+			name: attachment.name,
+		}));
+
+		// Webhookを取得または作成（削除前に準備）
+		let webhook;
+		try {
+			const webhooks = await message.channel.fetchWebhooks();
+			webhook = webhooks.find((wh) => wh.name === 'CROSSROID');
+
+			if (!webhook) {
+				webhook = await message.channel.createWebhook({
+					name: 'CROSSROID',
+					avatar: message.client.user.displayAvatarURL(),
+				});
+			}
+		} catch (webhookError) {
+			console.error(`[代理投稿] Webhook取得/作成エラー: MessageID=${messageId}`, webhookError);
+			// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
+			return;
+		}
+
+		// 削除ボタンを事前に準備
+		const deleteButton = new ButtonBuilder()
+			.setCustomId(`delete_${messageAuthorId}_${Date.now()}`)
+			.setLabel('削除')
+			.setStyle(ButtonStyle.Danger)
+			.setEmoji('🗑️');
+		const row = new ActionRowBuilder().addComponents(deleteButton);
+
+		// 元のメッセージを削除（優先処理）
 		try {
 			await message.delete();
 			console.log(`[代理投稿] 元メッセージ削除成功: MessageID=${messageId}`);
@@ -54,20 +76,7 @@ async function messageCreate(message) {
 			return;
 		}
 
-		// 削除情報を保存（削除成功後に保存）
-		const files = messageAttachments.map((attachment) => ({
-			attachment: attachment.url,
-			name: attachment.name,
-		}));
-
-		// 代理投稿を送信
-		const deleteButton = new ButtonBuilder()
-			.setCustomId(`delete_${messageAuthor.id}_${Date.now()}`)
-			.setLabel('削除')
-			.setStyle(ButtonStyle.Danger)
-			.setEmoji('🗑️');
-		const row = new ActionRowBuilder().addComponents(deleteButton);
-
+		// 代理投稿を送信（削除後に実行）
 		try {
 			const proxiedMessage = await webhook.send({
 				content: messageContent,
@@ -88,13 +97,15 @@ async function messageCreate(message) {
 				originalMessageId: messageId,
 				timestamp: Date.now(),
 			});
+
+			// クールダウンを更新（送信成功時のみ）
+			messageProxyCooldowns.set(messageAuthorId, Date.now());
 		} catch (webhookError) {
 			console.error(`[代理投稿] Webhook送信エラー: MessageID=${messageId}`, webhookError);
+			console.error(`[代理投稿] エラー詳細:`, webhookError.stack || webhookError);
 			// Webhook送信に失敗しても、元のメッセージは既に削除されている
+			// クールダウンは更新しない（再試行可能にする）
 		}
-
-		// クールダウンを更新
-		messageProxyCooldowns.set(message.author.id, Date.now());
 	}
 }
 
