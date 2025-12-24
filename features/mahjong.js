@@ -11,7 +11,7 @@ const { updateRomecoin } = require('./romecoin');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 const MAHJONG_DATA_FILE = path.join(__dirname, '..', 'mahjong_data.json');
-const WAIT_TIMEOUT_MS = 5 * 60 * 1000; // 5分
+const WAIT_TIMEOUT_MS = 30 * 1000; // 30秒
 
 // データ読み込み
 function loadMahjongData() {
@@ -43,15 +43,15 @@ const activeTables = new Map(); // tableId -> { host, players, rate, gameType, m
 async function createTable(interaction, client) {
 	try {
 		const host = interaction.user;
-		const rate = interaction.options.getInteger('rate');
+		const rate = interaction.options.getNumber('rate');
 		const player1 = interaction.options.getUser('player1');
 		const player2 = interaction.options.getUser('player2');
 		const player3 = interaction.options.getUser('player3');
 
 		// バリデーション
-		if (rate < 1) {
+		if (rate < 0.1 || rate > 1) {
 			return interaction.reply({
-				content: 'レートは1以上で指定してください。',
+				content: 'レートは0.1以上1以下で指定してください。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
@@ -393,7 +393,7 @@ async function handleResult(interaction, client) {
 		for (let i = 0; i < allPlayers.length; i++) {
 			const playerId = allPlayers[i];
 			const diff = scoreDiffs[i];
-			const romecoinChange = diff * table.rate;
+			const romecoinChange = Math.round(diff * table.rate);
 
 			const currentBalance = await require('./romecoin').getRomecoin(playerId);
 			const newBalance = Math.max(0, currentBalance + romecoinChange);
@@ -564,7 +564,7 @@ async function handleEdit(interaction, client) {
 		for (let i = 0; i < allPlayers.length; i++) {
 			const playerId = allPlayers[i];
 			const diff = scoreDiffs[i];
-			const romecoinChange = diff * table.rate;
+			const romecoinChange = Math.round(diff * table.rate);
 
 			const currentBalance = await require('./romecoin').getRomecoin(playerId);
 			const newBalance = Math.max(0, currentBalance + romecoinChange);

@@ -342,12 +342,13 @@ client.once('clientReady', async (client) => {
 		new SlashCommandBuilder()
 			.setName('mahjong_create')
 			.setDescription('雀魂を使った賭け麻雀のテーブルを作成します')
-			.addIntegerOption((option) =>
+			.addNumberOption((option) =>
 				option
 					.setName('rate')
-					.setDescription('レート（1点あたりのロメコイン、1以上）')
+					.setDescription('レート（1点あたりのロメコイン、0.1〜1）')
 					.setRequired(true)
-					.setMinValue(1)
+					.setMinValue(0.1)
+					.setMaxValue(1)
 			)
 			.addUserOption((option) =>
 				option

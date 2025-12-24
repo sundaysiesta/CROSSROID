@@ -643,16 +643,23 @@ async function handleCommands(interaction, client) {
 				: (i) =>
 						i.user.id === opponentUser.id &&
 						(i.customId.startsWith('russian_accept_') || i.customId.startsWith('russian_deny_'));
-			const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+			const collector = interaction.channel.createMessageComponentCollector({ filter, time: 30000, max: 1 });
 
 			// Timeout Handler for Invite (Russian)
 			collector.on('end', async (collected) => {
 				if (collected.size === 0) {
 					clearUserGame(userId);
-					await interaction.editReply({
-						content: '⌛ 時間切れでデスマッチはキャンセルされました。',
-						components: [],
-					});
+					try {
+						await interaction.editReply({
+							content: '⌛ 時間切れでデスマッチはキャンセルされました。',
+							components: [],
+						});
+					} catch (e) {
+						// インタラクションがタイムアウトしている場合はチャンネルに送信
+						if (e.code === 10062 || e.code === 40060) {
+							await interaction.channel.send('⌛ 時間切れでデスマッチはキャンセルされました。').catch(() => {});
+						}
+					}
 					// Penalty for Ignoring
 					// const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
 					// if (opponentMember && opponentMember.moderatable) {
@@ -739,7 +746,7 @@ async function handleCommands(interaction, client) {
 				const gameFilter = (m) => m.user.id === state.turn && m.customId === triggerCustomId;
 				const gameCollector = interaction.channel.createMessageComponentCollector({
 					filter: gameFilter,
-					time: 300000,
+					time: 30000,
 				});
 
 				gameCollector.on('collect', async (move) => {
@@ -853,6 +860,42 @@ async function handleCommands(interaction, client) {
 				gameCollector.on('end', async (c, reason) => {
 					if (reason !== 'death') {
 						interaction.channel.send(`⌛ <@${state.turn}> の戦意喪失によりゲーム終了。`);
+						
+						// ロメコイン返却処理
+						try {
+							await updateRomecoin(
+								userId,
+								(current) => Math.round((current || 0) + bet),
+								{
+									log: true,
+									client: interaction.client,
+									reason: `ロシアンルーレット無効試合: タイムアウトによる返却`,
+									metadata: {
+										targetUserId: actualOpponentUser.id,
+										commandName: 'duel_russian',
+									},
+								}
+							);
+							await updateRomecoin(
+								actualOpponentUser.id,
+								(current) => Math.round((current || 0) + bet),
+								{
+									log: true,
+									client: interaction.client,
+									reason: `ロシアンルーレット無効試合: タイムアウトによる返却`,
+									metadata: {
+										targetUserId: userId,
+										commandName: 'duel_russian',
+									},
+								}
+							);
+							await interaction.channel.send(
+								`💰 無効試合のため、両プレイヤーに ${ROMECOIN_EMOJI}${bet} を返却しました。`
+							);
+						} catch (e) {
+							console.error('ロメコイン返却エラー:', e);
+						}
+						
 						// Penalty for Stalling
 						const cowardMember = await interaction.guild.members.fetch(state.turn).catch(() => null);
 						if (cowardMember && cowardMember.moderatable) {
@@ -863,6 +906,10 @@ async function handleCommands(interaction, client) {
 								);
 							} catch (e) {}
 						}
+						
+						// ゲーム終了：進行状況をクリア
+						clearUserGame(userId);
+						clearUserGame(actualOpponentUser.id);
 					}
 				});
 			});
@@ -2017,7 +2064,7 @@ async function handleCommands(interaction, client) {
 				: (i) =>
 						i.user.id === opponentUser.id &&
 						(i.customId.startsWith('duel_accept_') || i.customId.startsWith('duel_deny_'));
-			const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+			const collector = interaction.channel.createMessageComponentCollector({ filter, time: 30000, max: 1 });
 
 			collector.on('collect', async (i) => {
 				// 受諾したユーザーを取得（open challengeの場合）
@@ -2302,11 +2349,18 @@ async function handleCommands(interaction, client) {
 			collector.on('end', async (collected) => {
 				if (collected.size === 0) {
 					clearUserGame(userId);
-					await interaction.editReply({
-						content: '⏰ 時間切れで決闘がキャンセルされました。',
-						components: [],
-						embeds: [],
-					});
+					try {
+						await interaction.editReply({
+							content: '⏰ 時間切れで決闘がキャンセルされました。',
+							components: [],
+							embeds: [],
+						});
+					} catch (e) {
+						// インタラクションがタイムアウトしている場合はチャンネルに送信
+						if (e.code === 10062 || e.code === 40060) {
+							await interaction.channel.send('⏰ 時間切れで決闘がキャンセルされました。').catch(() => {});
+						}
+					}
 					// タイムアウト時も進行状況をクリア
 					clearUserGame(userId);
 					if (opponentUser) {
@@ -2416,7 +2470,7 @@ async function handleCommands(interaction, client) {
 				: (i) =>
 						i.user.id === opponentUser.id &&
 						(i.customId.startsWith('russian_accept_') || i.customId.startsWith('russian_deny_'));
-			const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+			const collector = interaction.channel.createMessageComponentCollector({ filter, time: 30000, max: 1 });
 
 			collector.on('collect', async (i) => {
 				// 受諾したユーザーを取得（open challengeの場合）
@@ -2506,7 +2560,7 @@ async function handleCommands(interaction, client) {
 				const gameFilter = (m) => m.user.id === state.turn && m.customId === triggerCustomId;
 				const gameCollector = interaction.channel.createMessageComponentCollector({
 					filter: gameFilter,
-					time: 300000,
+					time: 30000,
 				});
 
 				gameCollector.on('collect', async (move) => {
@@ -2659,9 +2713,45 @@ async function handleCommands(interaction, client) {
 					}
 				});
 
-				gameCollector.on('end', (c, reason) => {
+				gameCollector.on('end', async (c, reason) => {
 					if (reason !== 'death') {
 						interaction.channel.send('⏰ ゲームは時間切れで中断されました。');
+						
+						// ロメコイン返却処理
+						try {
+							await updateRomecoin(
+								userId,
+								(current) => Math.round((current || 0) + bet),
+								{
+									log: true,
+									client: interaction.client,
+									reason: `ロシアンルーレット無効試合: タイムアウトによる返却`,
+									metadata: {
+										targetUserId: actualOpponentUser.id,
+										commandName: 'duel_russian',
+									},
+								}
+							);
+							await updateRomecoin(
+								actualOpponentUser.id,
+								(current) => Math.round((current || 0) + bet),
+								{
+									log: true,
+									client: interaction.client,
+									reason: `ロシアンルーレット無効試合: タイムアウトによる返却`,
+									metadata: {
+										targetUserId: userId,
+										commandName: 'duel_russian',
+									},
+								}
+							);
+							await interaction.channel.send(
+								`💰 無効試合のため、両プレイヤーに ${ROMECOIN_EMOJI}${bet} を返却しました。`
+							);
+						} catch (e) {
+							console.error('ロメコイン返却エラー:', e);
+						}
+						
 						// タイムアウト時も進行状況をクリア
 						clearUserGame(userId);
 						clearUserGame(actualOpponentUser.id);
@@ -2671,11 +2761,18 @@ async function handleCommands(interaction, client) {
 
 			collector.on('end', async (collected) => {
 				if (collected.size === 0) {
-					await interaction.editReply({
-						content: '⏰ 時間切れでロシアンルーレットがキャンセルされました。',
-						components: [],
-						embeds: [],
-					});
+					try {
+						await interaction.editReply({
+							content: '⏰ 時間切れでロシアンルーレットがキャンセルされました。',
+							components: [],
+							embeds: [],
+						});
+					} catch (e) {
+						// インタラクションがタイムアウトしている場合はチャンネルに送信
+						if (e.code === 10062 || e.code === 40060) {
+							await interaction.channel.send('⏰ 時間切れでロシアンルーレットがキャンセルされました。').catch(() => {});
+						}
+					}
 					// タイムアウト時も進行状況をクリア
 					clearUserGame(userId);
 					if (opponentUser) {
