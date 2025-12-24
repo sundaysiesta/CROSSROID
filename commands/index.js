@@ -3333,6 +3333,23 @@ async function handleCommands(interaction, client) {
 			await mahjong.handleRanking(interaction, client);
 			return;
 		}
+
+		// 部活投資機能
+		if (interaction.commandName === 'club_invest') {
+			const clubInvestment = require('../features/clubInvestment');
+			const subcommand = interaction.options.getSubcommand();
+			
+			if (subcommand === 'info') {
+				await clubInvestment.handleClubInvestInfo(interaction, client);
+			} else if (subcommand === 'buy') {
+				await clubInvestment.handleClubInvestBuy(interaction, client);
+			} else if (subcommand === 'sell') {
+				await clubInvestment.handleClubInvestSell(interaction, client);
+			} else if (subcommand === 'portfolio') {
+				await clubInvestment.handleClubInvestPortfolio(interaction, client);
+			}
+			return;
+		}
 	}
 
 }

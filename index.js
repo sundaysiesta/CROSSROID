@@ -623,40 +623,40 @@ client.once('clientReady', async (client) => {
 		new SlashCommandBuilder().setName('shop').setDescription('ロメコインショップを表示します'),
 		new SlashCommandBuilder().setName('backpack').setDescription('購入済みの商品を確認します'),
 		new SlashCommandBuilder()
-			.setName('stock')
-			.setDescription('株関連のコマンド')
+			.setName('club_invest')
+			.setDescription('部活投資機能')
 			.addSubcommand((subcommand) =>
 				subcommand
 					.setName('info')
-					.setDescription('指定した株式コードの株価情報を取得します')
-					.addStringOption((option) =>
-						option.setName('code').setDescription('株式コード(例: 7203.T)').setRequired(true)
+					.setDescription('部活の投資情報を表示します')
+					.addChannelOption((option) =>
+						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
 					)
 			)
 			.addSubcommand((subcommand) =>
 				subcommand
 					.setName('buy')
-					.setDescription('指定した株式コードの株を購入します(デモ)')
-					.addStringOption((option) =>
-						option.setName('code').setDescription('株式コード(例: 7203.T)').setRequired(true)
+					.setDescription('部活に投資（株式購入）します')
+					.addChannelOption((option) =>
+						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
 					)
 					.addIntegerOption((option) =>
-						option.setName('quantity').setDescription('購入する株数').setRequired(true)
+						option.setName('amount').setDescription('投資額（ロメコイン）').setRequired(true)
 					)
 			)
 			.addSubcommand((subcommand) =>
 				subcommand
 					.setName('sell')
-					.setDescription('指定した株式コードの株を売却します(デモ)')
-					.addStringOption((option) =>
-						option.setName('code').setDescription('株式コード(例: 7203.T)').setRequired(true)
+					.setDescription('保有株式を売却します')
+					.addChannelOption((option) =>
+						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
 					)
 					.addIntegerOption((option) =>
-						option.setName('quantity').setDescription('売却する株数').setRequired(true)
+						option.setName('shares').setDescription('売却する株式数').setRequired(true)
 					)
 			)
 			.addSubcommand((subcommand) =>
-				subcommand.setName('portfolio').setDescription('自分の株式ポートフォリオを確認します(作成中)')
+				subcommand.setName('portfolio').setDescription('自分の投資ポートフォリオを表示します')
 			),
 		new SlashCommandBuilder().setName('daily').setDescription('デイリーログインボーナスを受け取ります'),
 		new SlashCommandBuilder()

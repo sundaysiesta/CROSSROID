@@ -5,7 +5,7 @@ const { ADMIN_ROLE_ID, DATABASE_CHANNEL_ID } = require('../constants');
 const https = require('https');
 
 // Config
-const FILES = ['activity_data.json', 'custom_cooldowns.json', 'duel_data.json', 'janken_data.json', 'shop_data.json', 'mahjong_data.json', 'bank_data.json', 'loan_data.json', 'daily_data.json'];
+const FILES = ['activity_data.json', 'custom_cooldowns.json', 'duel_data.json', 'janken_data.json', 'shop_data.json', 'mahjong_data.json', 'bank_data.json', 'loan_data.json', 'daily_data.json', 'club_investment_data.json'];
 const SAVE_INTERVAL = 60 * 1000; // 1 min
 
 // --- Helper: Download File ---

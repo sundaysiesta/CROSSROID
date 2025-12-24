@@ -1161,9 +1161,9 @@ async function handleLoanCancel(interaction, client) {
 }
 
 // クロスロイドの所持金を黒須銀行の預金として移行
-async function migrateBotBalanceToBank(client) {
+async function migrateBotBalanceToBank(client, specificBotId = null) {
 	try {
-		const botUserId = client.user?.id;
+		const botUserId = specificBotId || client.user?.id;
 		if (!botUserId) {
 			console.log('[Bank] BotユーザーIDが取得できません。移行をスキップします。');
 			return;
@@ -1172,7 +1172,7 @@ async function migrateBotBalanceToBank(client) {
 		// Botの現在のロメコイン残高を取得
 		const botBalance = await getRomecoin(botUserId);
 		if (botBalance <= 0) {
-			console.log('[Bank] Botのロメコイン残高が0以下です。移行をスキップします。');
+			console.log(`[Bank] Bot(${botUserId})のロメコイン残高が0以下です。移行をスキップします。`);
 			return;
 		}
 
@@ -1214,7 +1214,7 @@ async function migrateBotBalanceToBank(client) {
 		);
 
 		console.log(
-			`[Bank] クロスロイドの所持金を黒須銀行の預金として移行しました。\n` +
+			`[Bank] クロスロイド(${botUserId})の所持金を黒須銀行の預金として移行しました。\n` +
 			`  移行前の所持金: ${ROMECOIN_EMOJI}${botBalance.toLocaleString()}\n` +
 			`  移行前の預金: ${ROMECOIN_EMOJI}${previousDeposit.toLocaleString()}\n` +
 			`  移行後の預金: ${ROMECOIN_EMOJI}${botBankData.deposit.toLocaleString()}`
