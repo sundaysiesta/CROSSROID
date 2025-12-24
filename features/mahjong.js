@@ -82,7 +82,6 @@ async function createTable(interaction, client) {
 
 		// 所持金チェック（-50000を超えている場合は参加不可）
 		const MIN_BALANCE = -50000;
-		const allParticipants = [host, ...players];
 		const balanceChecks = await Promise.all(
 			allParticipants.map(async (participant) => {
 				const balance = await require('./romecoin').getRomecoin(participant.id);

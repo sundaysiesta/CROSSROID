@@ -491,6 +491,52 @@ client.once('clientReady', async (client) => {
 				subcommand.setName('portfolio').setDescription('自分の株式ポートフォリオを確認します(作成中)')
 			),
 		new SlashCommandBuilder().setName('daily').setDescription('デイリーログインボーナスを受け取ります'),
+		new SlashCommandBuilder()
+			.setName('bank')
+			.setDescription('黒須銀行機能')
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('deposit')
+					.setDescription('預金します')
+					.addIntegerOption((option) =>
+						option.setName('amount').setDescription('預金額').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('withdraw')
+					.setDescription('引き出します')
+					.addIntegerOption((option) =>
+						option.setName('amount').setDescription('引き出し額').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) => subcommand.setName('info').setDescription('預金情報を確認します')),
+		new SlashCommandBuilder()
+			.setName('loan')
+			.setDescription('借金機能')
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('request')
+					.setDescription('借金を貸します')
+					.addUserOption((option) =>
+						option.setName('borrower').setDescription('借り手').setRequired(true)
+					)
+					.addIntegerOption((option) =>
+						option.setName('amount').setDescription('貸付額').setRequired(true)
+					)
+					.addIntegerOption((option) =>
+						option.setName('days').setDescription('返済期限（日数、デフォルト: 7日）').setRequired(false)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('repay')
+					.setDescription('借金を返済します')
+					.addUserOption((option) =>
+						option.setName('lender').setDescription('貸し手').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) => subcommand.setName('info').setDescription('借金情報を確認します')),
 		new ContextMenuCommandBuilder().setName('匿名開示 (運営専用)').setType(ApplicationCommandType.Message),
 	].map((command) => command.toJSON());
 
@@ -500,6 +546,15 @@ client.once('clientReady', async (client) => {
 	} catch (e) {
 		console.error('スラッシュコマンドの登録に失敗しました:', e);
 	}
+
+	// 期限切れの借金を定期的にチェック（1時間ごと）
+	setInterval(async () => {
+		try {
+			await bank.checkOverdueLoans(client);
+		} catch (error) {
+			console.error('[Loan] 期限切れチェックエラー:', error);
+		}
+	}, 60 * 60 * 1000); // 1時間ごと
 
 	// 再起動通知を送信
 	try {
@@ -551,6 +606,30 @@ client.on('interactionCreate', async (interaction) => {
 	// デイリーログインボーナス
 	if (interaction.isChatInputCommand() && interaction.commandName === 'daily') {
 		await daily.handleDaily(interaction, client);
+	}
+	
+	// 銀行機能
+	if (interaction.isChatInputCommand() && interaction.commandName === 'bank') {
+		const subcommand = interaction.options.getSubcommand();
+		if (subcommand === 'deposit') {
+			await bank.handleBankDeposit(interaction, client);
+		} else if (subcommand === 'withdraw') {
+			await bank.handleBankWithdraw(interaction, client);
+		} else if (subcommand === 'info') {
+			await bank.handleBankInfo(interaction, client);
+		}
+	}
+	
+	// 借金機能
+	if (interaction.isChatInputCommand() && interaction.commandName === 'loan') {
+		const subcommand = interaction.options.getSubcommand();
+		if (subcommand === 'request') {
+			await bank.handleLoanRequest(interaction, client);
+		} else if (subcommand === 'repay') {
+			await bank.handleLoanRepay(interaction, client);
+		} else if (subcommand === 'info') {
+			await bank.handleLoanInfo(interaction, client);
+		}
 	}
 
 	// 麻雀ボタンインタラクション

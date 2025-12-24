@@ -90,31 +90,48 @@ async function interactionCreate(interaction) {
 			romecoin_ranking_cooldowns.set(guildId, now);
 
 			// データを配列に変換（Notion名の場合はDiscord IDを取得）
+			// 黒須銀行（クロスロイド）を除外
+			const botUserId = interaction.client.user.id;
 			const sortedData = await Promise.all(
-				Object.entries(romecoin_data).map(async ([key, value]) => {
-					const isNotionName = !/^\d+$/.test(key);
-					let discordId = key;
+				Object.entries(romecoin_data)
+					.filter(([key, value]) => {
+						// クロスロイドのIDを除外
+						if (key === botUserId) return false;
+						// Notion名の場合はDiscord IDを確認
+						if (!/^\d+$/.test(key)) {
+							return true; // 後でDiscord IDを確認
+						}
+						return key !== botUserId;
+					})
+					.map(async ([key, value]) => {
+						const isNotionName = !/^\d+$/.test(key);
+						let discordId = key;
 
-					if (isNotionName) {
-						discordId = (await notionManager.getDiscordId(key)) || key;
-					}
+						if (isNotionName) {
+							discordId = (await notionManager.getDiscordId(key)) || key;
+							// クロスロイドの場合は除外
+							if (discordId === botUserId) return null;
+						}
 
-					return { key, discordId, displayName: isNotionName ? key : null, value };
-				})
+						return { key, discordId, displayName: isNotionName ? key : null, value };
+					})
 			);
+			
+			// nullを除外
+			const filteredData = sortedData.filter(item => item !== null);
 
-			sortedData.sort((a, b) => b.value - a.value);
+			filteredData.sort((a, b) => b.value - a.value);
 
 			// ページネーション用のデータ準備
 			const ITEMS_PER_PAGE = 10;
-			const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+			const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 			let currentPage = 0;
 
 			// ランキング表示用の関数
 			const buildRankingEmbed = (page) => {
 				const startIndex = page * ITEMS_PER_PAGE;
-				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
-				const pageData = sortedData.slice(startIndex, endIndex);
+				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredData.length);
+				const pageData = filteredData.slice(startIndex, endIndex);
 
 				let rankingText = '';
 				for (let i = 0; i < pageData.length; i++) {
@@ -134,7 +151,7 @@ async function interactionCreate(interaction) {
 					.setTitle('🏆 ROMECOINランキング')
 					.setDescription(rankingText)
 					.setColor(0xffd700)
-					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
+					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${filteredData.length}人` })
 					.setTimestamp();
 
 				return embed;
@@ -574,23 +591,35 @@ async function interactionCreate(interaction) {
 			}
 
 			// データを配列に変換
+			// 黒須銀行（クロスロイド）を除外
+			const botUserId = interaction.client.user.id;
 			const sortedData = await Promise.all(
-				Object.entries(romecoin_data).map(async ([key, value]) => {
-					const isNotionName = !/^\d+$/.test(key);
-					let discordId = key;
+				Object.entries(romecoin_data)
+					.filter(([key, value]) => {
+						if (key === botUserId) return false;
+						if (!/^\d+$/.test(key)) {
+							return true;
+						}
+						return key !== botUserId;
+					})
+					.map(async ([key, value]) => {
+						const isNotionName = !/^\d+$/.test(key);
+						let discordId = key;
 
-					if (isNotionName) {
-						discordId = (await notionManager.getDiscordId(key)) || key;
-					}
+						if (isNotionName) {
+							discordId = (await notionManager.getDiscordId(key)) || key;
+							if (discordId === botUserId) return null;
+						}
 
-					return { key, discordId, displayName: isNotionName ? key : null, value };
-				})
+						return { key, discordId, displayName: isNotionName ? key : null, value };
+					})
 			);
-
-			sortedData.sort((a, b) => b.value - a.value);
+			
+			const filteredData = sortedData.filter(item => item !== null);
+			filteredData.sort((a, b) => b.value - a.value);
 
 			const ITEMS_PER_PAGE = 10;
-			const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+			const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 
 			let newPage = currentPage;
 			if (action === 'prev' && currentPage > 0) {
@@ -602,8 +631,8 @@ async function interactionCreate(interaction) {
 			// ランキング表示用の関数
 			const buildRankingEmbed = (page) => {
 				const startIndex = page * ITEMS_PER_PAGE;
-				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedData.length);
-				const pageData = sortedData.slice(startIndex, endIndex);
+				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredData.length);
+				const pageData = filteredData.slice(startIndex, endIndex);
 
 				let rankingText = '';
 				for (let i = 0; i < pageData.length; i++) {
@@ -623,7 +652,7 @@ async function interactionCreate(interaction) {
 					.setTitle('🏆 ROMECOINランキング')
 					.setDescription(rankingText)
 					.setColor(0xffd700)
-					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${sortedData.length}人` })
+					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${filteredData.length}人` })
 					.setTimestamp();
 
 				return embed;
