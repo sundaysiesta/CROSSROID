@@ -36,6 +36,7 @@ const activityTracker = require('./features/activityTracker');
 const abuseProtocol = require('./features/abuseProtocol');
 const stock = require('./features/stock');
 const daily = require('./features/daily');
+const bank = require('./features/bank');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -599,45 +600,70 @@ client.once('clientReady', async (client) => {
 
 // コマンド処理
 client.on('interactionCreate', async (interaction) => {
-	await handleCommands(interaction, client);
-	await romecoin.interactionCreate(interaction);
-	await stock.interactionCreate(interaction);
-	
-	// デイリーログインボーナス
-	if (interaction.isChatInputCommand() && interaction.commandName === 'daily') {
-		await daily.handleDaily(interaction, client);
-	}
-	
-	// 銀行機能
-	if (interaction.isChatInputCommand() && interaction.commandName === 'bank') {
-		const subcommand = interaction.options.getSubcommand();
-		if (subcommand === 'deposit') {
-			await bank.handleBankDeposit(interaction, client);
-		} else if (subcommand === 'withdraw') {
-			await bank.handleBankWithdraw(interaction, client);
-		} else if (subcommand === 'info') {
-			await bank.handleBankInfo(interaction, client);
+	try {
+		await handleCommands(interaction, client);
+		await romecoin.interactionCreate(interaction);
+		await stock.interactionCreate(interaction);
+		
+		// デイリーログインボーナス
+		if (interaction.isChatInputCommand() && interaction.commandName === 'daily') {
+			await daily.handleDaily(interaction, client);
 		}
-	}
-	
-	// 借金機能
-	if (interaction.isChatInputCommand() && interaction.commandName === 'loan') {
-		const subcommand = interaction.options.getSubcommand();
-		if (subcommand === 'request') {
-			await bank.handleLoanRequest(interaction, client);
-		} else if (subcommand === 'repay') {
-			await bank.handleLoanRepay(interaction, client);
-		} else if (subcommand === 'info') {
-			await bank.handleLoanInfo(interaction, client);
+		
+		// 銀行機能
+		if (interaction.isChatInputCommand() && interaction.commandName === 'bank') {
+			const subcommand = interaction.options.getSubcommand();
+			if (subcommand === 'deposit') {
+				await bank.handleBankDeposit(interaction, client);
+			} else if (subcommand === 'withdraw') {
+				await bank.handleBankWithdraw(interaction, client);
+			} else if (subcommand === 'info') {
+				await bank.handleBankInfo(interaction, client);
+			}
 		}
-	}
+		
+		// 借金機能
+		if (interaction.isChatInputCommand() && interaction.commandName === 'loan') {
+			const subcommand = interaction.options.getSubcommand();
+			if (subcommand === 'request') {
+				await bank.handleLoanRequest(interaction, client);
+			} else if (subcommand === 'repay') {
+				await bank.handleLoanRepay(interaction, client);
+			} else if (subcommand === 'info') {
+				await bank.handleLoanInfo(interaction, client);
+			}
+		}
 
-	// 麻雀ボタンインタラクション
-	if (interaction.isButton() && interaction.customId.startsWith('mahjong_agree_')) {
-		await mahjong.handleAgreement(interaction, client);
-	}
-	if (interaction.isButton() && interaction.customId.startsWith('mahjong_cancel_')) {
-		await mahjong.handleCancel(interaction, client);
+		// 麻雀ボタンインタラクション
+		if (interaction.isButton() && interaction.customId.startsWith('mahjong_agree_')) {
+			await mahjong.handleAgreement(interaction, client);
+		}
+		if (interaction.isButton() && interaction.customId.startsWith('mahjong_cancel_')) {
+			await mahjong.handleCancel(interaction, client);
+		}
+	} catch (error) {
+		// Unknown interactionエラー（コード10062, 40060）は無視
+		if (error.code === 10062 || error.code === 40060) {
+			return;
+		}
+		console.error('[Interaction] エラー:', error);
+		
+		// エラーが発生した場合、まだ応答していなければエラーメッセージを送信
+		if (!interaction.replied && !interaction.deferred) {
+			try {
+				if (interaction.isChatInputCommand() || interaction.isButton()) {
+					await interaction.reply({
+						content: 'エラーが発生しました。',
+						flags: interaction.isChatInputCommand() ? [require('discord.js').MessageFlags.Ephemeral] : [],
+					}).catch(() => {});
+				}
+			} catch (replyError) {
+				// 応答エラーも無視（インタラクションが既に期限切れの可能性）
+				if (replyError.code !== 10062 && replyError.code !== 40060) {
+					console.error('[Interaction] 応答エラー:', replyError);
+				}
+			}
+		}
 	}
 });
 

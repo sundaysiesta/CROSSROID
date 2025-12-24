@@ -678,6 +678,118 @@ async function handleLoanInfo(interaction, client) {
 	}
 }
 
+// 強制返済を実行する関数
+async function forceRepayLoan(loanKey, loan, client) {
+	try {
+		const loanData = loadLoanData();
+		
+		// 利子を計算
+		const now = Date.now();
+		const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
+		if (hoursPassed > 0) {
+			const interest = calculateInterest(loan.principal, hoursPassed, LOAN_INTEREST_RATE_PER_HOUR);
+			loan.interest += interest;
+			loan.lastInterestTime = now;
+		}
+		
+		const totalAmount = loan.principal + loan.interest;
+		const borrowerBalance = await getRomecoin(loan.borrowerId);
+		
+		// 借り手のロメコインを減額（マイナスになっても強制返済）
+		await updateRomecoin(
+			loan.borrowerId,
+			(current) => Math.round((current || 0) - totalAmount),
+			{
+				log: true,
+				client: client,
+				reason: `借金の強制返済: ${loan.lenderId} へ`,
+				metadata: {
+					commandName: 'loan_force_repay',
+					targetUserId: loan.lenderId,
+				},
+			}
+		);
+		
+		// 貸し手のロメコインを追加
+		await updateRomecoin(
+			loan.lenderId,
+			(current) => Math.round((current || 0) + totalAmount),
+			{
+				log: true,
+				client: client,
+				reason: `借金の強制返済受取: ${loan.borrowerId} から`,
+				metadata: {
+					commandName: 'loan_force_repay',
+					targetUserId: loan.borrowerId,
+				},
+			}
+		);
+		
+		// 借金を削除
+		delete loanData[loanKey];
+		saveLoanData(loanData);
+		
+		// 借り手に通知を送信
+		try {
+			const borrower = await client.users.fetch(loan.borrowerId);
+			if (borrower) {
+				const embed = new EmbedBuilder()
+					.setTitle('⚠️ 借金の強制返済')
+					.setDescription(`返済期限が過ぎていたため、借金が強制返済されました。`)
+					.addFields(
+						{
+							name: '返済額',
+							value: `${ROMECOIN_EMOJI}${totalAmount.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '返済後の残高',
+							value: `${ROMECOIN_EMOJI}${(borrowerBalance - totalAmount).toLocaleString()}`,
+							inline: true,
+						}
+					)
+					.setColor(0xff0000)
+					.setTimestamp();
+				
+				await borrower.send({ embeds: [embed] }).catch(() => {
+					// DM送信に失敗しても無視
+				});
+			}
+		} catch (e) {
+			// 通知送信に失敗しても無視
+		}
+	} catch (error) {
+		console.error('[Loan] 強制返済エラー:', error);
+	}
+}
+
+// 期限切れの借金をチェックして強制返済を実行
+async function checkOverdueLoans(client) {
+	try {
+		const loanData = loadLoanData();
+		const now = Date.now();
+		const overdueLoans = [];
+		
+		// 期限切れの借金を検索
+		for (const [loanKey, loan] of Object.entries(loanData)) {
+			if (loan.dueDate && now > loan.dueDate) {
+				overdueLoans.push({ loanKey, loan });
+			}
+		}
+		
+		// 期限切れの借金を強制返済
+		for (const { loanKey, loan } of overdueLoans) {
+			await forceRepayLoan(loanKey, loan, client);
+		}
+		
+		if (overdueLoans.length > 0) {
+			console.log(`[Loan] ${overdueLoans.length}件の期限切れ借金を強制返済しました`);
+		}
+	} catch (error) {
+		console.error('[Loan] 期限切れチェックエラー:', error);
+	}
+}
+
 module.exports = {
 	handleBankDeposit,
 	handleBankWithdraw,
@@ -687,5 +799,6 @@ module.exports = {
 	handleLoanInfo,
 	loadBankData,
 	loadLoanData,
+	checkOverdueLoans,
 };
 
