@@ -1757,30 +1757,7 @@ async function handleCommands(interaction, client) {
 				// 現在の残高を取得
 				const previousBalance = await getRomecoin(targetUser.id);
 
-				if (previousBalance < amount) {
-					return interaction.editReply({
-						embeds: [
-							new EmbedBuilder()
-								.setTitle('❌ エラー')
-								.setDescription('ユーザーのロメコインが不足しています')
-								.addFields(
-									{
-										name: '現在の所持ロメコイン',
-										value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`,
-										inline: true,
-									},
-									{
-										name: '減額しようとする額',
-										value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
-										inline: true,
-									}
-								)
-								.setColor(0xff0000),
-						],
-					});
-				}
-
-				// ロメコインを減額（ログ付き）
+				// ロメコインを減額（ログ付き、マイナスも許可）
 				await updateRomecoin(
 					targetUser.id,
 					(current) => Math.round((current || 0) - amount),

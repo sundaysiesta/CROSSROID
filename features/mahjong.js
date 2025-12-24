@@ -657,7 +657,7 @@ async function handleEdit(interaction, client) {
 
 			try {
 				const currentBalance = await require('./romecoin').getRomecoin(playerId);
-				const newBalance = Math.max(0, currentBalance + romecoinChange);
+				const newBalance = currentBalance + romecoinChange;
 
 				await updateRomecoin(
 					playerId,
