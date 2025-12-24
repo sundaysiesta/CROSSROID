@@ -509,16 +509,7 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'duel_russian') {
 			const userId = interaction.user.id;
 
-			// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
-			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-			}
-
-			// 重複実行チェック
+			// 重複実行チェック（最初にチェック）
 			if (isUserInGame(userId)) {
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
@@ -529,69 +520,88 @@ async function handleCommands(interaction, client) {
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
 			}
 
+			// 即座にロックをかける（重複対戦を防ぐ）
+			const tempProgressId = `temp_russian_${userId}_${Date.now()}`;
+			setUserGame(userId, 'duel_russian', tempProgressId);
+
+			try {
+				// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
+				if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+					clearUserGame(userId);
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+						.setColor(0xff0000);
+					return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				}
+
 			const opponentUser = interaction.options.getUser('対戦相手');
 			const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
-			// ロメコインチェック
-			const userRomecoin = await getRomecoin(userId);
-			if (userRomecoin < bet) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('ロメコインが不足しています')
-					.addFields(
-						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
-						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
-					)
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-			}
-
-			// 相手が指定されている場合のバリデーション
-			if (opponentUser) {
-				if (opponentUser.id === userId || opponentUser.bot) {
-					return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
-				}
-
-				// 対戦相手のロメコインチェック
-				const opponentRomecoin = await getRomecoin(opponentUser.id);
-				if (opponentRomecoin < bet) {
+				// ロメコインチェック
+				const userRomecoin = await getRomecoin(userId);
+				if (userRomecoin < bet) {
+					clearUserGame(userId);
 					const errorEmbed = new EmbedBuilder()
 						.setTitle('❌ エラー')
-						.setDescription('対戦相手のロメコインが不足しています')
+						.setDescription('ロメコインが不足しています')
 						.addFields(
-							{
-								name: `${opponentUser}の現在の所持ロメコイン`,
-								value: `${ROMECOIN_EMOJI}${opponentRomecoin}`,
-								inline: true,
-							},
+							{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
 							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
 						)
 						.setColor(0xff0000);
 					return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
 				}
-			}
 
-			// Cooldown Check
-			const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
-			let cooldowns = {};
-			if (fs.existsSync(COOLDOWN_FILE)) {
-				try {
-					cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
-				} catch (e) {}
-			}
+				// 相手が指定されている場合のバリデーション
+				if (opponentUser) {
+					if (opponentUser.id === userId || opponentUser.bot) {
+						clearUserGame(userId);
+						return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+					}
 
-			// データ引き継ぎ（ID → Notion名）
-			await migrateData(userId, cooldowns, 'battle_');
+					// 対戦相手のロメコインチェック
+					const opponentRomecoin = await getRomecoin(opponentUser.id);
+					if (opponentRomecoin < bet) {
+						clearUserGame(userId);
+						const errorEmbed = new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setDescription('対戦相手のロメコインが不足しています')
+							.addFields(
+								{
+									name: `${opponentUser}の現在の所持ロメコイン`,
+									value: `${ROMECOIN_EMOJI}${opponentRomecoin}`,
+									inline: true,
+								},
+								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+							)
+							.setColor(0xff0000);
+						return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+					}
+				}
 
-			const now = Date.now();
-			const lastUsed = await getDataWithPrefix(userId, cooldowns, 'battle_', 0);
-			const CD_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 Day Cooldown for Russian
+				// Cooldown Check
+				const COOLDOWN_FILE = path.join(__dirname, '..', 'custom_cooldowns.json');
+				let cooldowns = {};
+				if (fs.existsSync(COOLDOWN_FILE)) {
+					try {
+						cooldowns = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
+					} catch (e) {}
+				}
 
-			if (now - lastUsed < CD_DURATION) {
-				const h = Math.ceil((CD_DURATION - (now - lastUsed)) / (60 * 60 * 1000));
-				return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, ephemeral: true });
-			}
+				// データ引き継ぎ（ID → Notion名）
+				await migrateData(userId, cooldowns, 'battle_');
+
+				const now = Date.now();
+				const lastUsed = await getDataWithPrefix(userId, cooldowns, 'battle_', 0);
+				const CD_DURATION = 1 * 24 * 60 * 60 * 1000; // 1 Day Cooldown for Russian
+
+				if (now - lastUsed < CD_DURATION) {
+					clearUserGame(userId);
+					const h = Math.ceil((CD_DURATION - (now - lastUsed)) / (60 * 60 * 1000));
+					return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, ephemeral: true });
+				}
 
 			// UI
 			const buttonCustomId = isOpenChallenge
@@ -638,6 +648,7 @@ async function handleCommands(interaction, client) {
 			// Timeout Handler for Invite (Russian)
 			collector.on('end', async (collected) => {
 				if (collected.size === 0) {
+					clearUserGame(userId);
 					await interaction.editReply({
 						content: '⌛ 時間切れでデスマッチはキャンセルされました。',
 						components: [],
@@ -855,6 +866,13 @@ async function handleCommands(interaction, client) {
 					}
 				});
 			});
+			} catch (error) {
+				clearUserGame(userId);
+				console.error('duel_russianコマンドエラー:', error);
+				if (!interaction.replied && !interaction.deferred) {
+					await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+				}
+			}
 			return;
 		}
 
@@ -1865,22 +1883,27 @@ async function handleCommands(interaction, client) {
 		try {
 			const userId = interaction.user.id;
 
-			// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
-			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-			}
-
-			// 重複実行チェック
+			// 重複実行チェック（最初にチェック）
 			if (isUserInGame(userId)) {
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
 					.setDescription(
 						'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
 					)
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+			}
+
+			// 即座にロックをかける（重複対戦を防ぐ）
+			const tempProgressId = `temp_duel_${userId}_${Date.now()}`;
+			setUserGame(userId, 'duel', tempProgressId);
+
+			// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
+			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+				clearUserGame(userId);
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
 					.setColor(0xff0000);
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
 			}
@@ -1894,6 +1917,7 @@ async function handleCommands(interaction, client) {
 			// ロメコインチェック
 			const userRomecoin = await getRomecoin(userId);
 			if (userRomecoin < bet) {
+				clearUserGame(userId);
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
 					.setDescription('ロメコインが不足しています')
@@ -1912,6 +1936,7 @@ async function handleCommands(interaction, client) {
 				member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
 
 			if (!isChallengerEligible) {
+				clearUserGame(userId);
 				return interaction.reply({
 					content: 'あなたは決闘に参加するための世代ロールを持っていません。',
 					ephemeral: true,
@@ -1921,14 +1946,17 @@ async function handleCommands(interaction, client) {
 			// 相手が指定されている場合のバリデーション
 			if (opponentUser) {
 				if (opponentUser.id === userId) {
+					clearUserGame(userId);
 					return interaction.reply({ content: '自分自身と決闘することはできません。', ephemeral: true });
 				}
 				if (opponentUser.bot) {
+					clearUserGame(userId);
 					return interaction.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
 				}
 
 				const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
 				if (!opponentMember) {
+					clearUserGame(userId);
 					return interaction.reply({
 						content: '対戦相手のメンバー情報を取得できませんでした。',
 						ephemeral: true,
@@ -1939,6 +1967,7 @@ async function handleCommands(interaction, client) {
 					opponentMember.roles.cache.some((r) => romanRegex.test(r.name)) ||
 					opponentMember.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
 				if (!isOpponentEligible) {
+					clearUserGame(userId);
 					return interaction.reply({
 						content: '対戦相手は決闘に参加するための世代ロールを持っていません。',
 						ephemeral: true,
@@ -2272,6 +2301,7 @@ async function handleCommands(interaction, client) {
 			// タイムアウトハンドラー
 			collector.on('end', async (collected) => {
 				if (collected.size === 0) {
+					clearUserGame(userId);
 					await interaction.editReply({
 						content: '⏰ 時間切れで決闘がキャンセルされました。',
 						components: [],
@@ -2285,6 +2315,10 @@ async function handleCommands(interaction, client) {
 				}
 			});
 		} catch (error) {
+			clearUserGame(userId);
+			if (opponentUser) {
+				clearUserGame(opponentUser.id);
+			}
 			console.error('決闘コマンドエラー:', error);
 			if (interaction.deferred || interaction.replied) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });

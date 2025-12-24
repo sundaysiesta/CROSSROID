@@ -174,16 +174,7 @@ async function interactionCreate(interaction) {
 					flags: [MessageFlags.Ephemeral],
 				});
 
-			// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
-			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-			}
-
-			// 重複実行チェック
+			// 重複実行チェック（最初にチェック）
 			if (isUserInGame(interaction.user.id)) {
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
@@ -193,6 +184,21 @@ async function interactionCreate(interaction) {
 					.setColor(0xff0000);
 				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
 			}
+
+			// 即座にロックをかける（重複対戦を防ぐ）
+			const tempProgressId = `temp_janken_${interaction.user.id}_${Date.now()}`;
+			setUserGame(interaction.user.id, 'janken', tempProgressId);
+
+			try {
+				// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
+				if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+					clearUserGame(interaction.user.id);
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+						.setColor(0xff0000);
+					return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+				}
 
 			if (
 				!Object.values(janken_progress_data).some(
@@ -210,6 +216,7 @@ async function interactionCreate(interaction) {
 							// クロスロイドのロメコイン残高をチェック
 							const botRomecoin = await getData(interaction.client.user.id, romecoin_data, 0);
 							if (botRomecoin < bet) {
+								clearUserGame(interaction.user.id);
 								const errorEmbed = new EmbedBuilder()
 									.setTitle('❌ エラー')
 									.setDescription('クロスロイドのロメコインが不足しています')
@@ -432,20 +439,33 @@ async function interactionCreate(interaction) {
 						};
 					}
 				} else {
+					clearUserGame(interaction.user.id);
+					if (!interaction.replied && !interaction.deferred) {
+						await interaction.reply({
+							content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(
+								interaction.user.id,
+								romecoin_data,
+								0
+							)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`,
+							flags: [MessageFlags.Ephemeral],
+						});
+					}
+				}
+			} else {
+				clearUserGame(interaction.user.id);
+				if (!interaction.replied && !interaction.deferred) {
 					await interaction.reply({
-						content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(
-							interaction.user.id,
-							romecoin_data,
-							0
-						)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`,
+						content: 'あなたは現在対戦中のため新規の対戦を開始できません',
 						flags: [MessageFlags.Ephemeral],
 					});
 				}
-			} else {
-				await interaction.reply({
-					content: 'あなたは現在対戦中のため新規の対戦を開始できません',
-					flags: [MessageFlags.Ephemeral],
-				});
+			}
+			} catch (error) {
+				clearUserGame(interaction.user.id);
+				console.error('jankenコマンドエラー:', error);
+				if (!interaction.replied && !interaction.deferred) {
+					await interaction.reply({ content: 'エラーが発生しました。', flags: [MessageFlags.Ephemeral] });
+				}
 			}
 		} else if (interaction.commandName === 'database_export') {
 			if (await checkAdmin(interaction.member)) {
