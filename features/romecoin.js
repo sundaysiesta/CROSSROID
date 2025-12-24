@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { DATABASE_CHANNEL_ID, RADIATION_ROLE_ID } = require('../constants');
+const { DATABASE_CHANNEL_ID, RADIATION_ROLE_ID, ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
 const { checkAdmin } = require('../utils');
 const { getData, updateData, migrateData } = require('./dataAccess');
 const notionManager = require('./notion');
@@ -18,6 +18,8 @@ let janken_progress_data = new Object();
 let romecoin_ranking_cooldowns = new Map();
 // ロメコイン絵文字
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
+// Discordクライアント（ログ送信用）
+let discordClient = null;
 
 const RSPEnum = Object.freeze({
 	rock: 'グー',
@@ -26,6 +28,9 @@ const RSPEnum = Object.freeze({
 });
 
 async function clientReady(client) {
+	// クライアントを保存（ログ送信用）
+	discordClient = client;
+
 	// DBからデータを取得
 	const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
 	const message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
@@ -796,20 +801,60 @@ async function interactionCreate(interaction) {
 				) {
 					winner = progress.user;
 					loser = progress.opponent;
-					await updateData(progress.user.id, romecoin_data, (current) =>
-						Math.round((current || 0) + progress.bet)
+					await updateRomecoin(
+						progress.user.id,
+						(current) => Math.round((current || 0) + progress.bet),
+						{
+							log: true,
+							client: interaction.client,
+							reason: `じゃんけん勝利: ${progress.opponent.tag} との対戦`,
+							metadata: {
+								targetUserId: progress.opponent.id,
+								commandName: 'janken',
+							},
+						}
 					);
-					await updateData(progress.opponent.id, romecoin_data, (current) =>
-						Math.round((current || 0) - progress.bet)
+					await updateRomecoin(
+						progress.opponent.id,
+						(current) => Math.round((current || 0) - progress.bet),
+						{
+							log: true,
+							client: interaction.client,
+							reason: `じゃんけん敗北: ${progress.user.tag} との対戦`,
+							metadata: {
+								targetUserId: progress.user.id,
+								commandName: 'janken',
+							},
+						}
 					);
 				} else {
 					winner = progress.opponent;
 					loser = progress.user;
-					await updateData(progress.user.id, romecoin_data, (current) =>
-						Math.round((current || 0) - progress.bet)
+					await updateRomecoin(
+						progress.user.id,
+						(current) => Math.round((current || 0) - progress.bet),
+						{
+							log: true,
+							client: interaction.client,
+							reason: `じゃんけん敗北: ${progress.opponent.tag} との対戦`,
+							metadata: {
+								targetUserId: progress.opponent.id,
+								commandName: 'janken',
+							},
+						}
 					);
-					await updateData(progress.opponent.id, romecoin_data, (current) =>
-						Math.round((current || 0) + progress.bet)
+					await updateRomecoin(
+						progress.opponent.id,
+						(current) => Math.round((current || 0) + progress.bet),
+						{
+							log: true,
+							client: interaction.client,
+							reason: `じゃんけん勝利: ${progress.user.tag} との対戦`,
+							metadata: {
+								targetUserId: progress.user.id,
+								commandName: 'janken',
+							},
+						}
 					);
 				}
 
@@ -973,10 +1018,26 @@ async function messageCreate(message) {
 	// データ引き継ぎ（ID → Notion名）
 	await migrateData(message.author.id, romecoin_data);
 
-	// ロメコインを更新
+	// ロメコインを更新（ログ付き）
+	const previousBalance = await getData(message.author.id, romecoin_data, 0);
 	await updateData(message.author.id, romecoin_data, (current) => {
 		return Math.round((current || 0) + score);
 	});
+	const newBalance = await getData(message.author.id, romecoin_data, 0);
+	
+	// ログ送信（変動があった場合のみ）
+	if (previousBalance !== newBalance && discordClient) {
+		await logRomecoinChange(
+			discordClient,
+			message.author.id,
+			previousBalance,
+			newBalance,
+			`メッセージ送信による獲得 (スコア: ${score.toFixed(1)})`,
+			{
+				commandName: 'message_create',
+			}
+		);
+	}
 
 	// 返信先のユーザーにも付与
 	if (message.reference) {
@@ -992,10 +1053,27 @@ async function messageCreate(message) {
 				// データ引き継ぎ（ID → Notion名）
 				await migrateData(reference.author.id, romecoin_data);
 
-				// ロメコインを更新
+				// ロメコインを更新（ログ付き）
+				const refPreviousBalance = await getData(reference.author.id, romecoin_data, 0);
 				await updateData(reference.author.id, romecoin_data, (current) => {
 					return Math.round((current || 0) + 5);
 				});
+				const refNewBalance = await getData(reference.author.id, romecoin_data, 0);
+				
+				// ログ送信（変動があった場合のみ）
+				if (refPreviousBalance !== refNewBalance && discordClient) {
+					await logRomecoinChange(
+						discordClient,
+						reference.author.id,
+						refPreviousBalance,
+						refNewBalance,
+						`返信による獲得 (${message.author.tag} からの返信)`,
+						{
+							targetUserId: message.author.id,
+							commandName: 'message_reply',
+						}
+					);
+				}
 			}
 		}
 	}
@@ -1020,10 +1098,27 @@ async function messageReactionAdd(reaction, user) {
 	// データ引き継ぎ（ID → Notion名）
 	await migrateData(reaction.message.author.id, romecoin_data);
 
-	// メッセージがリアクションされたときにも付与
+	// メッセージがリアクションされたときにも付与（ログ付き）
+	const reactPreviousBalance = await getData(reaction.message.author.id, romecoin_data, 0);
 	await updateData(reaction.message.author.id, romecoin_data, (current) => {
 		return Math.round((current || 0) + 5);
 	});
+	const reactNewBalance = await getData(reaction.message.author.id, romecoin_data, 0);
+	
+	// ログ送信（変動があった場合のみ）
+	if (reactPreviousBalance !== reactNewBalance && discordClient) {
+		await logRomecoinChange(
+			discordClient,
+			reaction.message.author.id,
+			reactPreviousBalance,
+			reactNewBalance,
+			`リアクションによる獲得 (${user.tag} からのリアクション)`,
+			{
+				targetUserId: user.id,
+				commandName: 'message_reaction',
+			}
+		);
+	}
 
 	reaction_cooldown_users.push(user.id);
 }
@@ -1048,13 +1143,83 @@ async function getRomecoin(userId) {
 	}
 }
 
-async function updateRomecoin(userId, updateFn) {
+/**
+ * ロメコインの変更ログを送信
+ * @param {Object} client - Discordクライアント
+ * @param {string} userId - ユーザーID
+ * @param {number} previousBalance - 変更前の残高
+ * @param {number} newBalance - 変更後の残高
+ * @param {string} reason - 変更理由
+ * @param {Object} metadata - 追加情報（オプション）
+ */
+async function logRomecoinChange(client, userId, previousBalance, newBalance, reason, metadata = {}) {
+	if (!client) return;
+
+	try {
+		const logChannel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch(() => null);
+		if (!logChannel) return;
+
+		const change = newBalance - previousBalance;
+		const changeType = change > 0 ? '増額' : change < 0 ? '減額' : '変更なし';
+		const changeEmoji = change > 0 ? '➕' : change < 0 ? '➖' : '➡️';
+
+		const embed = new EmbedBuilder()
+			.setTitle(`${changeEmoji} ロメコイン${changeType}`)
+			.setColor(change > 0 ? 0x00ff00 : change < 0 ? 0xffa500 : 0x99aab5)
+			.addFields(
+				{ name: 'ユーザー', value: `<@${userId}>`, inline: true },
+				{ name: '変更前', value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`, inline: true },
+				{ name: '変更後', value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`, inline: true },
+				{ name: '変動額', value: `${change > 0 ? '+' : ''}${ROMECOIN_EMOJI}${change.toLocaleString()}`, inline: true },
+				{ name: '理由', value: reason || '不明', inline: false }
+			)
+			.setTimestamp();
+
+		// 追加情報がある場合は追加
+		if (metadata.executorId) {
+			embed.addFields({ name: '実行者', value: `<@${metadata.executorId}>`, inline: true });
+		}
+		if (metadata.targetUserId && metadata.targetUserId !== userId) {
+			embed.addFields({ name: '対象ユーザー', value: `<@${metadata.targetUserId}>`, inline: true });
+		}
+		if (metadata.commandName) {
+			embed.setFooter({ text: `コマンド: ${metadata.commandName}` });
+		}
+
+		await logChannel.send({ embeds: [embed] }).catch((err) => {
+			console.error('[ロメコインログ] 送信エラー:', err);
+		});
+	} catch (error) {
+		console.error('[ロメコインログ] エラー:', error);
+	}
+}
+
+async function updateRomecoin(userId, updateFn, options = {}) {
 	// romecoin_dataが初期化されていない場合は初期化
 	if (!romecoin_data) {
 		romecoin_data = {};
 	}
+	
+	// 変更前の残高を取得
+	const previousBalance = await getData(userId, romecoin_data, 0);
+	
 	await migrateData(userId, romecoin_data);
 	await updateData(userId, romecoin_data, updateFn);
+	
+	// 変更後の残高を取得
+	const newBalance = await getData(userId, romecoin_data, 0);
+	
+	// ログ送信（オプションで指定された場合）
+	if (options.log && options.client && previousBalance !== newBalance) {
+		await logRomecoinChange(
+			options.client,
+			userId,
+			previousBalance,
+			newBalance,
+			options.reason || 'ロメコイン変更',
+			options.metadata || {}
+		);
+	}
 }
 
 module.exports = {
@@ -1065,4 +1230,5 @@ module.exports = {
 	getRomecoinData,
 	getRomecoin,
 	updateRomecoin,
+	logRomecoinChange,
 };

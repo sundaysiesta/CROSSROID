@@ -121,15 +121,38 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 			});
 		}
 
-		// ロメコインを減らす
-		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) - amount));
+		// ロメコインを減らす（ログ付き）
+		await romecoin.updateRomecoin(
+			userId,
+			(current) => Math.round((current || 0) - amount),
+			{
+				log: true,
+				client: client,
+				reason: `API経由での減額`,
+				metadata: {
+					commandName: 'api_deduct',
+				},
+			}
+		);
 		const newBalance = await romecoin.getRomecoin(userId);
 
 		// Botアカウントにロメコインを追加（部活作成費用など）
 		const botUserId = client.user?.id;
 		if (botUserId) {
 			try {
-				await romecoin.updateRomecoin(botUserId, (current) => Math.round((current || 0) + amount));
+				await romecoin.updateRomecoin(
+					botUserId,
+					(current) => Math.round((current || 0) + amount),
+					{
+						log: true,
+						client: client,
+						reason: `API経由での減額に伴うBotアカウントへの追加`,
+						metadata: {
+							targetUserId: userId,
+							commandName: 'api_deduct',
+						},
+					}
+				);
 				console.log(`[API] Botアカウントに${amount}ロメコインを追加しました`);
 			} catch (botError) {
 				console.error('[API] Botアカウントへのロメコイン追加エラー:', botError);
@@ -171,8 +194,19 @@ app.post('/api/romecoin/:userId/add', authenticateAPI, async (req, res) => {
 		// 現在の残高を取得
 		const previousBalance = await romecoin.getRomecoin(userId);
 
-		// ロメコインを追加
-		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) + amount));
+		// ロメコインを追加（ログ付き）
+		await romecoin.updateRomecoin(
+			userId,
+			(current) => Math.round((current || 0) + amount),
+			{
+				log: true,
+				client: client,
+				reason: `API経由での増額`,
+				metadata: {
+					commandName: 'api_add',
+				},
+			}
+		);
 		const newBalance = await romecoin.getRomecoin(userId);
 
 		console.log(`[API] ロメコイン追加: userId=${userId}, amount=${amount}, previousBalance=${previousBalance}, newBalance=${newBalance}`);

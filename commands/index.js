@@ -340,10 +340,36 @@ async function handleCommands(interaction, client) {
 
 			// ロメコインを譲渡
 			try {
-				// 送信者のロメコインを減らす
-				await updateRomecoin(senderId, (current) => Math.round((current || 0) - amount));
-				// 受信者のロメコインを増やす
-				await updateRomecoin(targetUser.id, (current) => Math.round((current || 0) + amount));
+				// 送信者のロメコインを減らす（ログ付き）
+				await updateRomecoin(
+					senderId,
+					(current) => Math.round((current || 0) - amount),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `giveコマンド: ${targetUser.tag} への譲渡`,
+						metadata: {
+							executorId: interaction.user.id,
+							targetUserId: targetUser.id,
+							commandName: 'give',
+						},
+					}
+				);
+				// 受信者のロメコインを増やす（ログ付き）
+				await updateRomecoin(
+					targetUser.id,
+					(current) => Math.round((current || 0) + amount),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `giveコマンド: ${interaction.user.tag} からの譲渡`,
+						metadata: {
+							executorId: interaction.user.id,
+							targetUserId: senderId,
+							commandName: 'give',
+						},
+					}
+				);
 
 				// 成功メッセージ
 				const senderNewBalance = await getRomecoin(senderId);
@@ -1244,7 +1270,19 @@ async function handleCommands(interaction, client) {
 				const results = [];
 				for (const { rank, user, rewardAmount } of rewardsList) {
 					try {
-						await updateRomecoin(user.id, (current) => Math.round((current || 0) + rewardAmount));
+						await updateRomecoin(
+							user.id,
+							(current) => Math.round((current || 0) + rewardAmount),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `月間ランキング賞金付与: ${rank}位`,
+								metadata: {
+									executorId: interaction.user.id,
+									commandName: 'monthly_ranking_rewards',
+								},
+							}
+						);
 						const newBalance = await getRomecoin(user.id);
 						results.push({
 							rank,
@@ -1402,7 +1440,19 @@ async function handleCommands(interaction, client) {
 				const results = [];
 				for (const { rank, user, rewardAmount } of rewardsList) {
 					try {
-						await updateRomecoin(user.id, (current) => Math.round((current || 0) + rewardAmount));
+						await updateRomecoin(
+							user.id,
+							(current) => Math.round((current || 0) + rewardAmount),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `人気者選手権賞金付与: ${rank}位`,
+								metadata: {
+									executorId: interaction.user.id,
+									commandName: 'popularity_championship_rewards',
+								},
+							}
+						);
 						const newBalance = await getRomecoin(user.id);
 						results.push({
 							rank,
@@ -1543,8 +1593,20 @@ async function handleCommands(interaction, client) {
 				// 現在の残高を取得
 				const previousBalance = await getRomecoin(targetUser.id);
 
-				// ロメコインを増額
-				await updateRomecoin(targetUser.id, (current) => Math.round((current || 0) + amount));
+				// ロメコインを増額（ログ付き）
+				await updateRomecoin(
+					targetUser.id,
+					(current) => Math.round((current || 0) + amount),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `管理者による手動増額`,
+						metadata: {
+							executorId: interaction.user.id,
+							commandName: 'admin_romecoin_add',
+						},
+					}
+				);
 				const newBalance = await getRomecoin(targetUser.id);
 
 				const successEmbed = new EmbedBuilder()
@@ -1647,8 +1709,20 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// ロメコインを減額
-				await updateRomecoin(targetUser.id, (current) => Math.round((current || 0) - amount));
+				// ロメコインを減額（ログ付き）
+				await updateRomecoin(
+					targetUser.id,
+					(current) => Math.round((current || 0) - amount),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `管理者による手動減額`,
+						metadata: {
+							executorId: interaction.user.id,
+							commandName: 'admin_romecoin_deduct',
+						},
+					}
+				);
 				const newBalance = await getRomecoin(targetUser.id);
 
 				const successEmbed = new EmbedBuilder()
@@ -2025,9 +2099,33 @@ async function handleCommands(interaction, client) {
 					winner = actualOpponentMember;
 				}
 
-				// ロメコインのやり取り
-				await updateRomecoin(winner.user.id, (current) => Math.round((current || 0) + bet));
-				await updateRomecoin(loser.user.id, (current) => Math.round((current || 0) - bet));
+				// ロメコインのやり取り（ログ付き）
+				await updateRomecoin(
+					winner.user.id,
+					(current) => Math.round((current || 0) + bet),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `決闘勝利: ${loser.user.tag} との対戦`,
+						metadata: {
+							targetUserId: loser.user.id,
+							commandName: 'duel',
+						},
+					}
+				);
+				await updateRomecoin(
+					loser.user.id,
+					(current) => Math.round((current || 0) - bet),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `決闘敗北: ${winner.user.tag} との対戦`,
+						metadata: {
+							targetUserId: winner.user.id,
+							commandName: 'duel',
+						},
+					}
+				);
 
 				// 戦績記録
 				const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
@@ -2409,13 +2507,33 @@ async function handleCommands(interaction, client) {
 						const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
 						const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
-						// ロメコインのやり取り
-						await updateRomecoin(winnerId, (current) => Math.round((current || 0) + bet));
-						await updateRomecoin(loserId, (current) => Math.round((current || 0) - bet));
-
-						// ロメコインのやり取り
-						await updateRomecoin(winnerId, (current) => Math.round((current || 0) + bet));
-						await updateRomecoin(loserId, (current) => Math.round((current || 0) - bet));
+						// ロメコインのやり取り（ログ付き）
+						await updateRomecoin(
+							winnerId,
+							(current) => Math.round((current || 0) + bet),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `ロシアンルーレット勝利: ${loserUser.tag} との対戦`,
+								metadata: {
+									targetUserId: loserId,
+									commandName: 'duel_russian',
+								},
+							}
+						);
+						await updateRomecoin(
+							loserId,
+							(current) => Math.round((current || 0) - bet),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `ロシアンルーレット敗北: ${winnerUser.tag} との対戦`,
+								metadata: {
+									targetUserId: winnerId,
+									commandName: 'duel_russian',
+								},
+							}
+						);
 
 						// ペナルティ: タイムアウト
 						if (loserMember) {
