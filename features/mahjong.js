@@ -222,7 +222,10 @@ async function handleAgreement(interaction, client) {
 
 		table.agreedPlayers.push(playerId);
 
-		const allPlayers = [table.host, ...table.players];
+		// allPlayersを構築（部屋主の重複を除去）
+		// 既存データでtable.playersに部屋主が含まれている可能性があるため、重複を除去
+		const playersWithoutHost = table.players.filter((p) => p !== table.host);
+		const allPlayers = [table.host, ...playersWithoutHost];
 		const remainingPlayers = table.players.filter((p) => !table.agreedPlayers.includes(p));
 
 		if (remainingPlayers.length === 0) {
@@ -355,7 +358,11 @@ async function handleResult(interaction, client) {
 			});
 		}
 
-		const allPlayers = [table.host, ...table.players];
+		// allPlayersを構築（部屋主の重複を除去）
+		// 既存データでtable.playersに部屋主が含まれている可能性があるため、重複を除去
+		const playersWithoutHost = table.players.filter((p) => p !== table.host);
+		const allPlayers = [table.host, ...playersWithoutHost];
+		
 		const scores = [hostScore, player1Score, player2Score];
 		if (table.gameType === '四麻') {
 			if (player3Score === null || player3Score === undefined) {
@@ -365,6 +372,14 @@ async function handleResult(interaction, client) {
 				});
 			}
 			scores.push(player3Score);
+		}
+		
+		// allPlayersとscoresの長さが一致するか確認
+		if (allPlayers.length !== scores.length) {
+			return interaction.reply({
+				content: `プレイヤー数と点数数の不一致: プレイヤー${allPlayers.length}人、点数${scores.length}個`,
+				flags: [MessageFlags.Ephemeral],
+			});
 		}
 
 		// 点数バリデーション
@@ -533,7 +548,11 @@ async function handleEdit(interaction, client) {
 			});
 		}
 
-		const allPlayers = [table.host, ...table.players];
+		// allPlayersを構築（部屋主の重複を除去）
+		// 既存データでtable.playersに部屋主が含まれている可能性があるため、重複を除去
+		const playersWithoutHost = table.players.filter((p) => p !== table.host);
+		const allPlayers = [table.host, ...playersWithoutHost];
+		
 		const scores = [hostScore, player1Score, player2Score];
 		if (table.gameType === '四麻') {
 			if (player3Score === null || player3Score === undefined) {
@@ -548,6 +567,19 @@ async function handleEdit(interaction, client) {
 				});
 			}
 			scores.push(player3Score);
+		}
+		
+		// allPlayersとscoresの長さが一致するか確認
+		if (allPlayers.length !== scores.length) {
+			if (deferred) {
+				return interaction.editReply({
+					content: `プレイヤー数と点数数の不一致: プレイヤー${allPlayers.length}人、点数${scores.length}個`,
+				});
+			}
+			return interaction.reply({
+				content: `プレイヤー数と点数数の不一致: プレイヤー${allPlayers.length}人、点数${scores.length}個`,
+				flags: [MessageFlags.Ephemeral],
+			});
 		}
 
 		// 点数バリデーション
