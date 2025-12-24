@@ -2,6 +2,8 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const { updateRomecoin, getRomecoin } = require('./romecoin');
+const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
+const { getData, updateData } = require('./dataAccess');
 
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 const DAILY_DATA_FILE = path.join(__dirname, '..', 'daily_data.json');
@@ -61,33 +63,52 @@ function calculateStreakBonus(streak) {
 
 async function handleDaily(interaction, client) {
 	try {
+		// 既に応答済みの場合は処理をスキップ
+		if (interaction.replied || interaction.deferred) {
+			return;
+		}
+
+		// 世代ロールチェック
+		const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+		const member = interaction.member;
+		const hasGenerationRole =
+			member.roles.cache.some((r) => romanRegex.test(r.name)) ||
+			member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
+
+		if (!hasGenerationRole) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('デイリーログインボーナスを受け取るには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const userId = interaction.user.id;
 		const todayKey = getTodayKey();
 		const yesterdayKey = getYesterdayKey();
 
-		// データ読み込み
+		// データ読み込み（Notion連携対応）
 		const data = loadDailyData();
-		if (!data[userId]) {
-			data[userId] = {
-				lastLogin: null,
-				totalDays: 0,
-				streak: 0,
-			};
-		}
-
-		const userData = data[userId];
+		const userData = await getData(userId, data, {
+			lastLogin: null,
+			totalDays: 0,
+			streak: 0,
+		});
 
 		// 今日既にログインしているかチェック
 		if (userData.lastLogin === todayKey) {
-			const embed = new EmbedBuilder()
-				.setTitle('⏰ 本日は既にログインボーナスを受け取っています')
-				.setDescription(
-					`**通算ログイン日数:** ${userData.totalDays}日\n**連続ログイン:** ${userData.streak}日`
-				)
-				.setColor(0xffa500)
-				.setTimestamp();
+			if (!interaction.replied && !interaction.deferred) {
+				const embed = new EmbedBuilder()
+					.setTitle('⏰ 本日は既にログインボーナスを受け取っています')
+					.setDescription(
+						`**通算ログイン日数:** ${userData.totalDays}日\n**連続ログイン:** ${userData.streak}日`
+					)
+					.setColor(0xffa500)
+					.setTimestamp();
 
-			return interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+				return interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+			}
+			return;
 		}
 
 		// 連続ログインの計算
@@ -129,11 +150,11 @@ async function handleDaily(interaction, client) {
 			}
 		);
 
-		// データを更新
+		// データを更新（Notion連携対応）
 		userData.lastLogin = todayKey;
 		userData.totalDays = newTotalDays;
 		userData.streak = newStreak;
-		data[userId] = userData;
+		await updateData(userId, data, () => userData);
 		saveDailyData(data);
 
 		// 結果を表示
@@ -153,15 +174,28 @@ async function handleDaily(interaction, client) {
 			.setColor(0x00ff00)
 			.setTimestamp();
 
-		await interaction.reply({ embeds: [embed] });
+		if (interaction.replied || interaction.deferred) {
+			return;
+		}
+
+		await interaction.reply({ embeds: [embed] }).catch((error) => {
+			// Unknown interactionエラー（コード10062, 40060）は無視
+			if (error.code !== 10062 && error.code !== 40060) {
+				console.error('[Daily] 応答エラー:', error);
+			}
+		});
 	} catch (error) {
+		// Unknown interactionエラー（コード10062, 40060）は無視
+		if (error.code === 10062 || error.code === 40060) {
+			return;
+		}
 		console.error('[Daily] エラー:', error);
 		if (!interaction.replied && !interaction.deferred) {
 			try {
 				await interaction.reply({
 					content: 'エラーが発生しました。',
 					flags: [MessageFlags.Ephemeral],
-				});
+				}).catch(() => {});
 			} catch (e) {
 				// エラーを無視
 			}

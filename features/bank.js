@@ -2,7 +2,8 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const { updateRomecoin, getRomecoin } = require('./romecoin');
-const { getData, updateData, migrateData } = require('./dataAccess');
+const { getData, updateData, migrateData, getDataKey } = require('./dataAccess');
+const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
 
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 const BANK_DATA_FILE = path.join(__dirname, '..', 'bank_data.json');
@@ -62,9 +63,93 @@ function calculateInterest(principal, hours, rate) {
 	return Math.round(principal * Math.pow(1 + rate, hours) - principal);
 }
 
+// 借金キーを生成（Notion連携対応）
+async function generateLoanKey(lenderId, borrowerId) {
+	const lenderKey = await getDataKey(lenderId);
+	const borrowerKey = await getDataKey(borrowerId);
+	return `${lenderKey}_${borrowerKey}`;
+}
+
+// 借金キーを検索（Notion名とDiscord IDの両方をチェック）
+async function findLoanKey(lenderId, borrowerId, loanData) {
+	// まずNotion名で試す
+	const lenderKey = await getDataKey(lenderId);
+	const borrowerKey = await getDataKey(borrowerId);
+	const notionKey = `${lenderKey}_${borrowerKey}`;
+	if (loanData[notionKey]) {
+		return notionKey;
+	}
+	
+	// Notion名で見つからない場合はDiscord IDで試す
+	const idKey = `${lenderId}_${borrowerId}`;
+	if (loanData[idKey]) {
+		return idKey;
+	}
+	
+	// どちらでも見つからない場合は、既存のデータを検索（移行用）
+	for (const [key, loan] of Object.entries(loanData)) {
+		if (loan.lenderId === lenderId && loan.borrowerId === borrowerId) {
+			return key;
+		}
+	}
+	
+	return null;
+}
+
+// 借金データの移行処理（Notion連携対応）
+async function migrateLoanData(userId, loanData) {
+	let migrated = false;
+	
+	// 借り手としての借金を移行
+	for (const [key, loan] of Object.entries(loanData)) {
+		if (loan.borrowerId === userId) {
+			const newKey = await generateLoanKey(loan.lenderId, loan.borrowerId);
+			if (key !== newKey) {
+				loanData[newKey] = loanData[key];
+				delete loanData[key];
+				migrated = true;
+			}
+		}
+	}
+	
+	// 貸し手としての借金を移行
+	for (const [key, loan] of Object.entries(loanData)) {
+		if (loan.lenderId === userId) {
+			const newKey = await generateLoanKey(loan.lenderId, loan.borrowerId);
+			if (key !== newKey) {
+				loanData[newKey] = loanData[key];
+				delete loanData[key];
+				migrated = true;
+			}
+		}
+	}
+	
+	if (migrated) {
+		saveLoanData(loanData);
+	}
+}
+
+// 世代ロールチェック関数
+function checkGenerationRole(member) {
+	const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+	return (
+		member.roles.cache.some((r) => romanRegex.test(r.name)) ||
+		member.roles.cache.has(CURRENT_GENERATION_ROLE_ID)
+	);
+}
+
 // 銀行機能
 async function handleBankDeposit(interaction, client) {
 	try {
+		// 世代ロールチェック
+		if (!checkGenerationRole(interaction.member)) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('銀行機能を利用するには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const userId = interaction.user.id;
 		const amount = interaction.options.getInteger('amount');
 
@@ -83,28 +168,27 @@ async function handleBankDeposit(interaction, client) {
 			});
 		}
 
-		// 銀行データを読み込み
+		// 銀行データを読み込み（Notion連携対応）
 		const bankData = loadBankData();
-		if (!bankData[userId]) {
-			bankData[userId] = {
-				deposit: 0,
-				lastInterestTime: Date.now(),
-			};
-		}
+		const userBankData = await getData(userId, bankData, {
+			deposit: 0,
+			lastInterestTime: Date.now(),
+		});
 
 		// 利子を計算して追加
 		const now = Date.now();
-		const hoursPassed = (now - bankData[userId].lastInterestTime) / INTEREST_INTERVAL_MS;
+		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
 		if (hoursPassed > 0) {
-			const interest = calculateInterest(bankData[userId].deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
+			const interest = calculateInterest(userBankData.deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
 			if (interest > 0) {
-				bankData[userId].deposit += interest;
+				userBankData.deposit += interest;
 			}
-			bankData[userId].lastInterestTime = now;
+			userBankData.lastInterestTime = now;
 		}
 
 		// 預金を追加
-		bankData[userId].deposit += amount;
+		userBankData.deposit += amount;
+		await updateData(userId, bankData, () => userBankData);
 		saveBankData(bankData);
 
 		// ロメコインを減額
@@ -127,7 +211,7 @@ async function handleBankDeposit(interaction, client) {
 			.addFields(
 				{
 					name: '現在の預金額',
-					value: `${ROMECOIN_EMOJI}${bankData[userId].deposit.toLocaleString()}`,
+					value: `${ROMECOIN_EMOJI}${userBankData.deposit.toLocaleString()}`,
 					inline: true,
 				},
 				{
@@ -157,6 +241,15 @@ async function handleBankDeposit(interaction, client) {
 
 async function handleBankWithdraw(interaction, client) {
 	try {
+		// 世代ロールチェック
+		if (!checkGenerationRole(interaction.member)) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('銀行機能を利用するには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const userId = interaction.user.id;
 		const amount = interaction.options.getInteger('amount');
 
@@ -167,9 +260,14 @@ async function handleBankWithdraw(interaction, client) {
 			});
 		}
 
-		// 銀行データを読み込み
+		// 銀行データを読み込み（Notion連携対応）
 		const bankData = loadBankData();
-		if (!bankData[userId]) {
+		const userBankData = await getData(userId, bankData, {
+			deposit: 0,
+			lastInterestTime: Date.now(),
+		});
+
+		if (!userBankData || userBankData.deposit === 0) {
 			return interaction.reply({
 				content: '預金がありません。',
 				flags: [MessageFlags.Ephemeral],
@@ -178,24 +276,25 @@ async function handleBankWithdraw(interaction, client) {
 
 		// 利子を計算して追加
 		const now = Date.now();
-		const hoursPassed = (now - bankData[userId].lastInterestTime) / INTEREST_INTERVAL_MS;
+		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
 		if (hoursPassed > 0) {
-			const interest = calculateInterest(bankData[userId].deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
+			const interest = calculateInterest(userBankData.deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
 			if (interest > 0) {
-				bankData[userId].deposit += interest;
+				userBankData.deposit += interest;
 			}
-			bankData[userId].lastInterestTime = now;
+			userBankData.lastInterestTime = now;
 		}
 
-		if (bankData[userId].deposit < amount) {
+		if (userBankData.deposit < amount) {
 			return interaction.reply({
-				content: `預金額が不足しています。\n現在の預金額: ${ROMECOIN_EMOJI}${bankData[userId].deposit.toLocaleString()}\n引き出し額: ${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+				content: `預金額が不足しています。\n現在の預金額: ${ROMECOIN_EMOJI}${userBankData.deposit.toLocaleString()}\n引き出し額: ${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		// 預金を減額
-		bankData[userId].deposit -= amount;
+		userBankData.deposit -= amount;
+		await updateData(userId, bankData, () => userBankData);
 		saveBankData(bankData);
 
 		// ロメコインを追加
@@ -217,7 +316,7 @@ async function handleBankWithdraw(interaction, client) {
 			.setDescription(`黒須銀行から ${ROMECOIN_EMOJI}${amount.toLocaleString()} を引き出しました。`)
 			.addFields({
 				name: '残りの預金額',
-				value: `${ROMECOIN_EMOJI}${bankData[userId].deposit.toLocaleString()}`,
+				value: `${ROMECOIN_EMOJI}${userBankData.deposit.toLocaleString()}`,
 				inline: true,
 			})
 			.setColor(0x00ff00)
@@ -241,32 +340,45 @@ async function handleBankWithdraw(interaction, client) {
 
 async function handleBankInfo(interaction, client) {
 	try {
+		// 世代ロールチェック
+		if (!checkGenerationRole(interaction.member)) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('銀行機能を利用するには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const userId = interaction.user.id;
 
-		// 銀行データを読み込み
+		// 銀行データを読み込み（Notion連携対応）
 		const bankData = loadBankData();
-		if (!bankData[userId]) {
-			return interaction.reply({
-				content: '預金がありません。',
-				flags: [MessageFlags.Ephemeral],
-			});
-		}
+		const userBankData = await getData(userId, bankData, {
+			deposit: 0,
+			lastInterestTime: Date.now(),
+		});
 
 		// 利子を計算して追加
 		const now = Date.now();
-		const hoursPassed = (now - bankData[userId].lastInterestTime) / INTEREST_INTERVAL_MS;
+		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
 		let interest = 0;
 		if (hoursPassed > 0) {
-			interest = calculateInterest(bankData[userId].deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
+			interest = calculateInterest(userBankData.deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
 			if (interest > 0) {
-				bankData[userId].deposit += interest;
-				bankData[userId].lastInterestTime = now;
+				userBankData.deposit += interest;
+				userBankData.lastInterestTime = now;
+				await updateData(userId, bankData, () => userBankData);
 				saveBankData(bankData);
 			}
 		}
 
-		// 銀行の合計額を計算
-		const totalDeposit = Object.values(bankData).reduce((sum, data) => sum + (data.deposit || 0), 0);
+		// 銀行の合計額を計算（全ユーザーのデータを集計）
+		const totalDeposit = Object.values(bankData).reduce((sum, data) => {
+			if (data && typeof data === 'object' && 'deposit' in data) {
+				return sum + (data.deposit || 0);
+			}
+			return sum;
+		}, 0);
 
 		const embed = new EmbedBuilder()
 			.setTitle('🏦 黒須銀行')
@@ -274,7 +386,7 @@ async function handleBankInfo(interaction, client) {
 			.addFields(
 				{
 					name: 'あなたの預金額',
-					value: `${ROMECOIN_EMOJI}${bankData[userId].deposit.toLocaleString()}`,
+					value: `${ROMECOIN_EMOJI}${userBankData.deposit.toLocaleString()}`,
 					inline: true,
 				},
 				{
@@ -310,6 +422,15 @@ async function handleBankInfo(interaction, client) {
 // 借金機能
 async function handleLoanRequest(interaction, client) {
 	try {
+		// 世代ロールチェック
+		if (!checkGenerationRole(interaction.member)) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('借金機能を利用するには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const lenderId = interaction.user.id;
 		const borrower = interaction.options.getUser('borrower');
 		const amount = interaction.options.getInteger('amount');
@@ -350,11 +471,19 @@ async function handleLoanRequest(interaction, client) {
 			});
 		}
 
-		// 借金データを読み込み
+		// 借金データを読み込み（Notion連携対応）
 		const loanData = loadLoanData();
-		const loanKey = `${lenderId}_${borrower.id}`;
+		const loanKey = await generateLoanKey(lenderId, borrower.id);
 		
-		if (loanData[loanKey]) {
+		// 既存の借金を検索（移行用）
+		const existingKey = await findLoanKey(lenderId, borrower.id, loanData);
+		if (existingKey) {
+			// 既存のキーと新しいキーが異なる場合は移行
+			if (existingKey !== loanKey) {
+				loanData[loanKey] = loanData[existingKey];
+				delete loanData[existingKey];
+				saveLoanData(loanData);
+			}
 			return interaction.reply({
 				content: 'このユーザーには既に借金があります。返済後に新しい借金を作成できます。',
 				flags: [MessageFlags.Ephemeral],
@@ -451,6 +580,15 @@ async function handleLoanRequest(interaction, client) {
 
 async function handleLoanRepay(interaction, client) {
 	try {
+		// 世代ロールチェック
+		if (!checkGenerationRole(interaction.member)) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('借金機能を利用するには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const borrowerId = interaction.user.id;
 		const lender = interaction.options.getUser('lender');
 
@@ -461,15 +599,24 @@ async function handleLoanRepay(interaction, client) {
 			});
 		}
 
-		// 借金データを読み込み
+		// 借金データを読み込み（Notion連携対応）
 		const loanData = loadLoanData();
-		const loanKey = `${lender.id}_${borrowerId}`;
+		const loanKey = await generateLoanKey(lender.id, borrowerId);
 		
-		if (!loanData[loanKey]) {
+		// 既存の借金を検索（移行用）
+		let existingKey = await findLoanKey(lender.id, borrowerId, loanData);
+		if (!existingKey) {
 			return interaction.reply({
 				content: 'このユーザーへの借金はありません。',
 				flags: [MessageFlags.Ephemeral],
 			});
+		}
+
+		// 既存のキーと新しいキーが異なる場合は移行
+		if (existingKey !== loanKey) {
+			loanData[loanKey] = loanData[existingKey];
+			delete loanData[existingKey];
+			saveLoanData(loanData);
 		}
 
 		const loan = loanData[loanKey];
@@ -590,10 +737,22 @@ async function handleLoanRepay(interaction, client) {
 
 async function handleLoanInfo(interaction, client) {
 	try {
+		// 世代ロールチェック
+		if (!checkGenerationRole(interaction.member)) {
+			const errorEmbed = new EmbedBuilder()
+				.setTitle('❌ エラー')
+				.setDescription('借金機能を利用するには世代ロールが必要です。')
+				.setColor(0xff0000);
+			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+		}
+
 		const userId = interaction.user.id;
 
 		// 借金データを読み込み
 		const loanData = loadLoanData();
+		
+		// 借金データの移行処理（Notion連携対応）
+		await migrateLoanData(userId, loanData);
 		
 		// 借り手としての借金
 		const loansAsBorrower = Object.entries(loanData)
@@ -773,7 +932,16 @@ async function checkOverdueLoans(client) {
 		// 期限切れの借金を検索
 		for (const [loanKey, loan] of Object.entries(loanData)) {
 			if (loan.dueDate && now > loan.dueDate) {
-				overdueLoans.push({ loanKey, loan });
+				// 借金データの移行処理（Notion連携対応）
+				const newKey = await generateLoanKey(loan.lenderId, loan.borrowerId);
+				if (loanKey !== newKey) {
+					loanData[newKey] = loanData[loanKey];
+					delete loanData[loanKey];
+					saveLoanData(loanData);
+					overdueLoans.push({ loanKey: newKey, loan });
+				} else {
+					overdueLoans.push({ loanKey, loan });
+				}
 			}
 		}
 		
@@ -800,5 +968,6 @@ module.exports = {
 	loadBankData,
 	loadLoanData,
 	checkOverdueLoans,
+	migrateLoanData,
 };
 

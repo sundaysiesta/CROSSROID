@@ -36,6 +36,46 @@ function saveMahjongData(data) {
 	}
 }
 
+// 既存の試合記録から統計を再計算（過去のデータも反映）
+function recalculateStats(data) {
+	// 統計をリセット
+	data.stats = {};
+	
+	// すべての試合記録を走査
+	for (const [tableId, record] of Object.entries(data)) {
+		// statsオブジェクトはスキップ
+		if (tableId === 'stats') continue;
+		
+		// 完了した試合のみをカウント
+		if (!record.completedAt || !record.players || !record.romecoinChanges) continue;
+		
+		const allPlayers = record.players;
+		const romecoinChanges = record.romecoinChanges;
+		
+		for (let i = 0; i < allPlayers.length && i < romecoinChanges.length; i++) {
+			const playerId = allPlayers[i];
+			const romecoinChange = romecoinChanges[i];
+			
+			if (!data.stats[playerId]) {
+				data.stats[playerId] = {
+					totalWinnings: 0,
+					totalLosses: 0,
+					gamesPlayed: 0,
+					gamesWon: 0,
+				};
+			}
+			
+			data.stats[playerId].gamesPlayed++;
+			if (romecoinChange > 0) {
+				data.stats[playerId].totalWinnings += romecoinChange;
+				data.stats[playerId].gamesWon++;
+			} else if (romecoinChange < 0) {
+				data.stats[playerId].totalLosses += Math.abs(romecoinChange);
+			}
+		}
+	}
+}
+
 // 麻雀データ取得（未使用だが将来の拡張用に保持）
 
 // 進行中のテーブル管理
@@ -473,6 +513,33 @@ async function handleResult(interaction, client) {
 
 		const data = loadMahjongData();
 		data[tableId] = matchRecord;
+		
+		// ユーザーごとの累計獲得賞金・負けた金額を更新
+		if (!data.stats) {
+			data.stats = {};
+		}
+		for (let i = 0; i < allPlayers.length; i++) {
+			const playerId = allPlayers[i];
+			const romecoinChange = results[i].romecoinChange;
+			
+			if (!data.stats[playerId]) {
+				data.stats[playerId] = {
+					totalWinnings: 0,
+					totalLosses: 0,
+					gamesPlayed: 0,
+					gamesWon: 0,
+				};
+			}
+			
+			data.stats[playerId].gamesPlayed++;
+			if (romecoinChange > 0) {
+				data.stats[playerId].totalWinnings += romecoinChange;
+				data.stats[playerId].gamesWon++;
+			} else if (romecoinChange < 0) {
+				data.stats[playerId].totalLosses += Math.abs(romecoinChange);
+			}
+		}
+		
 		saveMahjongData(data);
 
 		// 結果を表示
@@ -722,6 +789,61 @@ async function handleEdit(interaction, client) {
 		table.editedBy = interaction.user.id;
 
 		data[tableId] = table;
+		
+		// ユーザーごとの累計獲得賞金・負けた金額を更新（修正時は旧記録を差し引いて新記録を追加）
+		if (!data.stats) {
+			data.stats = {};
+		}
+		
+		// 旧記録の統計を差し引く
+		if (table.romecoinChanges && table.romecoinChanges.length > 0) {
+			for (let i = 0; i < allPlayers.length; i++) {
+				const playerId = allPlayers[i];
+				const oldRomecoinChange = table.romecoinChanges[i] || 0;
+				
+				if (!data.stats[playerId]) {
+					data.stats[playerId] = {
+						totalWinnings: 0,
+						totalLosses: 0,
+						gamesPlayed: 0,
+						gamesWon: 0,
+					};
+				}
+				
+				// 旧記録を差し引く
+				if (oldRomecoinChange > 0) {
+					data.stats[playerId].totalWinnings = Math.max(0, data.stats[playerId].totalWinnings - oldRomecoinChange);
+					data.stats[playerId].gamesWon = Math.max(0, data.stats[playerId].gamesWon - 1);
+				} else if (oldRomecoinChange < 0) {
+					data.stats[playerId].totalLosses = Math.max(0, data.stats[playerId].totalLosses - Math.abs(oldRomecoinChange));
+				}
+				data.stats[playerId].gamesPlayed = Math.max(0, data.stats[playerId].gamesPlayed - 1);
+			}
+		}
+		
+		// 新記録の統計を追加
+		for (let i = 0; i < allPlayers.length; i++) {
+			const playerId = allPlayers[i];
+			const romecoinChange = results[i].romecoinChange;
+			
+			if (!data.stats[playerId]) {
+				data.stats[playerId] = {
+					totalWinnings: 0,
+					totalLosses: 0,
+					gamesPlayed: 0,
+					gamesWon: 0,
+				};
+			}
+			
+			data.stats[playerId].gamesPlayed++;
+			if (romecoinChange > 0) {
+				data.stats[playerId].totalWinnings += romecoinChange;
+				data.stats[playerId].gamesWon++;
+			} else if (romecoinChange < 0) {
+				data.stats[playerId].totalLosses += Math.abs(romecoinChange);
+			}
+		}
+		
 		saveMahjongData(data);
 
 		// 結果を表示
@@ -836,6 +958,112 @@ async function handleCancel(interaction, client) {
 	}
 }
 
+async function handleRanking(interaction, client) {
+	try {
+		const data = loadMahjongData();
+		
+		// 統計を再計算（既存の試合記録から）
+		recalculateStats(data);
+		saveMahjongData(data);
+		
+		if (!data.stats || Object.keys(data.stats).length === 0) {
+			return interaction.reply({
+				content: 'ランキングデータがありません。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
+		// 獲得賞金ランキング
+		const winningsRanking = Object.entries(data.stats)
+			.map(([userId, stats]) => ({
+				userId,
+				totalWinnings: stats.totalWinnings || 0,
+				gamesWon: stats.gamesWon || 0,
+				gamesPlayed: stats.gamesPlayed || 0,
+			}))
+			.filter((entry) => entry.totalWinnings > 0)
+			.sort((a, b) => b.totalWinnings - a.totalWinnings)
+			.slice(0, 10);
+
+		// 負けた金額ランキング
+		const lossesRanking = Object.entries(data.stats)
+			.map(([userId, stats]) => ({
+				userId,
+				totalLosses: stats.totalLosses || 0,
+				gamesPlayed: stats.gamesPlayed || 0,
+			}))
+			.filter((entry) => entry.totalLosses > 0)
+			.sort((a, b) => b.totalLosses - a.totalLosses)
+			.slice(0, 10);
+
+		const embed = new EmbedBuilder()
+			.setTitle('🀄 賭け麻雀ランキング')
+			.setColor(0x00ff00)
+			.setTimestamp();
+
+		// 獲得賞金ランキング
+		if (winningsRanking.length > 0) {
+			const winningsText = winningsRanking
+				.map((entry, index) => {
+					const user = client.users.cache.get(entry.userId);
+					const userName = user ? user.tag : `<@${entry.userId}>`;
+					const winRate = entry.gamesPlayed > 0 
+						? ((entry.gamesWon / entry.gamesPlayed) * 100).toFixed(1)
+						: '0.0';
+					return `${index + 1}. **${userName}**\n   ${ROMECOIN_EMOJI}${entry.totalWinnings.toLocaleString()} (${entry.gamesWon}勝/${entry.gamesPlayed}戦、勝率${winRate}%)`;
+				})
+				.join('\n\n');
+			embed.addFields({
+				name: '💰 獲得賞金ランキング',
+				value: winningsText || 'データなし',
+				inline: false,
+			});
+		} else {
+			embed.addFields({
+				name: '💰 獲得賞金ランキング',
+				value: 'データなし',
+				inline: false,
+			});
+		}
+
+		// 負けた金額ランキング
+		if (lossesRanking.length > 0) {
+			const lossesText = lossesRanking
+				.map((entry, index) => {
+					const user = client.users.cache.get(entry.userId);
+					const userName = user ? user.tag : `<@${entry.userId}>`;
+					return `${index + 1}. **${userName}**\n   ${ROMECOIN_EMOJI}${entry.totalLosses.toLocaleString()} (${entry.gamesPlayed}戦)`;
+				})
+				.join('\n\n');
+			embed.addFields({
+				name: '💸 負けた金額ランキング',
+				value: lossesText || 'データなし',
+				inline: false,
+			});
+		} else {
+			embed.addFields({
+				name: '💸 負けた金額ランキング',
+				value: 'データなし',
+				inline: false,
+			});
+		}
+
+		await interaction.reply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[麻雀] ランキングエラー:', error);
+		if (!interaction.replied && !interaction.deferred) {
+			try {
+				await interaction.reply({
+					content: 'エラーが発生しました。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		}
+	}
+}
+
 module.exports = {
 	createTable,
 	handleAgreement,
@@ -843,5 +1071,6 @@ module.exports = {
 	handleEdit,
 	handleCancel,
 	loadMahjongData,
+	handleRanking,
 };
 

@@ -189,6 +189,22 @@ async function interactionCreate(interaction) {
 				return;
 			}
 
+			// 世代ロールチェック
+			const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
+			const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
+			const member = interaction.member;
+			const hasGenerationRole =
+				member.roles.cache.some((r) => romanRegex.test(r.name)) ||
+				member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
+
+			if (!hasGenerationRole) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('じゃんけんを実行するには世代ロールが必要です。')
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+			}
+
 			const bet = interaction.options.getInteger('bet') ? interaction.options.getInteger('bet') : 100;
 			if (bet < 100) {
 				if (!interaction.replied && !interaction.deferred) {

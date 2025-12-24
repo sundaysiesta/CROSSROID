@@ -3327,6 +3327,12 @@ async function handleCommands(interaction, client) {
 			await mahjong.handleEdit(interaction, client);
 			return;
 		}
+
+		if (interaction.commandName === 'mahjong_ranking') {
+			const mahjong = require('../features/mahjong');
+			await mahjong.handleRanking(interaction, client);
+			return;
+		}
 	}
 
 }

@@ -223,6 +223,171 @@ app.post('/api/romecoin/:userId/add', authenticateAPI, async (req, res) => {
 	}
 });
 
+// データ引き継ぎ（Notion連携時）
+app.post('/api/migrate/:userId', authenticateAPI, async (req, res) => {
+	try {
+		const userId = req.params.userId;
+		console.log(`[API] データ引き継ぎリクエスト: userId=${userId}`);
+
+		if (!userId || userId.trim() === '') {
+			return res.status(400).json({ error: 'ユーザーIDが指定されていません' });
+		}
+
+		const { migrateData, getDataWithPrefix, setDataWithPrefix } = require('./features/dataAccess');
+		const fs = require('fs');
+		const path = require('path');
+		
+		// 各データファイルを引き継ぎ
+		const dataFiles = {
+			romecoin: path.join(__dirname, 'romecoin_data.json'),
+			bank: path.join(__dirname, 'bank_data.json'),
+			daily: path.join(__dirname, 'daily_data.json'),
+			loan: path.join(__dirname, 'loan_data.json'),
+			duel: path.join(__dirname, 'duel_data.json'),
+			janken: path.join(__dirname, 'janken_data.json'),
+			shop: path.join(__dirname, 'data', 'shop_data.json'),
+			mahjong: path.join(__dirname, 'mahjong_data.json'),
+			activity: path.join(__dirname, 'activity_data.json'),
+			custom_cooldowns: path.join(__dirname, 'custom_cooldowns.json'),
+		};
+
+		const results = {};
+		
+		// ロメコインデータの引き継ぎ
+		if (fs.existsSync(dataFiles.romecoin)) {
+			const romecoinData = JSON.parse(fs.readFileSync(dataFiles.romecoin, 'utf8'));
+			const migrated = await migrateData(userId, romecoinData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.romecoin, JSON.stringify(romecoinData, null, 2));
+				results.romecoin = 'migrated';
+			} else {
+				results.romecoin = 'no_migration_needed';
+			}
+		}
+
+		// 銀行データの引き継ぎ
+		if (fs.existsSync(dataFiles.bank)) {
+			const bankData = JSON.parse(fs.readFileSync(dataFiles.bank, 'utf8'));
+			const migrated = await migrateData(userId, bankData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.bank, JSON.stringify(bankData, null, 2));
+				results.bank = 'migrated';
+			} else {
+				results.bank = 'no_migration_needed';
+			}
+		}
+
+		// ログインデータの引き継ぎ
+		if (fs.existsSync(dataFiles.daily)) {
+			const dailyData = JSON.parse(fs.readFileSync(dataFiles.daily, 'utf8'));
+			const migrated = await migrateData(userId, dailyData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.daily, JSON.stringify(dailyData, null, 2));
+				results.daily = 'migrated';
+			} else {
+				results.daily = 'no_migration_needed';
+			}
+		}
+
+		// 借金データの引き継ぎ（特殊処理）
+		if (fs.existsSync(dataFiles.loan)) {
+			const loanData = JSON.parse(fs.readFileSync(dataFiles.loan, 'utf8'));
+			const bank = require('./features/bank');
+			await bank.migrateLoanData(userId, loanData);
+			fs.writeFileSync(dataFiles.loan, JSON.stringify(loanData, null, 2));
+			results.loan = 'migrated';
+		}
+
+		// デュエルデータの引き継ぎ
+		if (fs.existsSync(dataFiles.duel)) {
+			const duelData = JSON.parse(fs.readFileSync(dataFiles.duel, 'utf8'));
+			const migrated = await migrateData(userId, duelData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.duel, JSON.stringify(duelData, null, 2));
+				results.duel = 'migrated';
+			} else {
+				results.duel = 'no_migration_needed';
+			}
+		}
+
+		// じゃんけんデータの引き継ぎ
+		if (fs.existsSync(dataFiles.janken)) {
+			const jankenData = JSON.parse(fs.readFileSync(dataFiles.janken, 'utf8'));
+			const migrated = await migrateData(userId, jankenData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.janken, JSON.stringify(jankenData, null, 2));
+				results.janken = 'migrated';
+			} else {
+				results.janken = 'no_migration_needed';
+			}
+		}
+
+		// ショップデータの引き継ぎ
+		if (fs.existsSync(dataFiles.shop)) {
+			const shopData = JSON.parse(fs.readFileSync(dataFiles.shop, 'utf8'));
+			const migrated = await migrateData(userId, shopData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.shop, JSON.stringify(shopData, null, 2));
+				results.shop = 'migrated';
+			} else {
+				results.shop = 'no_migration_needed';
+			}
+		}
+
+		// 麻雀データの引き継ぎ
+		if (fs.existsSync(dataFiles.mahjong)) {
+			const mahjongData = JSON.parse(fs.readFileSync(dataFiles.mahjong, 'utf8'));
+			const migrated = await migrateData(userId, mahjongData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.mahjong, JSON.stringify(mahjongData, null, 2));
+				results.mahjong = 'migrated';
+			} else {
+				results.mahjong = 'no_migration_needed';
+			}
+		}
+
+		// アクティビティデータの引き継ぎ
+		if (fs.existsSync(dataFiles.activity)) {
+			const activityData = JSON.parse(fs.readFileSync(dataFiles.activity, 'utf8'));
+			const migrated = await migrateData(userId, activityData);
+			if (migrated) {
+				fs.writeFileSync(dataFiles.activity, JSON.stringify(activityData, null, 2));
+				results.activity = 'migrated';
+			} else {
+				results.activity = 'no_migration_needed';
+			}
+		}
+
+		// クールダウンデータの引き継ぎ（プレフィックス付き）
+		if (fs.existsSync(dataFiles.custom_cooldowns)) {
+			const cooldownData = JSON.parse(fs.readFileSync(dataFiles.custom_cooldowns, 'utf8'));
+			// クールダウンデータは 'battle_' プレフィックスを使用
+			const migrated = await migrateData(userId, cooldownData, 'battle_');
+			if (migrated) {
+				fs.writeFileSync(dataFiles.custom_cooldowns, JSON.stringify(cooldownData, null, 2));
+				results.custom_cooldowns = 'migrated';
+			} else {
+				results.custom_cooldowns = 'no_migration_needed';
+			}
+		}
+
+		console.log(`[API] データ引き継ぎ完了: userId=${userId}`, results);
+		res.json({
+			success: true,
+			userId,
+			results,
+		});
+	} catch (error) {
+		console.error('[API] データ引き継ぎエラー:', error);
+		console.error('[API] エラースタック:', error.stack);
+		res.status(500).json({
+			error: 'データの引き継ぎに失敗しました',
+			message: error.message,
+			details: process.env.NODE_ENV !== 'production' ? error.stack : undefined,
+		});
+	}
+});
+
 // 404ハンドラー（デバッグ用）
 app.use((req, res) => {
 	console.log(`[404] リクエストが見つかりません: ${req.method} ${req.path}`);
@@ -237,6 +402,7 @@ app.use((req, res) => {
 			'GET /api/romecoin/:userId',
 			'POST /api/romecoin/:userId/deduct',
 			'POST /api/romecoin/:userId/add',
+			'POST /api/migrate/:userId',
 		],
 	});
 });
@@ -400,6 +566,7 @@ client.once('clientReady', async (client) => {
 					.setDescription('プレイヤー3の点数（修正後、四麻の場合のみ必要）')
 					.setRequired(false)
 			),
+		new SlashCommandBuilder().setName('mahjong_ranking').setDescription('賭け麻雀のランキングを表示します'),
 		new SlashCommandBuilder()
 			.setName('database_export')
 			.setDescription('データベースをエクスポートします(運営専用)'),
