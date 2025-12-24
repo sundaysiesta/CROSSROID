@@ -7,7 +7,6 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { getData, updateData } = require('./dataAccess');
 const { updateRomecoin } = require('./romecoin');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
@@ -36,8 +35,7 @@ function saveMahjongData(data) {
 	}
 }
 
-// 麻雀データ取得
-let mahjong_data = loadMahjongData();
+// 麻雀データ取得（未使用だが将来の拡張用に保持）
 
 // 進行中のテーブル管理
 const activeTables = new Map(); // tableId -> { host, players, rate, gameType, message, agreedPlayers, createdAt }
@@ -231,6 +229,20 @@ async function handleAgreement(interaction, client) {
 			table.status = 'in_progress';
 			table.startedAt = Date.now();
 
+			// 試合開始時にテーブルをデータベースに保存（結果入力時に使用）
+			const data = loadMahjongData();
+			data[tableId] = {
+				tableId: tableId,
+				host: table.host,
+				players: allPlayers,
+				gameType: table.gameType,
+				rate: table.rate,
+				createdAt: table.createdAt,
+				startedAt: table.startedAt,
+				status: 'in_progress',
+			};
+			saveMahjongData(data);
+
 			const embed = new EmbedBuilder()
 				.setTitle('🀄 試合開始')
 				.setDescription(
@@ -326,6 +338,14 @@ async function handleResult(interaction, client) {
 			});
 		}
 
+		// テーブルの状態チェック
+		if (table.status && table.status !== 'in_progress' && table.status !== 'waiting') {
+			return interaction.reply({
+				content: 'このテーブルは既に終了しています。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+
 		// 既に結果が入力されているかチェック
 		if (table.completedAt) {
 			return interaction.reply({
@@ -357,6 +377,16 @@ async function handleResult(interaction, client) {
 		// 25000点基準で計算
 		const BASE_SCORE = 25000;
 		const scoreDiffs = scores.map((score) => score - BASE_SCORE);
+
+		// 点数整合性チェック（サンマ: 合計75000点、四麻: 合計100000点）
+		const expectedTotal = table.gameType === '四麻' ? 100000 : 75000;
+		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
+		if (Math.abs(actualTotal - expectedTotal) > 1) {
+			return interaction.reply({
+				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
 
 		// ロメコイン計算と更新
 		const results = [];
@@ -488,30 +518,42 @@ async function handleEdit(interaction, client) {
 			});
 		}
 
-		// 旧記録のロメコイン変更を元に戻す
-		const oldScoreDiffs = table.scoreDiffs || [];
-		for (let i = 0; i < allPlayers.length; i++) {
-			const playerId = allPlayers[i];
-			const oldDiff = oldScoreDiffs[i] || 0;
-			const oldRomecoinChange = oldDiff * table.rate;
+		// 点数整合性チェック（サンマ: 合計75000点、四麻: 合計100000点）
+		const expectedTotal = table.gameType === '四麻' ? 100000 : 75000;
+		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
+		if (Math.abs(actualTotal - expectedTotal) > 1) {
+			return interaction.reply({
+				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
 
-			// 旧変更を元に戻す
-			const currentBalance = await require('./romecoin').getRomecoin(playerId);
-			const revertedBalance = Math.max(0, currentBalance - oldRomecoinChange);
+		// 旧記録のロメコイン変更を元に戻す（既に結果が入力されている場合のみ）
+		if (table.completedAt && table.scoreDiffs && table.scoreDiffs.length > 0) {
+			const oldScoreDiffs = table.scoreDiffs;
+			for (let i = 0; i < allPlayers.length; i++) {
+				const playerId = allPlayers[i];
+				const oldDiff = oldScoreDiffs[i] || 0;
+				const oldRomecoinChange = oldDiff * table.rate;
 
-			await updateRomecoin(
-				playerId,
-				(current) => revertedBalance,
-				{
-					log: true,
-					client: client,
-					reason: `賭け麻雀記録修正（元に戻す）: ${table.scores[i]}点`,
-					metadata: {
-						commandName: 'mahjong_edit',
-						targetUserId: playerId,
-					},
-				}
-			);
+				// 旧変更を元に戻す
+				const currentBalance = await require('./romecoin').getRomecoin(playerId);
+				const revertedBalance = Math.max(0, currentBalance - oldRomecoinChange);
+
+				await updateRomecoin(
+					playerId,
+					(current) => revertedBalance,
+					{
+						log: true,
+						client: client,
+						reason: `賭け麻雀記録修正（元に戻す）: ${table.scores[i]}点`,
+						metadata: {
+							commandName: 'mahjong_edit',
+							targetUserId: playerId,
+						},
+					}
+				);
+			}
 		}
 
 		// 新記録でロメコイン計算と更新
