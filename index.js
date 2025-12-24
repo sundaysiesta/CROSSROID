@@ -38,6 +38,7 @@ const abuseProtocol = require('./features/abuseProtocol');
 // Command Handler
 const { handleCommands } = require('./commands');
 const romecoin = require('./features/romecoin');
+const mahjong = require('./features/mahjong');
 
 // Discordクライアントのインスタンスを作成
 const client = new Client({
@@ -339,6 +340,100 @@ client.once('clientReady', async (client) => {
 					.setDescription('賭けるロメコインの量(100以上の整数で指定 指定されていない場合は100)')
 			),
 		new SlashCommandBuilder()
+			.setName('mahjong_create')
+			.setDescription('雀魂を使った賭け麻雀のテーブルを作成します')
+			.addIntegerOption((option) =>
+				option
+					.setName('rate')
+					.setDescription('レート（1点あたりのロメコイン、1以上）')
+					.setRequired(true)
+					.setMinValue(1)
+			)
+			.addUserOption((option) =>
+				option
+					.setName('player1')
+					.setDescription('参加メンバー1（サンマの場合は2人、四麻の場合は3人必要）')
+					.setRequired(true)
+			)
+			.addUserOption((option) =>
+				option
+					.setName('player2')
+					.setDescription('参加メンバー2')
+					.setRequired(true)
+			)
+			.addUserOption((option) =>
+				option
+					.setName('player3')
+					.setDescription('参加メンバー3（四麻の場合のみ必要）')
+					.setRequired(false)
+			),
+		new SlashCommandBuilder()
+			.setName('mahjong_result')
+			.setDescription('賭け麻雀の試合結果を入力します')
+			.addStringOption((option) =>
+				option
+					.setName('table_id')
+					.setDescription('テーブルID（試合開始時に表示されます）')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player1_score')
+					.setDescription('部屋主の点数')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player2_score')
+					.setDescription('プレイヤー1の点数')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player3_score')
+					.setDescription('プレイヤー2の点数')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player4_score')
+					.setDescription('プレイヤー3の点数（四麻の場合のみ必要）')
+					.setRequired(false)
+			),
+		new SlashCommandBuilder()
+			.setName('mahjong_edit')
+			.setDescription('賭け麻雀の試合記録を修正します（部屋主のみ）')
+			.addStringOption((option) =>
+				option
+					.setName('table_id')
+					.setDescription('修正するテーブルID')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player1_score')
+					.setDescription('部屋主の点数（修正後）')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player2_score')
+					.setDescription('プレイヤー1の点数（修正後）')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player3_score')
+					.setDescription('プレイヤー2の点数（修正後）')
+					.setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option
+					.setName('player4_score')
+					.setDescription('プレイヤー3の点数（修正後、四麻の場合のみ必要）')
+					.setRequired(false)
+			),
+		new SlashCommandBuilder()
 			.setName('database_export')
 			.setDescription('データベースをエクスポートします(運営専用)'),
 		new SlashCommandBuilder()
@@ -448,6 +543,11 @@ client.once('clientReady', async (client) => {
 client.on('interactionCreate', async (interaction) => {
 	await handleCommands(interaction, client);
 	await romecoin.interactionCreate(interaction);
+	
+	// 麻雀ボタンインタラクション
+	if (interaction.isButton() && interaction.customId.startsWith('mahjong_agree_')) {
+		await mahjong.handleAgreement(interaction, client);
+	}
 });
 
 client.on('messageCreate', async (message) => {

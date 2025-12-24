@@ -3234,6 +3234,27 @@ async function handleCommands(interaction, client) {
 		}
 	}
 
+	// 麻雀コマンド
+	if (interaction.isChatInputCommand()) {
+		if (interaction.commandName === 'mahjong_create') {
+			const mahjong = require('../features/mahjong');
+			await mahjong.createTable(interaction, client);
+			return;
+		}
+
+		if (interaction.commandName === 'mahjong_result') {
+			const mahjong = require('../features/mahjong');
+			await mahjong.handleResult(interaction, client);
+			return;
+		}
+
+		if (interaction.commandName === 'mahjong_edit') {
+			const mahjong = require('../features/mahjong');
+			await mahjong.handleEdit(interaction, client);
+			return;
+		}
+	}
+
 }
 
 // 30分ごとのクリーンアップ

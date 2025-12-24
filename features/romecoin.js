@@ -441,30 +441,55 @@ async function interactionCreate(interaction) {
 				} else {
 					clearUserGame(interaction.user.id);
 					if (!interaction.replied && !interaction.deferred) {
-						await interaction.reply({
-							content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(
-								interaction.user.id,
-								romecoin_data,
-								0
-							)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`,
-							flags: [MessageFlags.Ephemeral],
-						});
+						try {
+							await interaction.reply({
+								content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(
+									interaction.user.id,
+									romecoin_data,
+									0
+								)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`,
+								flags: [MessageFlags.Ephemeral],
+							});
+						} catch (replyError) {
+							// Unknown interactionエラー（コード10062, 40060）は無視
+							if (replyError.code !== 10062 && replyError.code !== 40060) {
+								console.error('jankenコマンド応答エラー:', replyError);
+							}
+						}
 					}
 				}
 			} else {
 				clearUserGame(interaction.user.id);
 				if (!interaction.replied && !interaction.deferred) {
-					await interaction.reply({
-						content: 'あなたは現在対戦中のため新規の対戦を開始できません',
-						flags: [MessageFlags.Ephemeral],
-					});
+					try {
+						await interaction.reply({
+							content: 'あなたは現在対戦中のため新規の対戦を開始できません',
+							flags: [MessageFlags.Ephemeral],
+						});
+					} catch (replyError) {
+						// Unknown interactionエラー（コード10062, 40060）は無視
+						if (replyError.code !== 10062 && replyError.code !== 40060) {
+							console.error('jankenコマンド応答エラー:', replyError);
+						}
+					}
 				}
 			}
 			} catch (error) {
 				clearUserGame(interaction.user.id);
 				console.error('jankenコマンドエラー:', error);
+				// Unknown interactionエラー（コード10062）は無視（インタラクションが既に期限切れ）
+				if (error.code === 10062 || error.code === 40060) {
+					return;
+				}
 				if (!interaction.replied && !interaction.deferred) {
-					await interaction.reply({ content: 'エラーが発生しました。', flags: [MessageFlags.Ephemeral] });
+					try {
+						await interaction.reply({ content: 'エラーが発生しました。', flags: [MessageFlags.Ephemeral] });
+					} catch (replyError) {
+						// 応答エラーも無視（インタラクションが既に期限切れの可能性）
+						if (replyError.code !== 10062 && replyError.code !== 40060) {
+							console.error('jankenコマンド応答エラー:', replyError);
+						}
+					}
 				}
 			}
 		} else if (interaction.commandName === 'database_export') {
