@@ -5,6 +5,8 @@ const {
 	ButtonBuilder,
 	ButtonStyle,
 	ChannelType,
+	StringSelectMenuBuilder,
+	StringSelectMenuOptionBuilder,
 } = require('discord.js');
 const { generateWacchoi, generateDailyUserId, getAnonymousName } = require('../utils');
 const {
@@ -20,6 +22,7 @@ const {
 	OWNER_ROLE_ID,
 	RADIATION_ROLE_ID,
 	SHOP_LOG_VIEWER_ROLE_ID,
+	SHOP_EMOJI_CREATOR_ROLE_ID,
 } = require('../constants');
 const fs = require('fs');
 const path = require('path');
@@ -2746,25 +2749,45 @@ async function handleCommands(interaction, client) {
 
 			const userId = interaction.user.id;
 			const hasLogViewerRole = shopData[userId] && shopData[userId]['log_viewer_role'];
+			const hasEmojiCreatorRole = shopData[userId] && shopData[userId]['emoji_creator_role'];
 
-			const buyButton = new ButtonBuilder()
-				.setCustomId('shop_buy_log_viewer_role')
-				.setLabel('購入する')
-				.setStyle(ButtonStyle.Primary)
-				.setEmoji('🛒')
-				.setDisabled(hasLogViewerRole);
+			// 商品選択セレクトメニュー
+			const selectMenu = new StringSelectMenuBuilder()
+				.setCustomId('shop_select_item')
+				.setPlaceholder('購入する商品を選択してください')
+				.addOptions(
+					new StringSelectMenuOptionBuilder()
+						.setLabel('ログ閲覧権限ロール')
+						.setDescription(`${ROMECOIN_EMOJI}25,000 - ロメダの管理ログ・廃部ログ・過去ログが読めるようになります`)
+						.setValue('log_viewer_role')
+						.setEmoji('📜')
+						.setDefault(hasLogViewerRole),
+					new StringSelectMenuOptionBuilder()
+						.setLabel('絵文字作成権ロール')
+						.setDescription(`${ROMECOIN_EMOJI}30,000 - サーバーで絵文字を作成できるようになります`)
+						.setValue('emoji_creator_role')
+						.setEmoji('🎨')
+						.setDefault(hasEmojiCreatorRole)
+				);
 
-			const row = new ActionRowBuilder().addComponents(buyButton);
+			const row = new ActionRowBuilder().addComponents(selectMenu);
 
 			const embed = new EmbedBuilder()
 				.setTitle('🛒 ロメコインショップ')
 				.setColor(0x00ff00)
-				.setDescription('ロメコインを使って特別な権限やアイテムを購入できます！')
-				.addFields({
-					name: '📜 ログ閲覧権限ロール',
-					value: `<@&${SHOP_LOG_VIEWER_ROLE_ID}>\n\n**価格:** ${ROMECOIN_EMOJI}25,000\n**説明:** ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。\n**注意:** 一回の買い切りです。${hasLogViewerRole ? '\n\n✅ **購入済み**' : ''}`,
-					inline: false,
-				})
+				.setDescription('ロメコインを使って特別な権限やアイテムを購入できます！\n\n下のセレクトメニューから購入する商品を選択してください。')
+				.addFields(
+					{
+						name: '📜 ログ閲覧権限ロール',
+						value: `<@&${SHOP_LOG_VIEWER_ROLE_ID}>\n\n**価格:** ${ROMECOIN_EMOJI}25,000\n**説明:** ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。\n**注意:** 一回の買い切りです。${hasLogViewerRole ? '\n\n✅ **購入済み**' : ''}`,
+						inline: false,
+					},
+					{
+						name: '🎨 絵文字作成権ロール',
+						value: `<@&${SHOP_EMOJI_CREATOR_ROLE_ID}>\n\n**価格:** ${ROMECOIN_EMOJI}30,000\n**説明:** サーバーで絵文字を作成できるようになります。\n**注意:** 一回の買い切りです。${hasEmojiCreatorRole ? '\n\n✅ **購入済み**' : ''}`,
+						inline: false,
+					}
+				)
 				.setFooter({ text: '※ 商品は一度購入すると再度購入できません' })
 				.setTimestamp();
 
@@ -2801,6 +2824,10 @@ async function handleCommands(interaction, client) {
 				log_viewer_role: {
 					name: 'ログ閲覧権限ロール',
 					roleId: SHOP_LOG_VIEWER_ROLE_ID,
+				},
+				emoji_creator_role: {
+					name: '絵文字作成権ロール',
+					roleId: SHOP_EMOJI_CREATOR_ROLE_ID,
 				},
 			};
 
@@ -2850,10 +2877,128 @@ async function handleCommands(interaction, client) {
 		return;
 	}
 
+	// セレクトメニューインタラクション処理
+	if (interaction.isStringSelectMenu()) {
+		// ショップ商品選択
+		if (interaction.customId === 'shop_select_item') {
+			try {
+				const itemId = interaction.values[0];
+				const userId = interaction.user.id;
+				const guildId = interaction.guild.id;
+
+				// サーバー間クールダウン（30秒）
+				const cooldownKey = `shop_buy_${guildId}`;
+				const lastUsed = shopBuyCooldowns.get(cooldownKey) || 0;
+				const cooldownTime = 30 * 1000; // 30秒
+				const elapsed = Date.now() - lastUsed;
+
+				if (elapsed < cooldownTime) {
+					const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
+					return interaction.reply({
+						content: `⏰ サーバー間クールダウン中です（残り${remainSec}秒）`,
+						ephemeral: true,
+					});
+				}
+
+				// 購入履歴を確認
+				let shopData = {};
+				try {
+					const shopDataFile = path.join(__dirname, '../data/shop_data.json');
+					if (fs.existsSync(shopDataFile)) {
+						shopData = JSON.parse(fs.readFileSync(shopDataFile, 'utf8'));
+					}
+				} catch (e) {
+					console.error('[ショップ] 購入履歴読み込みエラー:', e);
+				}
+
+				// 商品情報
+				const items = {
+					log_viewer_role: {
+						id: 'log_viewer_role',
+						name: 'ログ閲覧権限ロール',
+						price: 25000,
+						roleId: SHOP_LOG_VIEWER_ROLE_ID,
+						description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+					},
+					emoji_creator_role: {
+						id: 'emoji_creator_role',
+						name: '絵文字作成権ロール',
+						price: 30000,
+						roleId: SHOP_EMOJI_CREATOR_ROLE_ID,
+						description: 'サーバーで絵文字を作成できるようになります。',
+					},
+				};
+
+				const item = items[itemId];
+				if (!item) {
+					return interaction.reply({
+						content: '❌ 無効な商品IDです。',
+						ephemeral: true,
+					});
+				}
+
+				// 既に購入済みかチェック
+				if (!shopData[userId]) {
+					shopData[userId] = {};
+				}
+				if (shopData[userId][item.id]) {
+					return interaction.reply({
+						content: `❌ この商品は既に購入済みです。`,
+						ephemeral: true,
+					});
+				}
+
+				// ロメコイン残高を確認
+				const balance = await getRomecoin(userId);
+				if (balance < item.price) {
+					return interaction.reply({
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						ephemeral: true,
+					});
+				}
+
+				// 確認Embed
+				const confirmEmbed = new EmbedBuilder()
+					.setTitle('⚠️ 購入確認')
+					.setColor(0xffa500)
+					.setDescription(`**${item.name}** を購入しますか？`)
+					.addFields(
+						{ name: '価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '現在の残高', value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`, inline: true },
+						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${(balance - item.price).toLocaleString()}`, inline: true },
+						{ name: '説明', value: item.description, inline: false }
+					)
+					.setFooter({ text: '※ この商品は一度購入すると再度購入できません' })
+					.setTimestamp();
+
+				const confirmButton = new ButtonBuilder()
+					.setCustomId(`shop_confirm_${item.id}`)
+					.setLabel('購入を確定')
+					.setStyle(ButtonStyle.Success)
+					.setEmoji('✅');
+
+				const cancelButton = new ButtonBuilder()
+					.setCustomId('shop_cancel')
+					.setLabel('キャンセル')
+					.setStyle(ButtonStyle.Danger)
+					.setEmoji('❌');
+
+				const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+				await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
+			} catch (error) {
+				console.error('ショップ商品選択エラー:', error);
+				if (interaction.deferred || interaction.replied) {
+					return interaction.editReply({ content: 'エラーが発生しました。' });
+				}
+				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			}
+			return;
+		}
+	}
+
 	// ボタンインタラクション処理
 	if (interaction.isButton()) {
-		// ショップ購入ボタン
-		if (interaction.customId === 'shop_buy_log_viewer_role') {
 			try {
 				const userId = interaction.user.id;
 				const guildId = interaction.guild.id;
@@ -2885,11 +3030,11 @@ async function handleCommands(interaction, client) {
 
 				// 商品情報
 				const item = {
-					id: 'log_viewer_role',
-					name: 'ログ閲覧権限ロール',
-					price: 25000,
-					roleId: SHOP_LOG_VIEWER_ROLE_ID,
-					description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+					id: 'emoji_creator_role',
+					name: '絵文字作成権ロール',
+					price: 20000,
+					roleId: SHOP_EMOJI_CREATOR_ROLE_ID,
+					description: 'サーバーで絵文字を作成できるようになります。',
 				};
 
 				// 既に購入済みかチェック
@@ -2927,7 +3072,7 @@ async function handleCommands(interaction, client) {
 					.setTimestamp();
 
 				const confirmButton = new ButtonBuilder()
-					.setCustomId('shop_confirm_log_viewer_role')
+					.setCustomId('shop_confirm_emoji_creator_role')
 					.setLabel('購入を確定')
 					.setStyle(ButtonStyle.Success)
 					.setEmoji('✅');
@@ -2951,9 +3096,10 @@ async function handleCommands(interaction, client) {
 			return;
 		}
 
-		// 購入確認ボタン
-		if (interaction.customId === 'shop_confirm_log_viewer_role') {
+		// 購入確認ボタン（汎用 - shop_confirm_*）
+		if (interaction.customId.startsWith('shop_confirm_')) {
 			try {
+				const itemId = interaction.customId.replace('shop_confirm_', '');
 				const userId = interaction.user.id;
 				const guildId = interaction.guild.id;
 
@@ -2983,13 +3129,30 @@ async function handleCommands(interaction, client) {
 				}
 
 				// 商品情報
-				const item = {
-					id: 'log_viewer_role',
-					name: 'ログ閲覧権限ロール',
-					price: 25000,
-					roleId: SHOP_LOG_VIEWER_ROLE_ID,
-					description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+				const items = {
+					log_viewer_role: {
+						id: 'log_viewer_role',
+						name: 'ログ閲覧権限ロール',
+						price: 25000,
+						roleId: SHOP_LOG_VIEWER_ROLE_ID,
+						description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+					},
+					emoji_creator_role: {
+						id: 'emoji_creator_role',
+						name: '絵文字作成権ロール',
+						price: 30000,
+						roleId: SHOP_EMOJI_CREATOR_ROLE_ID,
+						description: 'サーバーで絵文字を作成できるようになります。',
+					},
 				};
+
+				const item = items[itemId];
+				if (!item) {
+					return interaction.reply({
+						content: '❌ 無効な商品IDです。',
+						ephemeral: true,
+					});
+				}
 
 				// 既に購入済みかチェック
 				if (!shopData[userId]) {
