@@ -855,6 +855,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
 	await romecoin.messageReactionAdd(reaction, user);
 });
 
+client.on('voiceStateUpdate', async (oldState, newState) => {
+	await romecoin.handleVoiceStateUpdate(oldState, newState);
+});
+
 process.on('uncaughtException', async (error, origin) => {
 	console.error('Uncaught Exception:', error);
 	try {

@@ -16,6 +16,10 @@ let reaction_cooldown_users = new Array();
 let janken_progress_data = new Object();
 // ロメコインランキングのサーバー間クールダウン（30秒）
 let romecoin_ranking_cooldowns = new Map();
+// VC参加者追跡（userId -> { joinTime, lastRewardTime, channelId }）
+let vcParticipants = new Map();
+// VCロメコイン付与の間隔（60秒）
+const VC_REWARD_INTERVAL_MS = 60 * 1000;
 // ロメコイン絵文字
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 // Discordクライアント（ログ送信用）
@@ -41,6 +45,15 @@ async function clientReady(client) {
 			romecoin_data = JSON.parse(data);
 		}
 	});
+
+	// VC参加者のロメコイン付与を定期実行（60秒ごと）
+	setInterval(async () => {
+		try {
+			await rewardVCParticipants(client);
+		} catch (error) {
+			console.error('[VCロメコイン] 定期実行エラー:', error);
+		}
+	}, VC_REWARD_INTERVAL_MS);
 
 	// 60秒ごとにデータを送信
 	setInterval(async () => {
@@ -1448,6 +1461,202 @@ async function messageReactionAdd(reaction, user) {
 	reaction_cooldown_users.push(user.id);
 }
 
+// VC参加者にロメコインを付与
+async function rewardVCParticipants(client) {
+	try {
+		const guild = client.guilds.cache.first();
+		if (!guild) return;
+
+		// 現在VCに参加しているメンバーを取得
+		const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2); // ボイスチャンネル
+		
+		for (const vc of voiceChannels.values()) {
+			if (!vc.members) continue;
+			
+			for (const [memberId, member] of vc.members.entries()) {
+				// Botは除外
+				if (member.user.bot) continue;
+				
+				// 被爆ロールチェック
+				if (member.roles.cache.has(RADIATION_ROLE_ID)) continue;
+				
+				// ミュート状態チェック（ミュート放置を防ぐ）
+				if (member.voice.selfMute || member.voice.serverMute || member.voice.deaf) {
+					// ミュート状態の場合は追跡から削除
+					vcParticipants.delete(memberId);
+					continue;
+				}
+				
+				// 参加者を追跡
+				const now = Date.now();
+				const participant = vcParticipants.get(memberId);
+				
+				if (!participant) {
+					// 新規参加者
+					vcParticipants.set(memberId, {
+						joinTime: now,
+						lastRewardTime: now,
+						channelId: vc.id,
+					});
+					continue;
+				}
+				
+				// チャンネルが変わった場合はリセット
+				if (participant.channelId !== vc.id) {
+					vcParticipants.set(memberId, {
+						joinTime: now,
+						lastRewardTime: now,
+						channelId: vc.id,
+					});
+					continue;
+				}
+				
+				// 前回の報酬から60秒以上経過しているかチェック
+				if (now - participant.lastRewardTime < VC_REWARD_INTERVAL_MS) {
+					continue;
+				}
+				
+				// ロメコインを計算（テキストチャンネルと同じ設定）
+				let score = 10;
+				
+				const generationRoles = [
+					'1431905155938258988', // 第1世代
+					'1431905155938258989', // 第2世代
+					'1431905155938258990', // 第3世代
+					'1431905155938258991', // 第4世代
+					'1431905155938258992', // 第5世代
+					'1431905155938258993', // 第6世代
+					'1431905155938258994', // 第7世代
+					'1431905155955294290', // 第8世代
+					'1431905155955294291', // 第9世代
+					'1431905155955294292', // 第10世代
+					'1431905155955294293', // 第11世代
+					'1431905155955294294', // 第12世代
+					'1431905155955294295', // 第13世代
+					'1431905155955294296', // 第14世代
+					'1431905155955294297', // 第15世代
+					'1431905155955294298', // 第16世代
+					'1431905155955294299', // 第17世代
+					'1431905155984392303', // 第18世代
+				];
+				
+				// 新規（世代ロールがない）
+				if (!member.roles.cache.some((role) => generationRoles.includes(role.id))) {
+					score *= 1.1;
+				}
+				
+				// VC参加人数によるボーナス（1 + (人数-1)/10）
+				// 被爆ロールがついている人とミュートしている人は除外
+				const validVCMembers = Array.from(vc.members.values()).filter(m => {
+					// Botは除外
+					if (m.user.bot) return false;
+					// 被爆ロールがついている人は除外
+					if (m.roles.cache.has(RADIATION_ROLE_ID)) return false;
+					// ミュートしている人は除外
+					if (m.voice.selfMute || m.voice.serverMute || m.voice.deaf) return false;
+					return true;
+				});
+				const vcMemberCount = validVCMembers.length;
+				score *= 1 + (vcMemberCount - 1) / 10;
+				
+				// 深夜（6時前）
+				const currentHour = new Date().getHours();
+				if (currentHour < 6) {
+					score *= 1.5;
+				}
+				
+				// データ引き継ぎ（ID → Notion名）
+				await migrateData(memberId, romecoin_data);
+				
+				// ロメコインを更新（ログ付き）
+				const previousBalance = await getData(memberId, romecoin_data, 0);
+				await updateData(memberId, romecoin_data, (current) => {
+					return Math.round((current || 0) + score);
+				});
+				const newBalance = await getData(memberId, romecoin_data, 0);
+				
+				// ログ送信（変動があった場合のみ）
+				if (previousBalance !== newBalance && discordClient) {
+					await logRomecoinChange(
+						discordClient,
+						memberId,
+						previousBalance,
+						newBalance,
+						`VC参加による獲得 (スコア: ${score.toFixed(1)}, VC: ${vc.name})`,
+						{
+							commandName: 'vc_participation',
+							channelId: vc.id,
+						}
+					);
+				}
+				
+				// 最終報酬時刻を更新
+				participant.lastRewardTime = now;
+				vcParticipants.set(memberId, participant);
+			}
+		}
+		
+		// VCから退出したメンバーを追跡から削除
+		for (const [memberId, participant] of vcParticipants.entries()) {
+			const member = guild.members.cache.get(memberId);
+			if (!member || !member.voice.channel) {
+				vcParticipants.delete(memberId);
+			}
+		}
+	} catch (error) {
+		console.error('[VCロメコイン] エラー:', error);
+	}
+}
+
+// VC参加/退出を追跡
+async function handleVoiceStateUpdate(oldState, newState) {
+	try {
+		const member = newState.member || oldState.member;
+		if (!member || member.user.bot) return;
+		
+		// VCに参加した場合
+		if (newState.channel && !oldState.channel) {
+			// ミュート状態でない場合のみ追跡
+			if (!newState.selfMute && !newState.serverMute && !newState.deaf) {
+				vcParticipants.set(member.id, {
+					joinTime: Date.now(),
+					lastRewardTime: Date.now(),
+					channelId: newState.channel.id,
+				});
+			}
+		}
+		// VCから退出した場合
+		else if (!newState.channel && oldState.channel) {
+			vcParticipants.delete(member.id);
+		}
+		// VC内でチャンネル移動またはミュート状態が変わった場合
+		else if (newState.channel) {
+			// ミュート状態になった場合は追跡から削除
+			if (newState.selfMute || newState.serverMute || newState.deaf) {
+				vcParticipants.delete(member.id);
+			}
+			// ミュート解除された場合は追跡に追加
+			else if (!newState.selfMute && !newState.serverMute && !newState.deaf) {
+				vcParticipants.set(member.id, {
+					joinTime: Date.now(),
+					lastRewardTime: Date.now(),
+					channelId: newState.channel.id,
+				});
+			}
+			// チャンネル移動した場合はリセット
+			else if (oldState.channel && newState.channel.id !== oldState.channel.id) {
+				vcParticipants.set(member.id, {
+					joinTime: Date.now(),
+					lastRewardTime: Date.now(),
+					channelId: newState.channel.id,
+				});
+			}
+		}
+	} catch (error) {
+		console.error('[VCロメコイン] voiceStateUpdateエラー:', error);
+	}
+}
+
 // romecoin_dataにアクセスする関数
 function getRomecoinData() {
 	return romecoin_data;
@@ -1594,6 +1803,7 @@ module.exports = {
 	interactionCreate,
 	messageCreate,
 	messageReactionAdd,
+	handleVoiceStateUpdate,
 	getRomecoinData,
 	getRomecoin,
 	updateRomecoin,
