@@ -125,7 +125,6 @@ async function handleDaily(interaction, client) {
 		const newTotalDays = userData.totalDays + 1;
 
 		// 基本報酬を決定
-		const member = interaction.member;
 		const isBooster = member && member.roles.cache.has(SERVER_BOOSTER_ROLE_ID);
 		const baseReward = isBooster ? 1000 : 500;
 
