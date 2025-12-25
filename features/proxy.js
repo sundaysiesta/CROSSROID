@@ -141,9 +141,20 @@ async function messageCreate(message) {
 		// 代理投稿を送信（削除後に実行）
 		let proxiedMessage;
 		try {
-			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, files=${downloadedFiles.length}件`);
+			// Discordのメッセージ長制限（2000文字）をチェック
+			const MAX_CONTENT_LENGTH = 2000;
+			let finalContent = messageContent || '';
+			
+			// 2000文字を超える場合は切り詰める
+			if (finalContent.length > MAX_CONTENT_LENGTH) {
+				const truncatedContent = finalContent.substring(0, MAX_CONTENT_LENGTH - 20); // 省略メッセージ用に20文字確保
+				finalContent = truncatedContent + '\n\n...（文字数制限により省略）';
+				console.log(`[代理投稿] メッセージを切り詰めました: ${messageContent.length}文字 → ${finalContent.length}文字`);
+			}
+			
+			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, files=${downloadedFiles.length}件, contentLength=${finalContent.length}文字`);
 			proxiedMessage = await webhook.send({
-				content: messageContent,
+				content: finalContent,
 				username: displayName,
 				avatarURL: avatarURL,
 				files: downloadedFiles.length > 0 ? downloadedFiles : undefined,
