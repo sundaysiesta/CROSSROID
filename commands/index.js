@@ -3249,10 +3249,6 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// 消費税を計算（インフレ対策）
-				const { applyConsumptionTax } = require('../features/inflationControl');
-				const { totalPrice, tax } = applyConsumptionTax(item.price);
-				
 				// 確認Embed
 				const confirmEmbed = new EmbedBuilder()
 					.setTitle('⚠️ 購入確認')
