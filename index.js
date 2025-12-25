@@ -660,22 +660,22 @@ client.once('clientReady', async (client) => {
 				subcommand
 					.setName('buy')
 					.setDescription('部活に投資（株式購入）します')
-					.addChannelOption((option) =>
-						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
-					)
 					.addIntegerOption((option) =>
 						option.setName('amount').setDescription('投資額（ロメコイン）').setRequired(true)
+					)
+					.addChannelOption((option) =>
+						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
 					)
 			)
 			.addSubcommand((subcommand) =>
 				subcommand
 					.setName('sell')
 					.setDescription('保有株式を売却します')
-					.addChannelOption((option) =>
-						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
-					)
 					.addIntegerOption((option) =>
 						option.setName('shares').setDescription('売却する株式数').setRequired(true)
+					)
+					.addChannelOption((option) =>
+						option.setName('channel').setDescription('部活チャンネル（未指定時は現在のチャンネル）').setRequired(false)
 					)
 			)
 			.addSubcommand((subcommand) =>
