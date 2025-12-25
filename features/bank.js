@@ -208,6 +208,11 @@ async function handleBankDeposit(interaction, client) {
 			}
 		);
 
+		// 利子の見積もりを計算（24時間後、1週間後、1ヶ月後）
+		const dailyInterest = calculateInterest(userBankData.deposit, 24, INTEREST_RATE_PER_HOUR);
+		const weeklyInterest = calculateInterest(userBankData.deposit, 24 * 7, INTEREST_RATE_PER_HOUR);
+		const monthlyInterest = calculateInterest(userBankData.deposit, 24 * 30, INTEREST_RATE_PER_HOUR);
+		
 		const embed = new EmbedBuilder()
 			.setTitle('💰 預金完了')
 			.setDescription(`黒須銀行に ${ROMECOIN_EMOJI}${amount.toLocaleString()} を預金しました。`)
@@ -219,8 +224,18 @@ async function handleBankDeposit(interaction, client) {
 				},
 				{
 					name: '利子率',
-					value: `${(INTEREST_RATE_PER_HOUR * 100).toFixed(3)}%/時間`,
+					value: `年利2%相当\n(${(INTEREST_RATE_PER_HOUR * 100).toFixed(5)}%/時間)`,
 					inline: true,
+				},
+				{
+					name: '📈 利子の見積もり',
+					value: `24時間後: +${ROMECOIN_EMOJI}${dailyInterest.toLocaleString()}\n1週間後: +${ROMECOIN_EMOJI}${weeklyInterest.toLocaleString()}\n1ヶ月後: +${ROMECOIN_EMOJI}${monthlyInterest.toLocaleString()}`,
+					inline: false,
+				},
+				{
+					name: '✨ 預金のメリット',
+					value: `• 自動的に利子がつきます（複利計算）\n• ゲーム時に自動的に引き出されます\n• ランキングに預金額も含まれます`,
+					inline: false,
 				}
 			)
 			.setColor(0x00ff00)
@@ -383,19 +398,53 @@ async function handleBankInfo(interaction, client) {
 			return sum;
 		}, 0);
 
+		// 利子の見積もりを計算（24時間後、1週間後、1ヶ月後）
+		const dailyInterest = calculateInterest(userBankData.deposit, 24, INTEREST_RATE_PER_HOUR);
+		const weeklyInterest = calculateInterest(userBankData.deposit, 24 * 7, INTEREST_RATE_PER_HOUR);
+		const monthlyInterest = calculateInterest(userBankData.deposit, 24 * 30, INTEREST_RATE_PER_HOUR);
+		
+		// 所持金も取得
+		const currentBalance = await getRomecoin(userId);
+		const totalBalance = currentBalance + userBankData.deposit;
+		
 		const embed = new EmbedBuilder()
 			.setTitle('🏦 黒須銀行')
 			.setDescription('あなたの預金情報')
 			.addFields(
 				{
-					name: 'あなたの預金額',
+					name: '💰 あなたの預金額',
 					value: `${ROMECOIN_EMOJI}${userBankData.deposit.toLocaleString()}`,
 					inline: true,
 				},
 				{
-					name: '銀行の合計預金額',
+					name: '💵 現在の所持金',
+					value: `${ROMECOIN_EMOJI}${currentBalance.toLocaleString()}`,
+					inline: true,
+				},
+				{
+					name: '📊 合計資産',
+					value: `${ROMECOIN_EMOJI}${totalBalance.toLocaleString()}`,
+					inline: true,
+				},
+				{
+					name: '🏛️ 銀行の合計預金額',
 					value: `${ROMECOIN_EMOJI}${totalDeposit.toLocaleString()}`,
 					inline: true,
+				},
+				{
+					name: '💹 利子率',
+					value: `年利2%相当（複利計算）\n${(INTEREST_RATE_PER_HOUR * 100).toFixed(5)}%/時間`,
+					inline: true,
+				},
+				{
+					name: '📈 利子の見積もり',
+					value: `24時間後: +${ROMECOIN_EMOJI}${dailyInterest.toLocaleString()}\n1週間後: +${ROMECOIN_EMOJI}${weeklyInterest.toLocaleString()}\n1ヶ月後: +${ROMECOIN_EMOJI}${monthlyInterest.toLocaleString()}`,
+					inline: false,
+				},
+				{
+					name: '✨ 預金のメリット',
+					value: `• **自動利子**: 預金しておくだけで自動的に増えます\n• **自動引き出し**: ゲーム時に所持金が足りない場合、預金から自動的に引き出されます\n• **ランキング反映**: 所持金と預金の合計でランキングに反映されます\n• **安全な資産運用**: 預金は安全に保管され、利子がつきます`,
+					inline: false,
 				},
 				{
 					name: '利子率',

@@ -344,38 +344,83 @@ async function handleCommands(interaction, client) {
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
 			}
 
-			// ロメコインを譲渡
+			// 取引手数料を計算（インフレ対策）
+			const { applyTransactionFee } = require('../features/inflationControl');
+			const { netAmount, fee } = applyTransactionFee(amount);
+			
+			// 手数料を考慮した残高チェック
+			if (currentBalance < amount) {
+				const errorEmbed = new EmbedBuilder()
+					.setTitle('❌ エラー')
+					.setDescription('ロメコインが不足しています')
+					.addFields(
+						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${currentBalance}`, inline: true },
+						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${amount}`, inline: true }
+					)
+					.setColor(0xff0000);
+				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+			}
+			
+			// ロメコインを譲渡（手数料込み）
 			try {
-				// 送信者のロメコインを減らす（ログ付き）
+				// 送信者のロメコインを減らす（手数料込み、ログ付き）
 				await updateRomecoin(
 					senderId,
 					(current) => Math.round((current || 0) - amount),
 					{
 						log: true,
 						client: interaction.client,
-						reason: `giveコマンド: ${targetUser.tag} への譲渡`,
+						reason: `giveコマンド: ${targetUser.tag} への譲渡（手数料: ${ROMECOIN_EMOJI}${fee.toLocaleString()}）`,
 						metadata: {
 							executorId: interaction.user.id,
 							targetUserId: targetUser.id,
 							commandName: 'give',
+							fee: fee,
 						},
 					}
 				);
-				// 受信者のロメコインを増やす（ログ付き）
+				// 受信者のロメコインを増やす（手数料を差し引いた金額、ログ付き）
 				await updateRomecoin(
 					targetUser.id,
-					(current) => Math.round((current || 0) + amount),
+					(current) => Math.round((current || 0) + netAmount),
 					{
 						log: true,
 						client: interaction.client,
-						reason: `giveコマンド: ${interaction.user.tag} からの譲渡`,
+						reason: `giveコマンド: ${interaction.user.tag} からの譲渡（手数料差引後: ${ROMECOIN_EMOJI}${netAmount.toLocaleString()}）`,
 						metadata: {
 							executorId: interaction.user.id,
 							targetUserId: senderId,
 							commandName: 'give',
+							originalAmount: amount,
+							fee: fee,
 						},
 					}
 				);
+				
+				// 手数料をBotアカウント（黒須銀行）に送る
+				const botUserId = interaction.client.user?.id;
+				if (botUserId && fee > 0) {
+					try {
+						await updateRomecoin(
+							botUserId,
+							(current) => Math.round((current || 0) + fee),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `giveコマンド取引手数料（1%）`,
+								metadata: {
+									commandName: 'give_fee',
+									senderId: senderId,
+									receiverId: targetUser.id,
+									amount: amount,
+									fee: fee,
+								},
+							}
+						);
+					} catch (botError) {
+						console.error('[Give] Botアカウントへの手数料追加エラー:', botError);
+					}
+				}
 
 				// 成功メッセージ
 				const senderNewBalance = await getRomecoin(senderId);
@@ -536,19 +581,29 @@ async function handleCommands(interaction, client) {
 				}
 
 			const opponentUser = interaction.options.getUser('対戦相手');
-			const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
+			let bet = interaction.options.getInteger('bet') || 100; // デフォルト100
+			// betの検証
+			if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
+				return interaction.reply({
+					content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
+					ephemeral: true,
+				});
+			}
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
 				// ロメコインチェック
-				const userRomecoin = await getRomecoin(userId);
-				if (userRomecoin < bet) {
+				const { getTotalBalance } = require('../features/romecoin');
+				const userTotalBalance = await getTotalBalance(userId);
+				if (userTotalBalance < bet) {
+					const userRomecoin = await getRomecoin(userId);
 					clearUserGame(userId);
 					const errorEmbed = new EmbedBuilder()
 						.setTitle('❌ エラー')
-						.setDescription('ロメコインが不足しています')
+						.setDescription('ロメコインが不足しています（所持金 + 預金）')
 						.addFields(
-							{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
-							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+							{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin.toLocaleString()}`, inline: true },
+							{ name: '合計残高（所持金 + 預金）', value: `${ROMECOIN_EMOJI}${userTotalBalance.toLocaleString()}`, inline: true },
+							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 						)
 						.setColor(0xff0000);
 					return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -561,20 +616,26 @@ async function handleCommands(interaction, client) {
 						return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
 					}
 
-					// 対戦相手のロメコインチェック
-					const opponentRomecoin = await getRomecoin(opponentUser.id);
-					if (opponentRomecoin < bet) {
+					// 対戦相手のロメコインチェック（所持金 + 預金）
+					const opponentTotalBalance = await getTotalBalance(opponentUser.id);
+					if (opponentTotalBalance < bet) {
+						const opponentRomecoin = await getRomecoin(opponentUser.id);
 						clearUserGame(userId);
 						const errorEmbed = new EmbedBuilder()
 							.setTitle('❌ エラー')
-							.setDescription('対戦相手のロメコインが不足しています')
+							.setDescription('対戦相手のロメコインが不足しています（所持金 + 預金）')
 							.addFields(
 								{
 									name: `${opponentUser}の現在の所持ロメコイン`,
-									value: `${ROMECOIN_EMOJI}${opponentRomecoin}`,
+									value: `${ROMECOIN_EMOJI}${opponentRomecoin.toLocaleString()}`,
 									inline: true,
 								},
-								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+								{
+									name: `${opponentUser}の合計残高（所持金 + 預金）`,
+									value: `${ROMECOIN_EMOJI}${opponentTotalBalance.toLocaleString()}`,
+									inline: true,
+								},
+								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
 						return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -1651,18 +1712,29 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				if (!amount || amount <= 0) {
+				if (!amount || amount <= 0 || !Number.isInteger(amount) || amount > Number.MAX_SAFE_INTEGER) {
 					return interaction.editReply({
 						embeds: [
 							new EmbedBuilder()
 								.setColor(0xff0000)
-								.setDescription('❌ 有効な金額（1以上）を指定してください。'),
+								.setDescription(`❌ 有効な金額（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`),
 						],
 					});
 				}
 
 				// 現在の残高を取得
 				const previousBalance = await getRomecoin(targetUser.id);
+				
+				// オーバーフローチェック
+				if (previousBalance + amount > Number.MAX_SAFE_INTEGER) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription(`❌ 増額後の残高が最大値を超えます（最大値: ${Number.MAX_SAFE_INTEGER.toLocaleString()}）`),
+						],
+					});
+				}
 
 				// ロメコインを増額（ログ付き）
 				await updateRomecoin(
@@ -1933,21 +2005,31 @@ async function handleCommands(interaction, client) {
 			}
 
 			const opponentUser = interaction.options.getUser('対戦相手');
-			const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
+			let bet = interaction.options.getInteger('bet') || 100; // デフォルト100
+			// betの検証
+			if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
+				return interaction.reply({
+					content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
+					ephemeral: true,
+				});
+			}
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
 			const member = interaction.member;
 
-			// ロメコインチェック
-			const userRomecoin = await getRomecoin(userId);
-			if (userRomecoin < bet) {
+			// ロメコインチェック（所持金 + 預金）
+			const { getTotalBalance } = require('../features/romecoin');
+			const userTotalBalance = await getTotalBalance(userId);
+			if (userTotalBalance < bet) {
 				clearUserGame(userId);
+				const userRomecoin = await getRomecoin(userId);
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
-					.setDescription('ロメコインが不足しています')
+					.setDescription('ロメコインが不足しています（所持金 + 預金）')
 					.addFields(
-						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
-						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin.toLocaleString()}`, inline: true },
+						{ name: '合計残高（所持金 + 預金）', value: `${ROMECOIN_EMOJI}${userTotalBalance.toLocaleString()}`, inline: true },
+						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 					)
 					.setColor(0xff0000);
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -2084,19 +2166,26 @@ async function handleCommands(interaction, client) {
 						return i.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
 					}
 
-					// 受諾者のロメコインチェック
-					const opponentRomecoin = await getRomecoin(actualOpponentUser.id);
-					if (opponentRomecoin < bet) {
+					// 受諾者のロメコインチェック（所持金 + 預金）
+					const { getTotalBalance } = require('../features/romecoin');
+					const opponentTotalBalance = await getTotalBalance(actualOpponentUser.id);
+					if (opponentTotalBalance < bet) {
+						const opponentRomecoin = await getRomecoin(actualOpponentUser.id);
 						const errorEmbed = new EmbedBuilder()
 							.setTitle('❌ エラー')
-							.setDescription('ロメコインが不足しています')
+							.setDescription('ロメコインが不足しています（所持金 + 預金）')
 							.addFields(
 								{
 									name: '現在の所持ロメコイン',
-									value: `${ROMECOIN_EMOJI}${opponentRomecoin}`,
+									value: `${ROMECOIN_EMOJI}${opponentRomecoin.toLocaleString()}`,
 									inline: true,
 								},
-								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+								{
+									name: '合計残高（所持金 + 預金）',
+									value: `${ROMECOIN_EMOJI}${opponentTotalBalance.toLocaleString()}`,
+									inline: true,
+								},
+								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
 						return i.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -2107,19 +2196,26 @@ async function handleCommands(interaction, client) {
 						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
 					}
 
-					// 対戦相手のロメコインチェック
-					const opponentRomecoin = await getRomecoin(opponentUser.id);
-					if (opponentRomecoin < bet) {
+					// 対戦相手のロメコインチェック（所持金 + 預金）
+					const { getTotalBalance } = require('../features/romecoin');
+					const opponentTotalBalance = await getTotalBalance(opponentUser.id);
+					if (opponentTotalBalance < bet) {
+						const opponentRomecoin = await getRomecoin(opponentUser.id);
 						const errorEmbed = new EmbedBuilder()
 							.setTitle('❌ エラー')
-							.setDescription('対戦相手のロメコインが不足しています')
+							.setDescription('対戦相手のロメコインが不足しています（所持金 + 預金）')
 							.addFields(
 								{
 									name: `${opponentUser}の現在の所持ロメコイン`,
-									value: `${ROMECOIN_EMOJI}${opponentRomecoin}`,
+									value: `${ROMECOIN_EMOJI}${opponentRomecoin.toLocaleString()}`,
 									inline: true,
 								},
-								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+								{
+									name: `${opponentUser}の合計残高（所持金 + 預金）`,
+									value: `${ROMECOIN_EMOJI}${opponentTotalBalance.toLocaleString()}`,
+									inline: true,
+								},
+								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
 						return i.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -2158,17 +2254,23 @@ async function handleCommands(interaction, client) {
 					winner = actualOpponentMember;
 				}
 
-				// ロメコインのやり取り（ログ付き）
+				// 取引手数料を計算（インフレ対策：勝者が受け取る金額から手数料を差し引く）
+				const { applyTransactionFee } = require('../features/inflationControl');
+				const { netAmount: winnerReward, fee } = applyTransactionFee(bet);
+				
+				// ロメコインのやり取り（手数料込み、ログ付き）
 				await updateRomecoin(
 					winner.user.id,
-					(current) => Math.round((current || 0) + bet),
+					(current) => Math.round((current || 0) + winnerReward),
 					{
 						log: true,
 						client: interaction.client,
-						reason: `決闘勝利: ${loser.user.tag} との対戦`,
+						reason: `決闘勝利: ${loser.user.tag} との対戦（手数料差引後: ${ROMECOIN_EMOJI}${winnerReward.toLocaleString()}）`,
 						metadata: {
 							targetUserId: loser.user.id,
 							commandName: 'duel',
+							originalBet: bet,
+							fee: fee,
 						},
 					}
 				);
@@ -2186,6 +2288,31 @@ async function handleCommands(interaction, client) {
 						useDeposit: true,
 					}
 				);
+				
+				// 手数料をBotアカウント（黒須銀行）に送る
+				const botUserId = interaction.client.user?.id;
+				if (botUserId && fee > 0) {
+					try {
+						await updateRomecoin(
+							botUserId,
+							(current) => Math.round((current || 0) + fee),
+							{
+								log: true,
+								client: interaction.client,
+								reason: `決闘取引手数料（1%）`,
+								metadata: {
+									commandName: 'duel_fee',
+									winnerId: winner.user.id,
+									loserId: loser.user.id,
+									bet: bet,
+									fee: fee,
+								},
+							}
+						);
+					} catch (botError) {
+						console.error('[Duel] Botアカウントへの手数料追加エラー:', botError);
+					}
+				}
 
 				// 戦績記録
 				const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
@@ -2365,18 +2492,28 @@ async function handleCommands(interaction, client) {
 		try {
 			const userId = interaction.user.id;
 			const opponentUser = interaction.options.getUser('対戦相手');
-			const bet = interaction.options.getInteger('bet') || 100; // デフォルト100
+			let bet = interaction.options.getInteger('bet') || 100; // デフォルト100
+			// betの検証
+			if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
+				return interaction.reply({
+					content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
+					ephemeral: true,
+				});
+			}
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
 
-			// ロメコインチェック
-			const userRomecoin = await getRomecoin(userId);
-			if (userRomecoin < bet) {
+			// ロメコインチェック（所持金 + 預金）
+			const { getTotalBalance } = require('../features/romecoin');
+			const userTotalBalance = await getTotalBalance(userId);
+			if (userTotalBalance < bet) {
+				const userRomecoin = await getRomecoin(userId);
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
-					.setDescription('ロメコインが不足しています')
+					.setDescription('ロメコインが不足しています（所持金 + 預金）')
 					.addFields(
-						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin}`, inline: true },
-						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin.toLocaleString()}`, inline: true },
+						{ name: '合計残高（所持金 + 預金）', value: `${ROMECOIN_EMOJI}${userTotalBalance.toLocaleString()}`, inline: true },
+						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 					)
 					.setColor(0xff0000);
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -2388,12 +2525,13 @@ async function handleCommands(interaction, client) {
 					return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
 				}
 
-				// 対戦相手のロメコインチェック
-				const opponentRomecoin = await getRomecoin(opponentUser.id);
-				if (opponentRomecoin < bet) {
+				// 対戦相手のロメコインチェック（所持金 + 預金）
+				const opponentTotalBalance = await getTotalBalance(opponentUser.id);
+				if (opponentTotalBalance < bet) {
+					const opponentRomecoin = await getRomecoin(opponentUser.id);
 					const errorEmbed = new EmbedBuilder()
 						.setTitle('❌ エラー')
-						.setDescription('対戦相手のロメコインが不足しています')
+						.setDescription('対戦相手のロメコインが不足しています（所持金 + 預金）')
 						.addFields(
 							{
 								name: `${opponentUser}の現在の所持ロメコイン`,
@@ -2478,19 +2616,26 @@ async function handleCommands(interaction, client) {
 						return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
 					}
 
-					// 受諾者のロメコインチェック
-					const opponentRomecoin = await getRomecoin(actualOpponentUser.id);
-					if (opponentRomecoin < bet) {
+					// 受諾者のロメコインチェック（所持金 + 預金）
+					const { getTotalBalance } = require('../features/romecoin');
+					const opponentTotalBalance = await getTotalBalance(actualOpponentUser.id);
+					if (opponentTotalBalance < bet) {
+						const opponentRomecoin = await getRomecoin(actualOpponentUser.id);
 						const errorEmbed = new EmbedBuilder()
 							.setTitle('❌ エラー')
-							.setDescription('ロメコインが不足しています')
+							.setDescription('ロメコインが不足しています（所持金 + 預金）')
 							.addFields(
 								{
 									name: '現在の所持ロメコイン',
-									value: `${ROMECOIN_EMOJI}${opponentRomecoin}`,
+									value: `${ROMECOIN_EMOJI}${opponentRomecoin.toLocaleString()}`,
 									inline: true,
 								},
-								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
+								{
+									name: '合計残高（所持金 + 預金）',
+									value: `${ROMECOIN_EMOJI}${opponentTotalBalance.toLocaleString()}`,
+									inline: true,
+								},
+								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
 						return i.reply({ embeds: [errorEmbed], ephemeral: true });
@@ -2579,17 +2724,23 @@ async function handleCommands(interaction, client) {
 						const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
 						const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
-						// ロメコインのやり取り（ログ付き）
+						// 取引手数料を計算（インフレ対策：勝者が受け取る金額から手数料を差し引く）
+						const { applyTransactionFee } = require('../features/inflationControl');
+						const { netAmount: winnerReward, fee } = applyTransactionFee(bet);
+						
+						// ロメコインのやり取り（手数料込み、ログ付き）
 						await updateRomecoin(
 							winnerId,
-							(current) => Math.round((current || 0) + bet),
+							(current) => Math.round((current || 0) + winnerReward),
 							{
 								log: true,
 								client: interaction.client,
-								reason: `ロシアンルーレット勝利: ${loserUser.tag} との対戦`,
+								reason: `ロシアンルーレット勝利: ${loserUser.tag} との対戦（手数料差引後: ${ROMECOIN_EMOJI}${winnerReward.toLocaleString()}）`,
 								metadata: {
 									targetUserId: loserId,
 									commandName: 'duel_russian',
+									originalBet: bet,
+									fee: fee,
 								},
 							}
 						);
@@ -2607,6 +2758,31 @@ async function handleCommands(interaction, client) {
 								useDeposit: true,
 							}
 						);
+						
+						// 手数料をBotアカウント（黒須銀行）に送る
+						const botUserId = interaction.client.user?.id;
+						if (botUserId && fee > 0) {
+							try {
+								await updateRomecoin(
+									botUserId,
+									(current) => Math.round((current || 0) + fee),
+									{
+										log: true,
+										client: interaction.client,
+										reason: `ロシアンルーレット取引手数料（1%）`,
+										metadata: {
+											commandName: 'duel_russian_fee',
+											winnerId: winnerId,
+											loserId: loserId,
+											bet: bet,
+											fee: fee,
+										},
+									}
+								);
+							} catch (botError) {
+								console.error('[Duel Russian] Botアカウントへの手数料追加エラー:', botError);
+							}
+						}
 
 						// ペナルティ: タイムアウト
 						if (loserMember) {
@@ -3060,24 +3236,34 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// ロメコイン残高を確認
+				// 消費税を計算（インフレ対策）
+				const { applyConsumptionTax } = require('../features/inflationControl');
+				const { totalPrice, tax } = applyConsumptionTax(item.price);
+				
+				// ロメコイン残高を確認（税込み価格）
 				const balance = await getRomecoin(userId);
-				if (balance < item.price) {
+				if (balance < totalPrice) {
 					return interaction.reply({
-						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${totalPrice.toLocaleString()} (税込み、内消費税: ${ROMECOIN_EMOJI}${tax.toLocaleString()})\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
 						ephemeral: true,
 					});
 				}
 
+				// 消費税を計算（インフレ対策）
+				const { applyConsumptionTax } = require('../features/inflationControl');
+				const { totalPrice, tax } = applyConsumptionTax(item.price);
+				
 				// 確認Embed
 				const confirmEmbed = new EmbedBuilder()
 					.setTitle('⚠️ 購入確認')
 					.setColor(0xffa500)
 					.setDescription(`**${item.name}** を購入しますか？`)
 					.addFields(
-						{ name: '価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '税抜き価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '消費税 (5%)', value: `${ROMECOIN_EMOJI}${tax.toLocaleString()}`, inline: true },
+						{ name: '税込み価格', value: `${ROMECOIN_EMOJI}${totalPrice.toLocaleString()}`, inline: true },
 						{ name: '現在の残高', value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`, inline: true },
-						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${(balance - item.price).toLocaleString()}`, inline: true },
+						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${(balance - totalPrice).toLocaleString()}`, inline: true },
 						{ name: '説明', value: item.description, inline: false }
 					)
 					.setFooter({ text: '※ この商品は一度購入すると再度購入できません' })
@@ -3180,11 +3366,15 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// ロメコイン残高を確認
+				// 消費税を計算（インフレ対策）
+				const { applyConsumptionTax } = require('../features/inflationControl');
+				const { totalPrice, tax } = applyConsumptionTax(item.price);
+				
+				// ロメコイン残高を確認（税込み価格）
 				const balance = await getRomecoin(userId);
-				if (balance < item.price) {
+				if (balance < totalPrice) {
 					return interaction.reply({
-						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${totalPrice.toLocaleString()} (税込み、内消費税: ${ROMECOIN_EMOJI}${tax.toLocaleString()})\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
 						ephemeral: true,
 					});
 				}
@@ -3226,37 +3416,42 @@ async function handleCommands(interaction, client) {
 					console.error('[ショップ] 購入履歴保存エラー:', e);
 				}
 
-				// ユーザーのロメコインを減額（ログ付き）
+				// ユーザーのロメコインを減額（税込み価格、ログ付き）
 				const previousBalance = balance;
 				await updateRomecoin(
 					userId,
-					(current) => Math.round((current || 0) - item.price),
+					(current) => Math.round((current || 0) - totalPrice),
 					{
 						log: true,
 						client: client,
-						reason: `ショップ購入: ${item.name}`,
+						reason: `ショップ購入: ${item.name} (消費税: ${ROMECOIN_EMOJI}${tax.toLocaleString()})`,
 						metadata: {
 							commandName: 'shop_buy',
 							itemId: item.id,
+							tax: tax,
+							originalPrice: item.price,
 						},
 					}
 				);
 				const newBalance = await getRomecoin(userId);
 
-				// クロスロイドのロメコインを増額（ログ付き）
+				// クロスロイドのロメコインを増額（税抜き価格 + 消費税、ログ付き）
 				const botUserId = client.user.id;
 				const botPreviousBalance = await getRomecoin(botUserId);
 				await updateRomecoin(
 					botUserId,
-					(current) => Math.round((current || 0) + item.price),
+					(current) => Math.round((current || 0) + totalPrice),
 					{
 						log: true,
 						client: client,
-						reason: `ショップ収益: ${item.name} (購入者: ${interaction.user.tag})`,
+						reason: `ショップ収益: ${item.name} (購入者: ${interaction.user.tag}、税込み: ${ROMECOIN_EMOJI}${totalPrice.toLocaleString()})`,
 						metadata: {
 							commandName: 'shop_revenue',
 							itemId: item.id,
 							buyerId: userId,
+							originalPrice: item.price,
+							tax: tax,
+							totalPrice: totalPrice,
 						},
 					}
 				);
@@ -3271,7 +3466,9 @@ async function handleCommands(interaction, client) {
 					.setColor(0x00ff00)
 					.setDescription(`**${item.name}** の購入が完了しました！`)
 					.addFields(
-						{ name: '支払額', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '税抜き価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
+						{ name: '消費税 (5%)', value: `${ROMECOIN_EMOJI}${tax.toLocaleString()}`, inline: true },
+						{ name: '支払額 (税込み)', value: `${ROMECOIN_EMOJI}${totalPrice.toLocaleString()}`, inline: true },
 						{ name: '購入前の残高', value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`, inline: true },
 						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`, inline: true }
 					)

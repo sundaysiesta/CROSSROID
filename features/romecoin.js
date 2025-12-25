@@ -1,1931 +1,450 @@
 const fs = require('fs');
-const { DATABASE_CHANNEL_ID, RADIATION_ROLE_ID, ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
-const { checkAdmin } = require('../utils');
+const path = require('path');
+const { EmbedBuilder } = require('discord.js');
 const { getData, updateData, migrateData } = require('./dataAccess');
-const notionManager = require('./notion');
-const { MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-const { isUserInGame, setUserGame, clearUserGame } = require('../utils');
-const crypto = require('crypto');
+const { ERRORLOG_CHANNEL_ID } = require('../constants');
 
-// ロメコインデータ
-let romecoin_data = new Object();
-// クールダウン用配列
-let message_cooldown_users = new Array();
-let reaction_cooldown_users = new Array();
-// じゃんけん進行データ
-let janken_progress_data = new Object();
-// ロメコインランキングのサーバー間クールダウン（30秒）
-let romecoin_ranking_cooldowns = new Map();
-// VC参加者追跡（userId -> { joinTime, lastRewardTime, channelId }）
-let vcParticipants = new Map();
-// VCロメコイン付与の間隔（60秒）
-const VC_REWARD_INTERVAL_MS = 60 * 1000;
-// ロメコイン絵文字
+const ROMECOIN_DATA_FILE = path.join(__dirname, '..', 'romecoin_data.json');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
-// Discordクライアント（ログ送信用）
-let discordClient = null;
 
-const RSPEnum = Object.freeze({
-	rock: 'グー',
-	scissors: 'チョキ',
-	paper: 'パー',
-});
+// 数値の最大値（JavaScriptの安全な整数範囲内）
+const MAX_SAFE_VALUE = Number.MAX_SAFE_INTEGER; // 2^53 - 1 = 9007199254740991
 
-async function clientReady(client) {
-	// クライアントを保存（ログ送信用）
-	discordClient = client;
+// グローバル変数としてromecoin_dataを初期化
+let romecoin_data = null;
 
-	// DBからデータを取得
-	const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
-	const message = (await db_channel.messages.fetch({ limit: 1, cache: false })).first();
-	message.attachments.forEach(async (attachment) => {
-		if (attachment.name === 'romecoin_data.json') {
-			const response = await fetch(attachment.url);
-			const data = await response.text();
-			romecoin_data = JSON.parse(data);
-		}
-	});
+// 同時実行制御用のロック（ユーザーIDごと）
+const updateLocks = new Map();
 
-	// VC参加者のロメコイン付与を定期実行（60秒ごと）
-	setInterval(async () => {
-		try {
-			await rewardVCParticipants(client);
-		} catch (error) {
-			console.error('[VCロメコイン] 定期実行エラー:', error);
-		}
-	}, VC_REWARD_INTERVAL_MS);
+// ランキングコマンドのクールダウン
+let romecoin_ranking_cooldowns = new Map();
 
-	// 60秒ごとにデータを送信
-	setInterval(async () => {
-		fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
-			if (err) {
-				throw err;
-			}
-		});
-
-		await db_channel.send({ files: ['./.tmp/romecoin_data.json'] });
-	}, 60000);
-
-	// 10秒ごとにクールダウンをリセット
-	setInterval(async () => {
-		message_cooldown_users = new Array();
-		reaction_cooldown_users = new Array();
-	}, 10000);
+// 数値の検証関数
+function validateAmount(amount) {
+	if (typeof amount !== 'number' || isNaN(amount) || !isFinite(amount)) {
+		return { valid: false, error: '数値が無効です' };
+	}
+	if (amount < 0) {
+		return { valid: false, error: '負の値は許可されていません' };
+	}
+	if (amount > MAX_SAFE_VALUE) {
+		return { valid: false, error: `数値が大きすぎます（最大値: ${MAX_SAFE_VALUE.toLocaleString()}）` };
+	}
+	return { valid: true };
 }
 
-async function interactionCreate(interaction) {
-	if (interaction.isChatInputCommand()) {
-		if (interaction.commandName === 'romecoin') {
-			const user = interaction.options.getUser('user')
-				? interaction.options.getUser('user').id
-				: interaction.user.id;
-			const romecoin = await getData(user, romecoin_data, 0);
-			interaction.reply({
-				content: `<@${user}>の現在の所持ロメコイン: ${ROMECOIN_EMOJI}${romecoin}`,
-				ephemeral: true,
-			});
-		} else if (interaction.commandName === 'romecoin_ranking') {
-			// サーバー間クールダウンチェック（30秒）
-			const guildId = interaction.guild?.id || 'dm';
-			const now = Date.now();
-			const lastUsed = romecoin_ranking_cooldowns.get(guildId) || 0;
-			const COOLDOWN_MS = 30 * 1000; // 30秒
-
-			if (now - lastUsed < COOLDOWN_MS) {
-				const remainSec = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
-				return interaction.reply({
-					content: `⏳ クールダウン中です（残り${remainSec}秒）`,
-					ephemeral: true,
-				});
-			}
-
-			// クールダウンを更新
-			romecoin_ranking_cooldowns.set(guildId, now);
-
-			// 銀行データを読み込み
-			const bank = require('./bank');
-			const bankData = bank.loadBankData();
-			const { getData: getBankData } = require('./dataAccess');
-			const INTEREST_RATE_PER_HOUR = 0.00000228;
-			const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
-
-			// データを配列に変換（Notion名の場合はDiscord IDを取得）
-			// 黒須銀行（クロスロイド）を除外
-			const botUserId = interaction.client.user.id;
-			const sortedData = await Promise.all(
-				Object.entries(romecoin_data)
-					.filter(([key, value]) => {
-						// クロスロイドのIDを除外
-						if (key === botUserId) return false;
-						// Notion名の場合はDiscord IDを確認
-						if (!/^\d+$/.test(key)) {
-							return true; // 後でDiscord IDを確認
-						}
-						return key !== botUserId;
-					})
-					.map(async ([key, value]) => {
-						const isNotionName = !/^\d+$/.test(key);
-						let discordId = key;
-
-						if (isNotionName) {
-							discordId = (await notionManager.getDiscordId(key)) || key;
-							// クロスロイドの場合は除外
-							if (discordId === botUserId) return null;
-						}
-
-						// 預金額を取得（利子も計算）
-						let deposit = 0;
-						try {
-							const userBankData = await getBankData(discordId, bankData, {
-								deposit: 0,
-								lastInterestTime: Date.now(),
-							});
-							const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-							if (hoursPassed > 0 && userBankData.deposit > 0) {
-								const interest = Math.round(userBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
-								deposit = userBankData.deposit + interest;
-							} else {
-								deposit = userBankData.deposit || 0;
-							}
-						} catch (e) {
-							// エラーが発生した場合は預金額を0とする
-							deposit = 0;
-						}
-
-						// 所持金 + 預金額を合計
-						const totalValue = (value || 0) + deposit;
-
-						return { key, discordId, displayName: isNotionName ? key : null, value: totalValue, deposit, romecoin: value || 0 };
-					})
-			);
-			
-			// nullを除外
-			const filteredData = sortedData.filter(item => item !== null);
-
-			filteredData.sort((a, b) => b.value - a.value);
-
-			// ページネーション用のデータ準備
-			const ITEMS_PER_PAGE = 10;
-			const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
-			let currentPage = 0;
-
-			// ランキング表示用の関数
-			const buildRankingEmbed = (page) => {
-				const startIndex = page * ITEMS_PER_PAGE;
-				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredData.length);
-				const pageData = filteredData.slice(startIndex, endIndex);
-
-				let rankingText = '';
-				for (let i = 0; i < pageData.length; i++) {
-					const rank = startIndex + i + 1;
-					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
-					const display = pageData[i].displayName
-						? `${pageData[i].displayName} (<@${pageData[i].discordId}>)`
-						: `<@${pageData[i].discordId}>`;
-					const totalValue = pageData[i].value;
-					const romecoin = pageData[i].romecoin || 0;
-					const deposit = pageData[i].deposit || 0;
-					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${totalValue.toLocaleString()} (所持: ${ROMECOIN_EMOJI}${romecoin.toLocaleString()}, 預金: ${ROMECOIN_EMOJI}${deposit.toLocaleString()})\n`;
-				}
-
-				if (rankingText === '') {
-					rankingText = 'データがありません';
-				}
-
-				const embed = new EmbedBuilder()
-					.setTitle('🏆 ROMECOINランキング')
-					.setDescription(rankingText)
-					.setColor(0xffd700)
-					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${filteredData.length}人` })
-					.setTimestamp();
-
-				return embed;
-			};
-
-			// ボタン作成
-			const buildButtons = (page, userId) => {
-				const row = new ActionRowBuilder();
-
-				const prevButton = new ButtonBuilder()
-					.setCustomId(`romecoin_ranking_prev_${page}_${userId}`)
-					.setLabel('前へ')
-					.setStyle(ButtonStyle.Primary)
-					.setDisabled(page === 0);
-
-				const nextButton = new ButtonBuilder()
-					.setCustomId(`romecoin_ranking_next_${page}_${userId}`)
-					.setLabel('次へ')
-					.setStyle(ButtonStyle.Primary)
-					.setDisabled(page >= totalPages - 1);
-
-				row.addComponents(prevButton, nextButton);
-				return row;
-			};
-
-			// 初回表示
-			await interaction.reply({
-				embeds: [buildRankingEmbed(currentPage)],
-				components: totalPages > 1 ? [buildButtons(currentPage, interaction.user.id)] : [],
-				ephemeral: false,
-			});
-		} else if (interaction.commandName === 'janken') {
-			// 既に応答済みの場合は処理をスキップ
-			if (interaction.replied || interaction.deferred) {
-				return;
-			}
-
-			// 世代ロールチェック
-			const { CURRENT_GENERATION_ROLE_ID } = require('../constants');
-			const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
-			const member = interaction.member;
-			const hasGenerationRole =
-				member.roles.cache.some((r) => romanRegex.test(r.name)) ||
-				member.roles.cache.has(CURRENT_GENERATION_ROLE_ID);
-
-			if (!hasGenerationRole) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('じゃんけんを実行するには世代ロールが必要です。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-			}
-
-			const bet = interaction.options.getInteger('bet') ? interaction.options.getInteger('bet') : 100;
-			if (bet < 100) {
-				if (!interaction.replied && !interaction.deferred) {
-					return interaction.reply({
-						content: 'ベットは100以上の整数で指定してください',
-						flags: [MessageFlags.Ephemeral],
-					}).catch(() => {});
-				}
-				return;
-			}
-
-			// 重複実行チェック（最初にチェック）
-			if (isUserInGame(interaction.user.id)) {
-				if (!interaction.replied && !interaction.deferred) {
-					const errorEmbed = new EmbedBuilder()
-						.setTitle('❌ エラー')
-						.setDescription(
-							'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
-						)
-						.setColor(0xff0000);
-					return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-				}
-				return;
-			}
-
-			// 即座にロックをかける（重複対戦を防ぐ）
-			const tempProgressId = `temp_janken_${interaction.user.id}_${Date.now()}`;
-			setUserGame(interaction.user.id, 'janken', tempProgressId);
-
-			try {
-				// 被爆ロールチェック：被爆ロールがついている人は対戦コマンドを実行できない
-				if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-					clearUserGame(interaction.user.id);
-					if (!interaction.replied && !interaction.deferred) {
-						const errorEmbed = new EmbedBuilder()
-							.setTitle('❌ エラー')
-							.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
-							.setColor(0xff0000);
-						return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-					}
-					return;
-				}
-
-			if (
-				!Object.values(janken_progress_data).some(
-					(data) =>
-						(data.user && data.user.id === interaction.user.id) ||
-						(data.opponent && data.opponent.id === interaction.user.id)
-				)
-			) {
-				const opponent = interaction.options.getUser('opponent');
-				if ((await getData(interaction.user.id, romecoin_data, 0)) >= bet) {
-					const progress_id = crypto.randomUUID();
-					if (opponent) {
-						// クロスロイドと対戦
-						if (opponent.id === interaction.client.user.id) {
-							// クロスロイドのロメコイン残高をチェック（銀行の預金から）
-							const bank = require('./bank');
-							const bankData = bank.loadBankData();
-							const { getData: getBankData } = require('./dataAccess');
-							const botBankData = await getBankData(interaction.client.user.id, bankData, {
-								deposit: 0,
-								lastInterestTime: Date.now(),
-							});
-							
-							// 利子を計算して追加
-							const INTEREST_RATE_PER_HOUR = 0.001;
-							const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
-							const now = Date.now();
-							const hoursPassed = (now - botBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-							if (hoursPassed > 0) {
-								const interest = Math.round(botBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
-								if (interest > 0) {
-									botBankData.deposit += interest;
-									botBankData.lastInterestTime = now;
-								}
-							}
-							
-							const botBalance = botBankData.deposit;
-							if (botBalance < bet) {
-								clearUserGame(interaction.user.id);
-								if (!interaction.replied && !interaction.deferred) {
-									const errorEmbed = new EmbedBuilder()
-										.setTitle('❌ エラー')
-										.setDescription('クロスロイドのロメコイン（銀行預金）が不足しています')
-										.addFields(
-											{
-												name: 'クロスロイドの現在の預金額',
-												value: `${ROMECOIN_EMOJI}${botBalance.toLocaleString()}`,
-												inline: true,
-											},
-											{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
-										)
-										.setColor(0xff0000);
-									return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-								}
-								return;
-							}
-							
-							// 手選択ボタンを表示
-							const rockButton = new ButtonBuilder()
-								.setCustomId(`janken_rock_${progress_id}`)
-								.setLabel('グー')
-								.setEmoji('✊')
-								.setStyle(ButtonStyle.Primary);
-							const scissorsButton = new ButtonBuilder()
-								.setCustomId(`janken_scissors_${progress_id}`)
-								.setLabel('チョキ')
-								.setEmoji('✌️')
-								.setStyle(ButtonStyle.Success);
-							const paperButton = new ButtonBuilder()
-								.setCustomId(`janken_paper_${progress_id}`)
-								.setLabel('パー')
-								.setEmoji('✋')
-								.setStyle(ButtonStyle.Danger);
-							const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-
-							const embed = new EmbedBuilder()
-								.setTitle('✂️ じゃんけん勝負')
-								.setDescription(
-									`${opponent}\n${interaction.user} からじゃんけん勝負を申し込まれました。`
-								)
-								.addFields(
-									{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
-									{ name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
-									{ name: '注意', value: '受諾後、キャンセル不可', inline: false }
-								)
-								.setColor(0xffa500)
-								.setThumbnail(interaction.user.displayAvatarURL());
-
-							if (interaction.replied || interaction.deferred) {
-								clearUserGame(interaction.user.id);
-								return;
-							}
-
-							const replyMessage = await interaction.reply({
-								content: `${opponent}`,
-								embeds: [embed],
-								components: [row],
-								fetchReply: true,
-							}).catch((error) => {
-								clearUserGame(interaction.user.id);
-								if (error.code !== 10062 && error.code !== 40060) {
-									console.error('[Janken] 応答エラー:', error);
-								}
-								return null;
-							});
-
-							if (!replyMessage) {
-								return;
-							}
-							janken_progress_data[progress_id] = {
-								user: interaction.user,
-								opponent: opponent,
-								bet: bet,
-								timeout_id: null,
-								user_hand: null,
-								opponent_hand: null, // ユーザーが手を選ぶタイミングでランダムに決定
-								status: 'selecting_hands',
-								message: replyMessage,
-							};
-						}
-						// 他ユーザーと対戦
-						else if (opponent.id !== interaction.user.id && !opponent.bot) {
-							// 被爆ロールチェック：対戦相手が被爆ロールを持っている場合は挑戦できない
-							const opponentMember = await interaction.guild.members.fetch(opponent.id).catch(() => null);
-							if (opponentMember && opponentMember.roles.cache.has(RADIATION_ROLE_ID)) {
-								clearUserGame(interaction.user.id);
-								if (!interaction.replied && !interaction.deferred) {
-									const errorEmbed = new EmbedBuilder()
-										.setTitle('❌ エラー')
-										.setDescription('対戦相手が被爆ロールを持っているため、挑戦できません。')
-										.setColor(0xff0000);
-									return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-								}
-								return;
-							}
-
-							if ((await getData(opponent.id, romecoin_data, 0)) >= bet) {
-								// 対戦相手の手選択ボタンを表示
-								const rockButton = new ButtonBuilder()
-									.setCustomId(`janken_rock_${progress_id}`)
-									.setLabel('グー')
-									.setEmoji('✊')
-									.setStyle(ButtonStyle.Primary);
-								const scissorsButton = new ButtonBuilder()
-									.setCustomId(`janken_scissors_${progress_id}`)
-									.setLabel('チョキ')
-									.setEmoji('✌️')
-									.setStyle(ButtonStyle.Success);
-								const paperButton = new ButtonBuilder()
-									.setCustomId(`janken_paper_${progress_id}`)
-									.setLabel('パー')
-									.setEmoji('✋')
-									.setStyle(ButtonStyle.Danger);
-								const row = new ActionRowBuilder().addComponents(
-									rockButton,
-									scissorsButton,
-									paperButton
-								);
-
-								const embed = new EmbedBuilder()
-									.setTitle('✂️ じゃんけん勝負')
-									.setDescription(
-										`${opponent}\n${interaction.user} からじゃんけん勝負を申し込まれました。`
-									)
-									.addFields(
-										{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
-										{ name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
-										{ name: '注意', value: '受諾後、キャンセル不可', inline: false }
-									)
-									.setColor(0xffa500)
-									.setThumbnail(interaction.user.displayAvatarURL());
-
-								if (interaction.replied || interaction.deferred) {
-									clearUserGame(interaction.user.id);
-									return;
-								}
-
-								const select_message = await interaction.reply({
-									content: `${opponent}`,
-									embeds: [embed],
-									components: [row],
-									fetchReply: true,
-								}).catch((error) => {
-									clearUserGame(interaction.user.id);
-									if (error.code !== 10062 && error.code !== 40060) {
-										console.error('[Janken] 応答エラー:', error);
-									}
-									return null;
-								});
-
-								if (!select_message) {
-									return;
-								}
-
-								// ゲーム開始：進行状況を記録
-								setUserGame(interaction.user.id, 'janken', progress_id);
-								setUserGame(opponent.id, 'janken', progress_id);
-
-								// 60秒たっても選択されなかったら勝負破棄
-								const timeout_id = setTimeout(async () => {
-									const timeoutEmbed = new EmbedBuilder()
-										.setTitle('⏰ 時間切れ')
-										.setDescription('時間切れとなったため、勝負は破棄されました')
-										.setColor(0x99aab5);
-									select_message.edit({ content: null, embeds: [timeoutEmbed], components: [] });
-									await interaction.followUp({
-										content: '時間切れとなったため、勝負は破棄されました',
-										flags: [MessageFlags.Ephemeral],
-									});
-									delete janken_progress_data[progress_id];
-									// タイムアウト時も進行状況をクリア
-									clearUserGame(interaction.user.id);
-									clearUserGame(opponent.id);
-								}, 60000);
-								janken_progress_data[progress_id] = {
-									user: interaction.user,
-									opponent: opponent,
-									bet: bet,
-									timeout_id: timeout_id,
-									user_hand: null,
-									opponent_hand: null,
-									status: 'selecting_hands',
-									message: select_message,
-								};
-							} else {
-								clearUserGame(interaction.user.id);
-								if (!interaction.replied && !interaction.deferred) {
-									const errorEmbed = new EmbedBuilder()
-										.setTitle('❌ エラー')
-										.setDescription(`対戦相手のロメコインが不足しています`)
-										.addFields(
-											{
-												name: `${opponent}の現在の所持ロメコイン`,
-												value: `${ROMECOIN_EMOJI}${await getData(opponent.id, romecoin_data, 0)}`,
-												inline: true,
-											},
-											{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
-										)
-										.setColor(0xff0000);
-									await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-								}
-							}
-						} else {
-							clearUserGame(interaction.user.id);
-							if (!interaction.replied && !interaction.deferred) {
-								const errorEmbed = new EmbedBuilder()
-									.setTitle('❌ エラー')
-									.setDescription('自分自身やクロスロイド以外のBotと対戦することはできません')
-									.setColor(0xff0000);
-								await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
-							}
-						}
-					}
-					// 対戦相手が指定されていない場合は対戦募集ボードを表示
-					else {
-						const acceptButton = new ButtonBuilder()
-							.setCustomId(`janken_accept_${progress_id}`)
-							.setLabel('受ける')
-							.setStyle(ButtonStyle.Success);
-						const row = new ActionRowBuilder().addComponents(acceptButton);
-
-						const embed = new EmbedBuilder()
-							.setTitle('✂️ じゃんけん勝負募集')
-							.setDescription(
-								`${interaction.user} が誰でも挑戦可能なじゃんけん勝負を開始しました。\n\n**誰でも「受ける」ボタンを押して挑戦できます！**`
-							)
-							.addFields(
-								{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true },
-								{ name: 'ベット', value: `${ROMECOIN_EMOJI}${bet}`, inline: true },
-								{ name: '注意', value: '受諾後、キャンセル不可', inline: false }
-							)
-							.setColor(0xffa500)
-							.setThumbnail(interaction.user.displayAvatarURL());
-
-						if (interaction.replied || interaction.deferred) {
-							clearUserGame(interaction.user.id);
-							return;
-						}
-
-						const replyMessage = await interaction.reply({
-							content: null,
-							embeds: [embed],
-							components: [row],
-							fetchReply: true,
-						}).catch((error) => {
-							clearUserGame(interaction.user.id);
-							if (error.code !== 10062 && error.code !== 40060) {
-								console.error('[Janken] 応答エラー:', error);
-							}
-							return null;
-						});
-
-						if (!replyMessage) {
-							return;
-						}
-						// ゲーム開始：進行状況を記録（募集段階）
-						setUserGame(interaction.user.id, 'janken', progress_id);
-						const timeout_id = setTimeout(async () => {
-							const timeoutEmbed = new EmbedBuilder()
-								.setTitle('⏰ 時間切れ')
-								.setDescription('時間切れとなったため、対戦募集は終了しました')
-								.setColor(0x99aab5);
-							await replyMessage.edit({ content: null, embeds: [timeoutEmbed], components: [] });
-							delete janken_progress_data[progress_id];
-							// タイムアウト時も進行状況をクリア
-							clearUserGame(interaction.user.id);
-						}, 60000);
-						janken_progress_data[progress_id] = {
-							user: interaction.user,
-							opponent: null,
-							bet: bet,
-							timeout_id: timeout_id,
-							user_hand: null,
-							opponent_hand: null,
-							status: 'waiting_for_opponent',
-							message: replyMessage,
-						};
-					}
-				} else {
-					clearUserGame(interaction.user.id);
-					if (!interaction.replied && !interaction.deferred) {
-						try {
-							await interaction.reply({
-								content: `ロメコインが不足しています\n現在の所持ロメコイン: ${ROMECOIN_EMOJI}${await getData(
-									interaction.user.id,
-									romecoin_data,
-									0
-								)}\n必要なロメコイン: ${ROMECOIN_EMOJI}${bet}`,
-								flags: [MessageFlags.Ephemeral],
-							});
-						} catch (replyError) {
-							// Unknown interactionエラー（コード10062, 40060）は無視
-							if (replyError.code !== 10062 && replyError.code !== 40060) {
-								console.error('jankenコマンド応答エラー:', replyError);
-							}
-						}
-					}
-				}
-			} else {
-				clearUserGame(interaction.user.id);
-				if (!interaction.replied && !interaction.deferred) {
-					try {
-						await interaction.reply({
-							content: 'あなたは現在対戦中のため新規の対戦を開始できません',
-							flags: [MessageFlags.Ephemeral],
-						});
-					} catch (replyError) {
-						// Unknown interactionエラー（コード10062, 40060）は無視
-						if (replyError.code !== 10062 && replyError.code !== 40060) {
-							console.error('jankenコマンド応答エラー:', replyError);
-						}
-					}
-				}
-			}
-			} catch (error) {
-				clearUserGame(interaction.user.id);
-				// Unknown interactionエラー（コード10062, 40060）は無視
-				if (error.code === 10062 || error.code === 40060) {
-					return;
-				}
-				console.error('jankenコマンドエラー:', error);
-				// エラーが発生した場合、まだ応答していなければエラーメッセージを送信
-				if (!interaction.replied && !interaction.deferred) {
-					try {
-						await interaction.reply({
-							content: 'エラーが発生しました。',
-							flags: [MessageFlags.Ephemeral],
-						}).catch(() => {});
-					} catch (replyError) {
-						// 応答エラーも無視（インタラクションが既に期限切れの可能性）
-						if (replyError.code !== 10062 && replyError.code !== 40060) {
-							console.error('[Janken] 応答エラー:', replyError);
-						}
-					}
-				}
-				// Unknown interactionエラー（コード10062）は無視（インタラクションが既に期限切れ）
-				if (error.code === 10062 || error.code === 40060) {
-					return;
-				}
-				if (!interaction.replied && !interaction.deferred) {
-					try {
-						await interaction.reply({ content: 'エラーが発生しました。', flags: [MessageFlags.Ephemeral] });
-					} catch (replyError) {
-						// 応答エラーも無視（インタラクションが既に期限切れの可能性）
-						if (replyError.code !== 10062 && replyError.code !== 40060) {
-							console.error('jankenコマンド応答エラー:', replyError);
-						}
-					}
-				}
-			}
-		} else if (interaction.commandName === 'database_export') {
-			if (await checkAdmin(interaction.member)) {
-				fs.writeFile('./.tmp/romecoin_data.json', JSON.stringify(romecoin_data), (err) => {
-					if (err) {
-						throw err;
-					}
-				});
-
-				await interaction.reply({ files: ['./.tmp/romecoin_data.json'], ephemeral: true });
-			}
-		} else if (interaction.commandName === 'data_migrate') {
-			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
-			}
-
-			const targetUser = interaction.options.getUser('user');
-			if (!targetUser) {
-				return interaction.reply({ content: '❌ ユーザーを指定してください。', ephemeral: true });
-			}
-
-			const fs = require('fs');
-			const path = require('path');
-			const { migrateData } = require('./dataAccess');
-			const persistence = require('./persistence');
-
-			let migratedCount = 0;
-			const results = [];
-
-			// 各データファイルを引き継ぎ
-			const files = [
-				{ file: 'duel_data.json', name: '決闘データ' },
-				{ file: 'janken_data.json', name: 'じゃんけんデータ' },
-				{ file: 'romecoin_data.json', name: 'ロメコインデータ' },
-				{ file: 'activity_data.json', name: 'アクティビティデータ' },
-				{ file: 'custom_cooldowns.json', name: 'クールダウンデータ', prefix: 'battle_' },
-			];
-
-			for (const { file, name, prefix = '' } of files) {
-				const filePath = path.join(__dirname, '..', file);
-				if (fs.existsSync(filePath)) {
-					try {
-						const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-						const migrated = await migrateData(targetUser.id, data, prefix);
-						if (migrated) {
-							fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-							migratedCount++;
-							results.push(`✅ ${name}`);
-						} else {
-							results.push(`⏭️ ${name} (引き継ぎ不要)`);
-						}
-					} catch (e) {
-						results.push(`❌ ${name} (エラー: ${e.message})`);
-					}
-				}
-			}
-
-			// Memory storeに保存
-			await persistence.save(interaction.client).catch(() => {});
-
-			const resultText = results.join('\n');
-			await interaction.reply({
-				content: `📊 **データ引き継ぎ結果**\n対象: <@${targetUser.id}>\n\n${resultText}\n\n引き継ぎ完了: ${migratedCount}件`,
-				ephemeral: true,
-			});
-		}
-	} else if (interaction.isButton()) {
-		// romecoin_ranking ページネーションボタン処理
-		if (interaction.customId.startsWith('romecoin_ranking_')) {
-			const parts = interaction.customId.split('_');
-			const action = parts[2]; // 'prev' or 'next'
-			const currentPage = parseInt(parts[3]);
-			const commandUserId = parts[4]; // コマンド実行者のID
-
-			// コマンド実行者のみが操作できるようにチェック
-			if (interaction.user.id !== commandUserId) {
-				return interaction.reply({
-					content: 'このランキングを表示したユーザーのみが操作できます。',
-					ephemeral: true,
-				});
-			}
-
-			// 銀行データを読み込み
-			const bank = require('./bank');
-			const bankData = bank.loadBankData();
-			const { getData: getBankData } = require('./dataAccess');
-			const INTEREST_RATE_PER_HOUR = 0.00000228;
-			const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
-			const now = Date.now();
-
-			// データを配列に変換
-			// 黒須銀行（クロスロイド）を除外
-			const botUserId = interaction.client.user.id;
-			const sortedData = await Promise.all(
-				Object.entries(romecoin_data)
-					.filter(([key, value]) => {
-						if (key === botUserId) return false;
-						if (!/^\d+$/.test(key)) {
-							return true;
-						}
-						return key !== botUserId;
-					})
-					.map(async ([key, value]) => {
-						const isNotionName = !/^\d+$/.test(key);
-						let discordId = key;
-
-						if (isNotionName) {
-							discordId = (await notionManager.getDiscordId(key)) || key;
-							if (discordId === botUserId) return null;
-						}
-
-						// 預金額を取得（利子も計算）
-						let deposit = 0;
-						try {
-							const userBankData = await getBankData(discordId, bankData, {
-								deposit: 0,
-								lastInterestTime: Date.now(),
-							});
-							const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-							if (hoursPassed > 0 && userBankData.deposit > 0) {
-								const interest = Math.round(userBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
-								deposit = userBankData.deposit + interest;
-							} else {
-								deposit = userBankData.deposit || 0;
-							}
-						} catch (e) {
-							// エラーが発生した場合は預金額を0とする
-							deposit = 0;
-						}
-
-						// 所持金 + 預金額を合計
-						const totalValue = (value || 0) + deposit;
-
-						return { key, discordId, displayName: isNotionName ? key : null, value: totalValue, deposit, romecoin: value || 0 };
-					})
-			);
-			
-			const filteredData = sortedData.filter(item => item !== null);
-			filteredData.sort((a, b) => b.value - a.value);
-
-			const ITEMS_PER_PAGE = 10;
-			const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
-
-			let newPage = currentPage;
-			if (action === 'prev' && currentPage > 0) {
-				newPage = currentPage - 1;
-			} else if (action === 'next' && currentPage < totalPages - 1) {
-				newPage = currentPage + 1;
-			}
-
-			// ランキング表示用の関数
-			const buildRankingEmbed = (page) => {
-				const startIndex = page * ITEMS_PER_PAGE;
-				const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredData.length);
-				const pageData = filteredData.slice(startIndex, endIndex);
-
-				let rankingText = '';
-				for (let i = 0; i < pageData.length; i++) {
-					const rank = startIndex + i + 1;
-					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
-					const display = pageData[i].displayName
-						? `${pageData[i].displayName} (<@${pageData[i].discordId}>)`
-						: `<@${pageData[i].discordId}>`;
-					const totalValue = pageData[i].value;
-					const romecoin = pageData[i].romecoin || 0;
-					const deposit = pageData[i].deposit || 0;
-					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${totalValue.toLocaleString()} (所持: ${ROMECOIN_EMOJI}${romecoin.toLocaleString()}, 預金: ${ROMECOIN_EMOJI}${deposit.toLocaleString()})\n`;
-				}
-
-				if (rankingText === '') {
-					rankingText = 'データがありません';
-				}
-
-				const embed = new EmbedBuilder()
-					.setTitle('🏆 ROMECOINランキング')
-					.setDescription(rankingText)
-					.setColor(0xffd700)
-					.setFooter({ text: `ページ ${page + 1}/${totalPages} | 総登録者数: ${filteredData.length}人` })
-					.setTimestamp();
-
-				return embed;
-			};
-
-			// ボタン作成
-			const buildButtons = (page, userId) => {
-				const row = new ActionRowBuilder();
-
-				const prevButton = new ButtonBuilder()
-					.setCustomId(`romecoin_ranking_prev_${page}_${userId}`)
-					.setLabel('前へ')
-					.setStyle(ButtonStyle.Primary)
-					.setDisabled(page === 0);
-
-				const nextButton = new ButtonBuilder()
-					.setCustomId(`romecoin_ranking_next_${page}_${userId}`)
-					.setLabel('次へ')
-					.setStyle(ButtonStyle.Primary)
-					.setDisabled(page >= totalPages - 1);
-
-				row.addComponents(prevButton, nextButton);
-				return row;
-			};
-
-			await interaction.update({
-				embeds: [buildRankingEmbed(newPage)],
-				components: totalPages > 1 ? [buildButtons(newPage, commandUserId)] : [],
-			});
-
-			return;
-		}
-
-		// jankenボタンインタラクション処理(対戦承諾)
-		if (interaction.customId.startsWith('janken_accept_')) {
-			const progress_id = interaction.customId.split('_')[2];
-
-			// 被爆ロールチェック：被爆ロールがついている人は受諾できない
-			if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('被爆ロールがついているため、対戦を受諾できません。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-			}
-
-			if (
-				interaction.user.id !== janken_progress_data[progress_id].user.id &&
-				(await getData(interaction.user.id, romecoin_data, 0)) >= janken_progress_data[progress_id].bet
-			) {
-				if (
-					!Object.values(janken_progress_data).some(
-						(data) =>
-							(data.user && data.user.id === interaction.user.id) ||
-							(data.opponent && data.opponent.id === interaction.user.id)
-					)
-				) {
-					clearTimeout(janken_progress_data[progress_id].timeout_id);
-					const rockButton = new ButtonBuilder()
-						.setCustomId(`janken_rock_${progress_id}`)
-						.setLabel('グー')
-						.setEmoji('✊')
-						.setStyle(ButtonStyle.Primary);
-					const scissorsButton = new ButtonBuilder()
-						.setCustomId(`janken_scissors_${progress_id}`)
-						.setLabel('チョキ')
-						.setEmoji('✌️')
-						.setStyle(ButtonStyle.Success);
-					const paperButton = new ButtonBuilder()
-						.setCustomId(`janken_paper_${progress_id}`)
-						.setLabel('パー')
-						.setEmoji('✋')
-						.setStyle(ButtonStyle.Danger);
-					const row = new ActionRowBuilder().addComponents(rockButton, scissorsButton, paperButton);
-					// 最初のメッセージを編集
-					const startEmbed = new EmbedBuilder()
-						.setTitle('✂️ じゃんけん勝負開始')
-						.setDescription(
-							`${janken_progress_data[progress_id].user} 対戦相手が見つかりました！\n対戦相手は${interaction.user}です`
-						)
-						.addFields(
-							{
-								name: 'ベット',
-								value: `${ROMECOIN_EMOJI}${janken_progress_data[progress_id].bet}`,
-								inline: true,
-							},
-							{ name: 'ルール', value: 'グー・チョキ・パーで勝負', inline: true }
-						)
-						.setColor(0xffa500);
-
-					try {
-						// 最初のメッセージを編集（オープンチャレンジの場合）
-						if (janken_progress_data[progress_id].message) {
-							await janken_progress_data[progress_id].message.edit({
-								content: null,
-								embeds: [startEmbed],
-								components: [row],
-							});
-						} else {
-							// メッセージが保存されていない場合は新しいメッセージとして送信
-							await interaction.channel.send({
-								content: null,
-								embeds: [startEmbed],
-								components: [row],
-							});
-						}
-
-						// インタラクションに応答（既に応答済みの場合は無視）
-						if (!interaction.replied && !interaction.deferred) {
-							await interaction.deferUpdate().catch(() => {});
-						}
-					} catch (error) {
-						console.error('じゃんけん受諾処理エラー:', error);
-						// エラーが発生しても処理を続行
-					}
-
-					janken_progress_data[progress_id].opponent = interaction.user;
-					janken_progress_data[progress_id].status = 'selecting_hands';
-					const timeout_id = setTimeout(async () => {
-						const timeoutEmbed = new EmbedBuilder()
-							.setTitle('⏰ 時間切れ')
-							.setDescription('時間切れとなったため、勝負は破棄されました')
-							.setColor(0x99aab5);
-						if (janken_progress_data[progress_id] && janken_progress_data[progress_id].message) {
-							await janken_progress_data[progress_id].message
-								.edit({ content: null, embeds: [timeoutEmbed], components: [] })
-								.catch(() => {});
-						}
-						delete janken_progress_data[progress_id];
-					}, 60000);
-					janken_progress_data[progress_id].timeout_id = timeout_id;
-				} else {
-					const errorEmbed = new EmbedBuilder()
-						.setTitle('❌ エラー')
-						.setDescription('あなたは現在対戦中のため対戦ボードを承諾できません')
-						.setColor(0xff0000);
-					await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-				}
-			} else {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('自分自身やロメコインが不足しているユーザーは対戦できません')
-					.setColor(0xff0000);
-				await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-			}
-		}
-		// jankenボタンインタラクション処理(手選択)
-		else if (interaction.customId.startsWith('janken_')) {
-			const progress_id = interaction.customId.split('_')[2];
-			const progress = janken_progress_data[progress_id];
-
-			// progressが存在しない、または必要なデータが不足している場合はエラー
-			if (!progress || !progress.user) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('この勝負は既に終了しているか、無効です。')
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-			}
-
-			// 既に両方の手が選択されている場合は処理しない
-			if (progress.user_hand && progress.opponent_hand) {
-				return;
-			}
-
-			// ユーザーの手選択処理
-			if (interaction.user.id === progress.user.id) {
-				// 既に手を選択している場合は処理しない
-				if (progress.user_hand) {
-					return;
-				}
-				progress.user_hand = interaction.customId.split('_')[1];
-				
-				// クロスロイドと対戦する場合、ユーザーが手を選んだタイミングでクロスロイドの手をランダムに決定
-				if (progress.opponent && progress.opponent.id === interaction.client.user.id && !progress.opponent_hand) {
-					const hands = ['rock', 'scissors', 'paper'];
-					progress.opponent_hand = hands[Math.floor(Math.random() * hands.length)];
-				}
-				
-				const handEmbed = new EmbedBuilder()
-					.setTitle('✂️ 手を選択しました')
-					.setDescription(
-						`あなたの手は${RSPEnum[progress.user_hand]}に決定しました。\n対戦相手の手を待っています...`
-					)
-					.setColor(0x00ff00);
-				try {
-					if (!interaction.replied && !interaction.deferred) {
-						await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
-					}
-				} catch (error) {
-					console.error('手選択応答エラー:', error);
-				}
-			}
-			// 対戦相手の手選択処理
-			else if (progress.opponent && interaction.user.id === progress.opponent.id) {
-				// 既に手を選択している場合は処理しない
-				if (progress.opponent_hand) {
-					return;
-				}
-				progress.opponent_hand = interaction.customId.split('_')[1];
-				const handEmbed = new EmbedBuilder()
-					.setTitle('✂️ 手を選択しました')
-					.setDescription(
-						`あなたの手は${RSPEnum[progress.opponent_hand]}に決定しました。\n対戦相手の手を待っています...`
-					)
-					.setColor(0x00ff00);
-				try {
-					if (!interaction.replied && !interaction.deferred) {
-						await interaction.reply({ embeds: [handEmbed], flags: [MessageFlags.Ephemeral] });
-					}
-				} catch (error) {
-					console.error('手選択応答エラー:', error);
-				}
-			} else {
-				// 該当するユーザーではない場合
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('あなたはこの勝負に参加していません。')
-					.setColor(0xff0000);
-				try {
-					if (!interaction.replied && !interaction.deferred) {
-						return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-					}
-				} catch (error) {
-					console.error('エラー応答エラー:', error);
-				}
-				return;
-			}
-
-			// 勝敗判定
-			if (progress.user_hand && progress.opponent_hand) {
-				clearTimeout(progress.timeout_id);
-				let winner = null;
-				let loser = null;
-				let isDraw = false;
-
-				if (progress.user_hand === progress.opponent_hand) {
-					isDraw = true;
-				} else if (
-					(progress.user_hand === 'rock' && progress.opponent_hand === 'scissors') ||
-					(progress.user_hand === 'scissors' && progress.opponent_hand === 'paper') ||
-					(progress.user_hand === 'paper' && progress.opponent_hand === 'rock')
-				) {
-					winner = progress.user;
-					loser = progress.opponent;
-					await updateRomecoin(
-						progress.user.id,
-						(current) => Math.round((current || 0) + progress.bet),
-						{
-							log: true,
-							client: interaction.client,
-							reason: `じゃんけん勝利: ${progress.opponent.tag} との対戦`,
-							metadata: {
-								targetUserId: progress.opponent.id,
-								commandName: 'janken',
-							},
-						}
-					);
-					
-					// クロスロイドが負けた場合、銀行の預金から引き出す
-					if (progress.opponent.id === interaction.client.user.id) {
-						const bank = require('./bank');
-						const bankData = bank.loadBankData();
-						const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
-						
-						// 利子を計算して追加
-						const INTEREST_RATE_PER_HOUR = 0.001;
-						const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
-						const now = Date.now();
-						const botBankData = await getBankData(interaction.client.user.id, bankData, {
-							deposit: 0,
-							lastInterestTime: Date.now(),
-						});
-						const hoursPassed = (now - botBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-						if (hoursPassed > 0) {
-							const interest = Math.round(botBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
-							if (interest > 0) {
-								botBankData.deposit += interest;
-								botBankData.lastInterestTime = now;
-							}
-						}
-						
-						// 預金から引き出す
-						botBankData.deposit -= progress.bet;
-						await updateBankData(interaction.client.user.id, bankData, () => botBankData);
-						bank.saveBankData(bankData);
-						
-						// ロメコインを減らす（預金から引き出したので、所持金は0のまま）
-						await updateRomecoin(
-							interaction.client.user.id,
-							() => 0,
-							{
-								log: true,
-								client: interaction.client,
-								reason: `じゃんけん敗北: ${progress.user.tag} との対戦（銀行預金から引き出し）`,
-								metadata: {
-									targetUserId: progress.user.id,
-									commandName: 'janken',
-								},
-							}
-						);
-					} else {
-						await updateRomecoin(
-							progress.opponent.id,
-							(current) => Math.round((current || 0) - progress.bet),
-							{
-								log: true,
-								client: interaction.client,
-								reason: `じゃんけん敗北: ${progress.user.tag} との対戦`,
-								metadata: {
-									targetUserId: progress.user.id,
-									commandName: 'janken',
-								},
-								useDeposit: true,
-							}
-						);
-					}
-				} else {
-					winner = progress.opponent;
-					loser = progress.user;
-					await updateRomecoin(
-						progress.user.id,
-						(current) => Math.round((current || 0) - progress.bet),
-						{
-							log: true,
-							client: interaction.client,
-							reason: `じゃんけん敗北: ${progress.opponent.tag} との対戦`,
-							metadata: {
-								targetUserId: progress.opponent.id,
-								commandName: 'janken',
-							},
-							useDeposit: true,
-						}
-					);
-					
-					// クロスロイドが勝った場合、ユーザーから受け取ったロメコインを預金に追加
-					if (progress.opponent.id === interaction.client.user.id) {
-						const bank = require('./bank');
-						const bankData = bank.loadBankData();
-						const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
-						
-						// 利子を計算して追加
-						const INTEREST_RATE_PER_HOUR = 0.001;
-						const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
-						const now = Date.now();
-						const botBankData = await getBankData(interaction.client.user.id, bankData, {
-							deposit: 0,
-							lastInterestTime: Date.now(),
-						});
-						const hoursPassed = (now - botBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-						if (hoursPassed > 0) {
-							const interest = Math.round(botBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
-							if (interest > 0) {
-								botBankData.deposit += interest;
-								botBankData.lastInterestTime = now;
-							}
-						}
-						
-						// ユーザーから受け取ったロメコインを預金に追加
-						botBankData.deposit += progress.bet;
-						await updateBankData(interaction.client.user.id, bankData, () => botBankData);
-						bank.saveBankData(bankData);
-						
-						// ロメコインは0のまま（所持金＝預金）
-						await updateRomecoin(
-							interaction.client.user.id,
-							() => 0,
-							{
-								log: true,
-								client: interaction.client,
-								reason: `じゃんけん勝利: ${progress.user.tag} との対戦（預金に追加）`,
-								metadata: {
-									targetUserId: progress.user.id,
-									commandName: 'janken',
-								},
-							}
-						);
-					} else {
-						await updateRomecoin(
-							progress.opponent.id,
-							(current) => Math.round((current || 0) + progress.bet),
-							{
-								log: true,
-								client: interaction.client,
-								reason: `じゃんけん勝利: ${progress.user.tag} との対戦`,
-								metadata: {
-									targetUserId: progress.user.id,
-									commandName: 'janken',
-								},
-							}
-						);
-					}
-				}
-
-				// じゃんけんの勝敗記録（引き分け以外の場合のみ）
-				if (!isDraw && winner && loser && !winner.bot && !loser.bot) {
-					const fs = require('fs');
-					const path = require('path');
-					const persistence = require('./persistence');
-					const DATA_FILE = path.join(__dirname, '..', 'janken_data.json');
-					let jankenData = {};
-					if (fs.existsSync(DATA_FILE)) {
-						try {
-							jankenData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-						} catch (e) {
-							console.error('じゃんけんデータ読み込みエラー:', e);
-						}
-					}
-
-					// データ引き継ぎ（ID → Notion名）
-					await migrateData(winner.id, jankenData);
-					await migrateData(loser.id, jankenData);
-
-					// 勝者のデータを更新
-					await updateData(winner.id, jankenData, (current) => {
-						const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-						data.wins++;
-						data.streak++;
-						if (data.streak > data.maxStreak) {
-							data.maxStreak = data.streak;
-						}
-						return data;
-					});
-
-					// 敗者のデータを更新
-					await updateData(loser.id, jankenData, (current) => {
-						const data = current || { wins: 0, losses: 0, streak: 0, maxStreak: 0 };
-						data.losses++;
-						data.streak = 0;
-						return data;
-					});
-
-					try {
-						fs.writeFileSync(DATA_FILE, JSON.stringify(jankenData, null, 2));
-						// Memory storeに保存（clientはinteractionから取得）
-						const client = interaction.client;
-						if (client) {
-							persistence.save(client).catch((err) => console.error('Memory store保存エラー:', err));
-						}
-					} catch (e) {
-						console.error('じゃんけんデータ書き込みエラー:', e);
-					}
-				}
-
-				const resultEmbed = new EmbedBuilder()
-					.setTitle(isDraw ? '⚖️ じゃんけん引き分け' : '✂️ じゃんけん決着')
-					.setColor(isDraw ? 0x99aab5 : 0xffd700)
-					.setDescription(`${progress.user} vs ${progress.opponent}`)
-					.addFields(
-						{ name: `${progress.user.username}`, value: `${RSPEnum[progress.user_hand]}`, inline: true },
-						{
-							name: `${progress.opponent.username}`,
-							value: `${RSPEnum[progress.opponent_hand]}`,
-							inline: true,
-						},
-						{ name: 'ベット', value: `${ROMECOIN_EMOJI}${progress.bet}`, inline: true }
-					);
-
-				if (isDraw) {
-					resultEmbed.addFields({ name: '結果', value: '引き分け', inline: false });
-				} else {
-					resultEmbed.addFields(
-						{ name: '🏆 勝利者', value: `${winner}`, inline: false },
-						{
-							name: '獲得/損失',
-							value: `${winner} は ${ROMECOIN_EMOJI}${progress.bet} を獲得\n${loser} は ${ROMECOIN_EMOJI}${progress.bet} を失いました`,
-							inline: false,
-						}
-					);
-				}
-
-				// ゲーム終了：進行状況をクリア
-				clearUserGame(progress.user.id);
-				if (progress.opponent) {
-					clearUserGame(progress.opponent.id);
-				}
-
-				// 最初のメッセージを編集
-				try {
-					if (progress.message) {
-						await progress.message.edit({ embeds: [resultEmbed], components: [] }).catch(() => {});
-					} else {
-						// メッセージが保存されていない場合は新しいメッセージとして送信
-						await interaction.channel.send({ embeds: [resultEmbed], components: [] }).catch(() => {});
-					}
-				} catch (error) {
-					console.error('結果表示エラー:', error);
-				}
-				delete janken_progress_data[progress_id];
-			}
-		}
+// データ読み込み
+function loadRomecoinData() {
+	if (romecoin_data !== null) {
+		return romecoin_data;
 	}
-}
-
-async function messageCreate(message) {
-	if (message.author.bot) return;
-	if (message_cooldown_users.includes(message.author.id)) return;
-
-	// 被爆ロールチェック：被爆ロールがついている人はロメコインが溜まらない
-	if (message.member && message.member.roles.cache.has(RADIATION_ROLE_ID)) {
-		message_cooldown_users.push(message.author.id);
-		return;
-	}
-
-	let score = 10;
-
-	const generationRoles = [
-		'1431905155938258988', // 第1世代
-		'1431905155938258989', // 第2世代
-		'1431905155938258990', // 第3世代
-		'1431905155938258991', // 第4世代
-		'1431905155938258992', // 第5世代
-		'1431905155938258993', // 第6世代
-		'1431905155938258994', // 第7世代
-		'1431905155955294290', // 第8世代
-		'1431905155955294291', // 第9世代
-		'1431905155955294292', // 第10世代
-		'1431905155955294293', // 第11世代
-		'1431905155955294294', // 第12世代
-		'1431905155955294295', // 第13世代
-		'1431905155955294296', // 第14世代
-		'1431905155955294297', // 第15世代
-		'1431905155955294298', // 第16世代
-		'1431905155955294299', // 第17世代
-		'1431905155984392303', // 第18世代
-		//'1433777496767074386' // 第19世代
-	];
-
-	// 新規
-	if (!message.member.roles.cache.some((role) => generationRoles.includes(role.id))) {
-		score *= 1.1;
-	}
-
-	// 直近10件のメッセージ中で会話している人の数
-	let talkingMembers = [];
-	(await message.channel.messages.fetch({ limit: 10 })).forEach((_message) => {
-		if (
-			!_message.author.bot &&
-			_message.author.id !== message.author.id &&
-			!talkingMembers.includes(_message.author.id)
-		) {
-			talkingMembers.push(_message.author.id);
-		}
-	});
-	score *= 1 + talkingMembers.length / 10;
-
-	// 深夜
-	if (message.createdAt.getHours() < 6) {
-		score *= 1.5;
-	}
-
-	// データ引き継ぎ（ID → Notion名）
-	await migrateData(message.author.id, romecoin_data);
-
-	// ロメコインを更新（ログ付き）
-	const previousBalance = await getData(message.author.id, romecoin_data, 0);
-	await updateData(message.author.id, romecoin_data, (current) => {
-		return Math.round((current || 0) + score);
-	});
-	const newBalance = await getData(message.author.id, romecoin_data, 0);
 	
-	// ログ送信（変動があった場合のみ）
-	if (previousBalance !== newBalance && discordClient) {
-		await logRomecoinChange(
-			discordClient,
-			message.author.id,
-			previousBalance,
-			newBalance,
-			`メッセージ送信による獲得 (スコア: ${score.toFixed(1)})`,
-			{
-				commandName: 'message_create',
-			}
-		);
-	}
-
-	// 返信先のユーザーにも付与
-	if (message.reference) {
-		let reference;
+	if (fs.existsSync(ROMECOIN_DATA_FILE)) {
 		try {
-			reference = await message.fetchReference();
-		} catch (error) {
-			// 参照先のメッセージが存在しない場合（削除されたメッセージへの返信など）はスキップ
-			console.log('[ロメコイン] 返信先メッセージの取得に失敗しました（削除された可能性があります）:', error.message);
-			return;
+			romecoin_data = JSON.parse(fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8'));
+		} catch (e) {
+			console.error('[Romecoin] データ読み込みエラー:', e);
+			romecoin_data = {};
 		}
-		
-		if (
-			reference &&
-			reference.guild &&
-			reference.guild.id === message.guild.id &&
-			!reference.author.bot &&
-			reference.author.id !== message.author.id
-		) {
-			// 被爆ロールチェック：返信先が被爆ロールを持っている場合はロメコインを付与しない
-			const referenceMember = await message.guild.members.fetch(reference.author.id).catch(() => null);
-			if (referenceMember && !referenceMember.roles.cache.has(RADIATION_ROLE_ID)) {
-				// データ引き継ぎ（ID → Notion名）
-				await migrateData(reference.author.id, romecoin_data);
-
-				// ロメコインを更新（ログ付き）
-				const refPreviousBalance = await getData(reference.author.id, romecoin_data, 0);
-				await updateData(reference.author.id, romecoin_data, (current) => {
-					return Math.round((current || 0) + 5);
-				});
-				const refNewBalance = await getData(reference.author.id, romecoin_data, 0);
-				
-				// ログ送信（変動があった場合のみ）
-				if (refPreviousBalance !== refNewBalance && discordClient) {
-					await logRomecoinChange(
-						discordClient,
-						reference.author.id,
-						refPreviousBalance,
-						refNewBalance,
-						`返信による獲得 (${message.author.tag} からの返信)`,
-						{
-							targetUserId: message.author.id,
-							commandName: 'message_reply',
-						}
-					);
-				}
-			}
-		}
+	} else {
+		romecoin_data = {};
 	}
-
-	message_cooldown_users.push(message.author.id);
-}
-
-async function messageReactionAdd(reaction, user) {
-	if (user.bot || reaction.message.author.bot) return;
-	if (reaction.message.author.id === user.id) return;
-	if (reaction_cooldown_users.includes(user.id)) return;
-
-	// 被爆ロールチェック：メッセージ送信者が被爆ロールを持っている場合はロメコインを付与しない
-	const messageAuthorMember = await reaction.message.guild.members
-		.fetch(reaction.message.author.id)
-		.catch(() => null);
-	if (messageAuthorMember && messageAuthorMember.roles.cache.has(RADIATION_ROLE_ID)) {
-		reaction_cooldown_users.push(user.id);
-		return;
-	}
-
-	// データ引き継ぎ（ID → Notion名）
-	await migrateData(reaction.message.author.id, romecoin_data);
-
-	// メッセージがリアクションされたときにも付与（ログ付き）
-	const reactPreviousBalance = await getData(reaction.message.author.id, romecoin_data, 0);
-	await updateData(reaction.message.author.id, romecoin_data, (current) => {
-		return Math.round((current || 0) + 5);
-	});
-	const reactNewBalance = await getData(reaction.message.author.id, romecoin_data, 0);
-	
-	// ログ送信（変動があった場合のみ）
-	if (reactPreviousBalance !== reactNewBalance && discordClient) {
-		await logRomecoinChange(
-			discordClient,
-			reaction.message.author.id,
-			reactPreviousBalance,
-			reactNewBalance,
-			`リアクションによる獲得 (${user.tag} からのリアクション)`,
-			{
-				targetUserId: user.id,
-				commandName: 'message_reaction',
-			}
-		);
-	}
-
-	reaction_cooldown_users.push(user.id);
-}
-
-// VC参加者にロメコインを付与
-async function rewardVCParticipants(client) {
-	try {
-		const guild = client.guilds.cache.first();
-		if (!guild) return;
-
-		// 現在VCに参加しているメンバーを取得
-		const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2); // ボイスチャンネル
-		
-		for (const vc of voiceChannels.values()) {
-			if (!vc.members) continue;
-			
-			for (const [memberId, member] of vc.members.entries()) {
-				// Botは除外
-				if (member.user.bot) continue;
-				
-				// 被爆ロールチェック
-				if (member.roles.cache.has(RADIATION_ROLE_ID)) continue;
-				
-				// ミュート状態チェック（ミュート放置を防ぐ）
-				if (member.voice.selfMute || member.voice.serverMute || member.voice.deaf) {
-					// ミュート状態の場合は追跡から削除
-					vcParticipants.delete(memberId);
-					continue;
-				}
-				
-				// 参加者を追跡
-				const now = Date.now();
-				const participant = vcParticipants.get(memberId);
-				
-				if (!participant) {
-					// 新規参加者
-					vcParticipants.set(memberId, {
-						joinTime: now,
-						lastRewardTime: now,
-						channelId: vc.id,
-					});
-					continue;
-				}
-				
-				// チャンネルが変わった場合はリセット
-				if (participant.channelId !== vc.id) {
-					vcParticipants.set(memberId, {
-						joinTime: now,
-						lastRewardTime: now,
-						channelId: vc.id,
-					});
-					continue;
-				}
-				
-				// 前回の報酬から60秒以上経過しているかチェック
-				if (now - participant.lastRewardTime < VC_REWARD_INTERVAL_MS) {
-					continue;
-				}
-				
-				// ロメコインを計算（テキストチャンネルと同じ設定）
-				let score = 10;
-				
-				const generationRoles = [
-					'1431905155938258988', // 第1世代
-					'1431905155938258989', // 第2世代
-					'1431905155938258990', // 第3世代
-					'1431905155938258991', // 第4世代
-					'1431905155938258992', // 第5世代
-					'1431905155938258993', // 第6世代
-					'1431905155938258994', // 第7世代
-					'1431905155955294290', // 第8世代
-					'1431905155955294291', // 第9世代
-					'1431905155955294292', // 第10世代
-					'1431905155955294293', // 第11世代
-					'1431905155955294294', // 第12世代
-					'1431905155955294295', // 第13世代
-					'1431905155955294296', // 第14世代
-					'1431905155955294297', // 第15世代
-					'1431905155955294298', // 第16世代
-					'1431905155955294299', // 第17世代
-					'1431905155984392303', // 第18世代
-				];
-				
-				// 新規（世代ロールがない）
-				if (!member.roles.cache.some((role) => generationRoles.includes(role.id))) {
-					score *= 1.1;
-				}
-				
-				// VC参加人数によるボーナス（1 + (人数-1)/10）
-				// 被爆ロールがついている人とミュートしている人は除外
-				const validVCMembers = Array.from(vc.members.values()).filter(m => {
-					// Botは除外
-					if (m.user.bot) return false;
-					// 被爆ロールがついている人は除外
-					if (m.roles.cache.has(RADIATION_ROLE_ID)) return false;
-					// ミュートしている人は除外
-					if (m.voice.selfMute || m.voice.serverMute || m.voice.deaf) return false;
-					return true;
-				});
-				const vcMemberCount = validVCMembers.length;
-				score *= 1 + (vcMemberCount - 1) / 10;
-				
-				// 深夜（6時前）
-				const currentHour = new Date().getHours();
-				if (currentHour < 6) {
-					score *= 1.5;
-				}
-				
-				// データ引き継ぎ（ID → Notion名）
-				await migrateData(memberId, romecoin_data);
-				
-				// ロメコインを更新（ログ付き）
-				const previousBalance = await getData(memberId, romecoin_data, 0);
-				await updateData(memberId, romecoin_data, (current) => {
-					return Math.round((current || 0) + score);
-				});
-				const newBalance = await getData(memberId, romecoin_data, 0);
-				
-				// ログ送信（変動があった場合のみ）
-				if (previousBalance !== newBalance && discordClient) {
-					await logRomecoinChange(
-						discordClient,
-						memberId,
-						previousBalance,
-						newBalance,
-						`VC参加による獲得 (スコア: ${score.toFixed(1)}, VC: ${vc.name})`,
-						{
-							commandName: 'vc_participation',
-							channelId: vc.id,
-						}
-					);
-				}
-				
-				// 最終報酬時刻を更新
-				participant.lastRewardTime = now;
-				vcParticipants.set(memberId, participant);
-			}
-		}
-		
-		// VCから退出したメンバーを追跡から削除
-		for (const [memberId, participant] of vcParticipants.entries()) {
-			const member = guild.members.cache.get(memberId);
-			if (!member || !member.voice.channel) {
-				vcParticipants.delete(memberId);
-			}
-		}
-	} catch (error) {
-		console.error('[VCロメコイン] エラー:', error);
-	}
-}
-
-// VC参加/退出を追跡
-async function handleVoiceStateUpdate(oldState, newState) {
-	try {
-		const member = newState.member || oldState.member;
-		if (!member || member.user.bot) return;
-		
-		// VCに参加した場合
-		if (newState.channel && !oldState.channel) {
-			// ミュート状態でない場合のみ追跡
-			if (!newState.selfMute && !newState.serverMute && !newState.deaf) {
-				vcParticipants.set(member.id, {
-					joinTime: Date.now(),
-					lastRewardTime: Date.now(),
-					channelId: newState.channel.id,
-				});
-			}
-		}
-		// VCから退出した場合
-		else if (!newState.channel && oldState.channel) {
-			vcParticipants.delete(member.id);
-		}
-		// VC内でチャンネル移動またはミュート状態が変わった場合
-		else if (newState.channel) {
-			// ミュート状態になった場合は追跡から削除
-			if (newState.selfMute || newState.serverMute || newState.deaf) {
-				vcParticipants.delete(member.id);
-			}
-			// ミュート解除された場合は追跡に追加
-			else if (!newState.selfMute && !newState.serverMute && !newState.deaf) {
-				vcParticipants.set(member.id, {
-					joinTime: Date.now(),
-					lastRewardTime: Date.now(),
-					channelId: newState.channel.id,
-				});
-			}
-			// チャンネル移動した場合はリセット
-			else if (oldState.channel && newState.channel.id !== oldState.channel.id) {
-				vcParticipants.set(member.id, {
-					joinTime: Date.now(),
-					lastRewardTime: Date.now(),
-					channelId: newState.channel.id,
-				});
-			}
-		}
-	} catch (error) {
-		console.error('[VCロメコイン] voiceStateUpdateエラー:', error);
-	}
-}
-
-// romecoin_dataにアクセスする関数
-function getRomecoinData() {
 	return romecoin_data;
 }
 
-async function getRomecoin(userId) {
+// データ保存
+function saveRomecoinData() {
+	if (romecoin_data === null) {
+		return;
+	}
 	try {
-		// romecoin_dataが初期化されていない場合は空オブジェクトを使用
-		const data = romecoin_data || {};
-		const balance = await getData(userId, data, 0);
-		return balance;
-	} catch (error) {
-		console.error('[getRomecoin] エラー:', error);
-		console.error('[getRomecoin] userId:', userId);
-		console.error('[getRomecoin] romecoin_data存在:', !!romecoin_data);
-		// エラーが発生した場合は0を返す（デフォルト値）
-		return 0;
+		fs.writeFileSync(ROMECOIN_DATA_FILE, JSON.stringify(romecoin_data, null, 2));
+	} catch (e) {
+		console.error('[Romecoin] データ保存エラー:', e);
 	}
 }
 
-/**
- * ロメコインの変更ログを送信
- * @param {Object} client - Discordクライアント
- * @param {string} userId - ユーザーID
- * @param {number} previousBalance - 変更前の残高
- * @param {number} newBalance - 変更後の残高
- * @param {string} reason - 変更理由
- * @param {Object} metadata - 追加情報（オプション）
- */
+// 定期的にデータを保存（1分ごと）
+setInterval(() => {
+	saveRomecoinData();
+}, 60 * 1000);
+
+// ロメコインデータを取得
+function getRomecoinData() {
+	return loadRomecoinData();
+}
+
+// ロメコイン残高を取得
+async function getRomecoin(userId) {
+	const data = loadRomecoinData();
+	await migrateData(userId, data);
+	const balance = await getData(userId, data, 0);
+	// 負の値や無効な値を0に正規化
+	return Math.max(0, Math.min(MAX_SAFE_VALUE, Number(balance) || 0));
+}
+
+// 所持金と預金の合計を取得するヘルパー関数
+async function getTotalBalance(userId) {
+	const romecoinBalance = await getRomecoin(userId);
+	
+	const bank = require('./bank');
+	const bankData = bank.loadBankData();
+	const { getData: getBankData } = require('./dataAccess');
+	const INTEREST_RATE_PER_HOUR = 0.00000228;
+	const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+	const now = Date.now();
+	
+	const userBankData = await getBankData(userId, bankData, {
+		deposit: 0,
+		lastInterestTime: Date.now(),
+	});
+	const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+	let deposit = userBankData.deposit || 0;
+	if (hoursPassed > 0 && deposit > 0) {
+		// 利子計算の精度を確保
+		const interestRate = Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1;
+		const interest = Math.round(deposit * interestRate);
+		if (interest > 0 && deposit + interest <= MAX_SAFE_VALUE) {
+			deposit += interest;
+		} else if (deposit + interest > MAX_SAFE_VALUE) {
+			deposit = MAX_SAFE_VALUE;
+		}
+	}
+	
+	const total = romecoinBalance + deposit;
+	// 合計値も最大値を超えないようにする
+	return Math.min(MAX_SAFE_VALUE, total);
+}
+
+// ロメコイン変更をログに記録
 async function logRomecoinChange(client, userId, previousBalance, newBalance, reason, metadata = {}) {
-	if (!client) return;
-
 	try {
-		const logChannel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch(() => null);
-		if (!logChannel) return;
+		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
+		if (!errorlog_channel) return;
 
-		// ユーザー情報を取得
-		let userTag = userId;
-		let executorTag = metadata.executorId || '';
-		let targetUserTag = metadata.targetUserId || '';
-
-		try {
-			const user = await client.users.fetch(userId).catch(() => null);
-			if (user) {
-				userTag = `${user.tag} (<@${userId}>)`;
-			} else {
-				userTag = `<@${userId}>`;
-			}
-		} catch (e) {
-			userTag = `<@${userId}>`;
-		}
-
-		if (metadata.executorId) {
-			try {
-				const executor = await client.users.fetch(metadata.executorId).catch(() => null);
-				if (executor) {
-					executorTag = `${executor.tag} (<@${metadata.executorId}>)`;
-				} else {
-					executorTag = `<@${metadata.executorId}>`;
-				}
-			} catch (e) {
-				executorTag = `<@${metadata.executorId}>`;
-			}
-		}
-
-		if (metadata.targetUserId && metadata.targetUserId !== userId) {
-			try {
-				const targetUser = await client.users.fetch(metadata.targetUserId).catch(() => null);
-				if (targetUser) {
-					targetUserTag = `${targetUser.tag} (<@${metadata.targetUserId}>)`;
-				} else {
-					targetUserTag = `<@${metadata.targetUserId}>`;
-				}
-			} catch (e) {
-				targetUserTag = `<@${metadata.targetUserId}>`;
-			}
-		}
-
-		const change = newBalance - previousBalance;
-		const changeType = change > 0 ? '増額' : change < 0 ? '減額' : '変更なし';
-		const changeEmoji = change > 0 ? '➕' : change < 0 ? '➖' : '➡️';
-
+		const diff = newBalance - previousBalance;
+		const diffText = diff >= 0 ? `+${diff.toLocaleString()}` : `${diff.toLocaleString()}`;
+		
 		const embed = new EmbedBuilder()
-			.setTitle(`${changeEmoji} ロメコイン${changeType}`)
-			.setColor(change > 0 ? 0x00ff00 : change < 0 ? 0xffa500 : 0x99aab5)
+			.setTitle('💰 ロメコイン変更ログ')
 			.addFields(
-				{ name: 'ユーザー', value: userTag, inline: true },
+				{ name: 'ユーザーID', value: userId, inline: true },
 				{ name: '変更前', value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`, inline: true },
 				{ name: '変更後', value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`, inline: true },
-				{ name: '変動額', value: `${change > 0 ? '+' : ''}${ROMECOIN_EMOJI}${change.toLocaleString()}`, inline: true },
-				{ name: '理由', value: reason || '不明', inline: false }
+				{ name: '変動', value: `${diffText}`, inline: true },
+				{ name: '理由', value: reason || 'ロメコイン変更', inline: false }
 			)
+			.setColor(diff >= 0 ? 0x00ff00 : 0xff0000)
 			.setTimestamp();
 
-		// 追加情報がある場合は追加
-		if (metadata.executorId) {
-			embed.addFields({ name: '実行者', value: executorTag, inline: true });
-		}
-		if (metadata.targetUserId && metadata.targetUserId !== userId) {
-			embed.addFields({ name: '対象ユーザー', value: targetUserTag, inline: true });
-		}
 		if (metadata.commandName) {
-			embed.setFooter({ text: `コマンド: ${metadata.commandName}` });
+			embed.addFields({ name: 'コマンド', value: metadata.commandName, inline: true });
+		}
+		if (metadata.targetUserId) {
+			embed.addFields({ name: '対象ユーザー', value: metadata.targetUserId, inline: true });
 		}
 
-		await logChannel.send({ embeds: [embed] }).catch((err) => {
-			console.error('[ロメコインログ] 送信エラー:', err);
-		});
+		await errorlog_channel.send({ embeds: [embed] });
 	} catch (error) {
-		console.error('[ロメコインログ] エラー:', error);
+		console.error('[Romecoin] ログ送信エラー:', error);
 	}
 }
 
 async function updateRomecoin(userId, updateFn, options = {}) {
-	// romecoin_dataが初期化されていない場合は初期化
-	if (!romecoin_data) {
-		romecoin_data = {};
+	// 同時実行制御：同じユーザーIDの更新を順次処理
+	if (!updateLocks.has(userId)) {
+		updateLocks.set(userId, Promise.resolve());
 	}
 	
-	await migrateData(userId, romecoin_data);
-	
-	// 変更前の残高を取得
-	const previousBalance = await getData(userId, romecoin_data, 0);
-	
-	// 預金から自動的に引き出す機能（useDeposit オプションが true の場合）
-	if (options.useDeposit) {
-		const bank = require('./bank');
-		const bankData = bank.loadBankData();
-		const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
-		const INTEREST_RATE_PER_HOUR = 0.00000228;
-		const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
-		
-		// 預金データを取得（利子も計算）
-		const userBankData = await getBankData(userId, bankData, {
-			deposit: 0,
-			lastInterestTime: Date.now(),
-		});
-		
-		const now = Date.now();
-		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-		if (hoursPassed > 0 && userBankData.deposit > 0) {
-			const interest = Math.round(userBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
-			if (interest > 0) {
-				userBankData.deposit += interest;
-				userBankData.lastInterestTime = now;
-			}
-		}
-		
-		// 更新関数を実行して、新しい残高を計算
-		const newBalance = updateFn(previousBalance);
-		const requiredDeduction = previousBalance - newBalance;
-		
-		// 減額が必要で、所持金が足りない場合、預金から引き出す
-		if (requiredDeduction > 0 && previousBalance < requiredDeduction) {
-			const shortage = requiredDeduction - previousBalance;
-			const availableDeposit = userBankData.deposit || 0;
+	const lockPromise = updateLocks.get(userId).then(async () => {
+		try {
+			// romecoin_dataを初期化
+			const data = loadRomecoinData();
 			
-			if (availableDeposit >= shortage) {
-				// 預金から引き出す
-				const previousDeposit = userBankData.deposit;
-				userBankData.deposit -= shortage;
-				userBankData.lastInterestTime = now;
-				await updateBankData(userId, bankData, () => userBankData);
-				bank.saveBankData(bankData);
+			await migrateData(userId, data);
+			
+			// 変更前の残高を取得（正規化済み）
+			const previousBalance = await getRomecoin(userId);
+			
+			// 更新関数を実行して、目標残高を計算
+			const targetBalance = updateFn(previousBalance);
+			
+			// 目標残高の検証
+			const targetValidation = validateAmount(targetBalance);
+			if (!targetValidation.valid) {
+				throw new Error(`目標残高が無効です: ${targetValidation.error}`);
+			}
+			
+			// 目標残高を最大値以内に制限
+			const safeTargetBalance = Math.min(MAX_SAFE_VALUE, Math.max(0, Math.round(targetBalance)));
+			
+			// 預金から自動的に引き出す機能（useDeposit オプションが true の場合）
+			if (options.useDeposit) {
+				const bank = require('./bank');
+				const bankData = bank.loadBankData();
+				const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
+				const INTEREST_RATE_PER_HOUR = 0.00000228;
+				const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
 				
-				// 預金から引き出した分を所持金に追加
-				await updateData(userId, romecoin_data, (current) => Math.round((current || 0) + shortage));
+				// 預金データを取得（利子も計算）
+				const userBankData = await getBankData(userId, bankData, {
+					deposit: 0,
+					lastInterestTime: Date.now(),
+				});
 				
-				if (options.log && options.client) {
-					await logRomecoinChange(
-						options.client,
-						userId,
-						previousDeposit,
-						userBankData.deposit,
-						`預金からの自動引き出し: ${options.reason || 'ロメコイン変更'}`,
-						{
-							...options.metadata,
-							source: 'bank_deposit',
-						}
-					);
+				const now = Date.now();
+				const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+				let currentDeposit = userBankData.deposit || 0;
+				if (hoursPassed > 0 && currentDeposit > 0) {
+					// 利子計算の精度を確保
+					const interestRate = Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1;
+					const interest = Math.round(currentDeposit * interestRate);
+					if (interest > 0 && currentDeposit + interest <= MAX_SAFE_VALUE) {
+						currentDeposit += interest;
+						userBankData.deposit = currentDeposit;
+						userBankData.lastInterestTime = now;
+					} else if (currentDeposit + interest > MAX_SAFE_VALUE) {
+						currentDeposit = MAX_SAFE_VALUE;
+						userBankData.deposit = currentDeposit;
+						userBankData.lastInterestTime = now;
+					}
 				}
+				
+				const requiredDeduction = previousBalance - safeTargetBalance;
+				
+				// 減額が必要で、所持金が足りない場合、預金から引き出す
+				if (requiredDeduction > 0 && previousBalance < requiredDeduction) {
+					const shortage = requiredDeduction - previousBalance;
+					const availableDeposit = Math.min(MAX_SAFE_VALUE, currentDeposit);
+					
+					if (availableDeposit >= shortage) {
+						// 預金から引き出す
+						const previousDeposit = currentDeposit;
+						userBankData.deposit = Math.max(0, currentDeposit - shortage);
+						userBankData.lastInterestTime = now;
+						await updateBankData(userId, bankData, () => userBankData);
+						bank.saveBankData(bankData);
+						
+						// 預金から引き出した分を所持金に追加してから、updateFnを適用
+						await updateData(userId, data, () => safeTargetBalance);
+						
+						if (options.log && options.client) {
+							await logRomecoinChange(
+								options.client,
+								userId,
+								previousDeposit,
+								userBankData.deposit,
+								`預金からの自動引き出し: ${options.reason || 'ロメコイン変更'}`,
+								{
+									...options.metadata,
+									source: 'bank_deposit',
+								}
+							);
+						}
+					} else {
+						// 預金も足りない場合
+						const totalAvailable = Math.min(MAX_SAFE_VALUE, previousBalance + availableDeposit);
+						if (totalAvailable < requiredDeduction) {
+							// 合計が足りない場合、0になるように調整
+							const finalBalance = Math.max(0, totalAvailable - requiredDeduction);
+							await updateData(userId, data, () => finalBalance);
+							
+							// 預金を0にする
+							userBankData.deposit = 0;
+							userBankData.lastInterestTime = now;
+							await updateBankData(userId, bankData, () => userBankData);
+							bank.saveBankData(bankData);
+							
+							if (options.log && options.client) {
+								await logRomecoinChange(
+									options.client,
+									userId,
+									currentDeposit,
+									0,
+									`預金からの自動引き出し（全額）: ${options.reason || 'ロメコイン変更'}`,
+									{
+										...options.metadata,
+										source: 'bank_deposit',
+									}
+								);
+							}
+						} else {
+							// 預金を全額引き出す
+							userBankData.deposit = 0;
+							userBankData.lastInterestTime = now;
+							await updateBankData(userId, bankData, () => userBankData);
+							bank.saveBankData(bankData);
+							
+							// 預金から引き出した分を所持金に追加してから、updateFnを適用
+							await updateData(userId, data, () => safeTargetBalance);
+							
+							if (options.log && options.client) {
+								await logRomecoinChange(
+									options.client,
+									userId,
+									currentDeposit,
+									0,
+									`預金からの自動引き出し（全額）: ${options.reason || 'ロメコイン変更'}`,
+									{
+										...options.metadata,
+										source: 'bank_deposit',
+									}
+								);
+							}
+						}
+					}
+				} else {
+					// 減額が不要、または所持金が足りる場合は通常通り更新
+					await updateData(userId, data, () => safeTargetBalance);
+				}
+			} else {
+				// 預金から自動引き出しを使用しない場合は通常通り更新
+				await updateData(userId, data, () => safeTargetBalance);
+			}
+			
+			// データを保存
+			saveRomecoinData();
+			
+			// 変更後の残高を取得（正規化済み）
+			const newBalance = await getRomecoin(userId);
+			
+			// ログ送信（オプションで指定された場合）
+			if (options.log && options.client && previousBalance !== newBalance) {
+				await logRomecoinChange(
+					options.client,
+					userId,
+					previousBalance,
+					newBalance,
+					options.reason || 'ロメコイン変更',
+					options.metadata || {}
+				);
+			}
+		} catch (error) {
+			console.error(`[Romecoin] updateRomecoin エラー (userId: ${userId}):`, error);
+			throw error;
+		}
+	});
+	
+	// ロックを更新
+	updateLocks.set(userId, lockPromise);
+	
+	return lockPromise;
+}
+
+// クライアント準備完了時の処理
+async function clientReady(client) {
+	// データを読み込む
+	loadRomecoinData();
+	console.log('[Romecoin] ロメコインデータを読み込みました');
+}
+
+// インタラクション作成時の処理
+async function interactionCreate(interaction) {
+	// ロメコインランキングコマンドの処理
+	if (interaction.isChatInputCommand() && interaction.commandName === 'romecoin_ranking') {
+		try {
+			const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+			const notionManager = require('./notionManager');
+			const botUserId = interaction.client.user?.id;
+			
+			// クールダウン（30秒）
+			const guildId = interaction.guild?.id || 'global';
+			const cooldownKey = `romecoin_ranking_${guildId}`;
+			const lastUsed = romecoin_ranking_cooldowns?.get(cooldownKey) || 0;
+			const cooldownTime = 30 * 1000;
+			const now = Date.now();
+			
+			if (now - lastUsed < cooldownTime) {
+				const remainSec = Math.ceil((cooldownTime - (now - lastUsed)) / 1000);
+				return interaction.reply({
+					content: `⏰ クールダウン中です（残り${remainSec}秒）`,
+					ephemeral: true,
+				});
+			}
+			
+			// クールダウンを更新
+			if (!romecoin_ranking_cooldowns) {
+				romecoin_ranking_cooldowns = new Map();
+			}
+			romecoin_ranking_cooldowns.set(cooldownKey, now);
+			
+			await interaction.deferReply();
+			
+			// ロメコインデータを取得
+			const data = getRomecoinData();
+			
+			// 全ユーザーのデータを取得（預金込みの合計で計算）
+			const userData = await Promise.all(
+				Object.entries(data)
+					.filter(([key, value]) => typeof value === 'number' && value > 0)
+					.map(async ([key, value]) => {
+						const isNotionName = !/^\d+$/.test(key);
+						let discordId = key;
+
+						if (isNotionName) {
+							discordId = (await notionManager.getDiscordId(key)) || key;
+							if (discordId === botUserId) return null;
+						}
+
+						// 預金を含めた合計を計算
+						const totalValue = await getTotalBalance(discordId);
+
+						return { key, discordId, displayName: isNotionName ? key : null, value: totalValue };
+					})
+			);
+			
+			// nullを除外してソート
+			const validData = userData.filter((item) => item !== null);
+			validData.sort((a, b) => b.value - a.value);
+			
+			// 上位10名を表示
+			const top10 = validData.slice(0, 10);
+			
+			const rankingText = top10
+				.map((item, index) => {
+					const rank = index + 1;
+					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+					const displayName = item.displayName || `<@${item.discordId}>`;
+					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
+				})
+				.join('\n');
+			
+			const embed = new EmbedBuilder()
+				.setTitle('💰 ロメコインランキング')
+				.setDescription(rankingText || 'ランキングデータがありません')
+				.setColor(0xffd700)
+				.setTimestamp();
+			
+			await interaction.editReply({ embeds: [embed] });
+		} catch (error) {
+			console.error('[Romecoin] ランキングエラー:', error);
+			if (!interaction.replied && !interaction.deferred) {
+				await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true }).catch(() => {});
+			} else {
+				await interaction.editReply({ content: 'エラーが発生しました。' }).catch(() => {});
 			}
 		}
 	}
 	
-	// ロメコインを更新
-	await updateData(userId, romecoin_data, updateFn);
-	
-	// 変更後の残高を取得
-	const newBalance = await getData(userId, romecoin_data, 0);
-	
-	// ログ送信（オプションで指定された場合）
-	if (options.log && options.client && previousBalance !== newBalance) {
-		await logRomecoinChange(
-			options.client,
-			userId,
-			previousBalance,
-			newBalance,
-			options.reason || 'ロメコイン変更',
-			options.metadata || {}
-		);
+	// ページネーションボタンの処理
+	if (interaction.isButton() && interaction.customId.startsWith('romecoin_ranking_')) {
+		// ページネーション機能は将来の実装用（現在は簡易版のみ）
 	}
+}
+
+// メッセージ作成時の処理
+async function messageCreate(message) {
+	// 特に処理なし
+}
+
+// リアクション追加時の処理
+async function messageReactionAdd(reaction, user) {
+	// 特に処理なし
+}
+
+// ボイスステート更新時の処理
+async function handleVoiceStateUpdate(oldState, newState) {
+	// 特に処理なし
 }
 
 module.exports = {
@@ -1938,4 +457,5 @@ module.exports = {
 	getRomecoin,
 	updateRomecoin,
 	logRomecoinChange,
+	getTotalBalance,
 };

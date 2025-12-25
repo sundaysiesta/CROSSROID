@@ -107,10 +107,22 @@ app.get('/api/romecoin/:userId', authenticateAPI, async (req, res) => {
 app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 	try {
 		const userId = req.params.userId;
-		const amount = parseInt(req.body.amount);
-
-		if (!amount || amount <= 0) {
-			return res.status(400).json({ error: '有効な金額を指定してください' });
+		const amountRaw = req.body.amount;
+		
+		// 数値の検証を強化
+		if (typeof amountRaw !== 'number' && typeof amountRaw !== 'string') {
+			return res.status(400).json({ error: '金額は数値である必要があります' });
+		}
+		
+		const amount = parseInt(amountRaw, 10);
+		if (isNaN(amount) || !isFinite(amount) || amount <= 0) {
+			return res.status(400).json({ error: '有効な金額（1以上の整数）を指定してください' });
+		}
+		
+		if (amount > Number.MAX_SAFE_INTEGER) {
+			return res.status(400).json({ 
+				error: `金額が大きすぎます（最大値: ${Number.MAX_SAFE_INTEGER.toLocaleString()}）` 
+			});
 		}
 
 		// 現在の残高を確認（所持金 + 預金）
@@ -204,10 +216,22 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 app.post('/api/romecoin/:userId/add', authenticateAPI, async (req, res) => {
 	try {
 		const userId = req.params.userId;
-		const amount = parseInt(req.body.amount);
-
-		if (!amount || amount <= 0) {
-			return res.status(400).json({ error: '有効な金額を指定してください' });
+		const amountRaw = req.body.amount;
+		
+		// 数値の検証を強化
+		if (typeof amountRaw !== 'number' && typeof amountRaw !== 'string') {
+			return res.status(400).json({ error: '金額は数値である必要があります' });
+		}
+		
+		const amount = parseInt(amountRaw, 10);
+		if (isNaN(amount) || !isFinite(amount) || amount <= 0) {
+			return res.status(400).json({ error: '有効な金額（1以上の整数）を指定してください' });
+		}
+		
+		if (amount > Number.MAX_SAFE_INTEGER) {
+			return res.status(400).json({ 
+				error: `金額が大きすぎます（最大値: ${Number.MAX_SAFE_INTEGER.toLocaleString()}）` 
+			});
 		}
 
 		// 現在の残高を取得
