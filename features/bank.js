@@ -9,8 +9,8 @@ const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 const BANK_DATA_FILE = path.join(__dirname, '..', 'bank_data.json');
 const LOAN_DATA_FILE = path.join(__dirname, '..', 'loan_data.json');
 
-// 銀行の利子率（1時間ごとに0.1%）
-const INTEREST_RATE_PER_HOUR = 0.001;
+// 銀行の利子率（1時間ごとに約0.000228%、年利2%相当）
+const INTEREST_RATE_PER_HOUR = 0.00000228;
 // 借金の利子率（1時間ごとに1.5%）
 const LOAN_INTEREST_RATE_PER_HOUR = 0.015;
 // 利子計算の間隔（1時間 = 3600000ms）

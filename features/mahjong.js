@@ -501,6 +501,7 @@ async function handleResult(interaction, client) {
 						commandName: 'mahjong_result',
 						targetUserId: playerId,
 					},
+					useDeposit: romecoinChange < 0, // 減額の場合のみ預金から自動引き出し
 				}
 			);
 

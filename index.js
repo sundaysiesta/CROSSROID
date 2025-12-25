@@ -113,18 +113,41 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 			return res.status(400).json({ error: '有効な金額を指定してください' });
 		}
 
-		// 現在の残高を確認
+		// 現在の残高を確認（所持金 + 預金）
 		const currentBalance = await romecoin.getRomecoin(userId);
-		if (currentBalance < amount) {
+		const bank = require('./features/bank');
+		const bankData = bank.loadBankData();
+		const { getData: getBankData } = require('./features/dataAccess');
+		const INTEREST_RATE_PER_HOUR = 0.00000228;
+		const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+		const now = Date.now();
+		
+		const userBankData = await getBankData(userId, bankData, {
+			deposit: 0,
+			lastInterestTime: Date.now(),
+		});
+		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+		let deposit = userBankData.deposit || 0;
+		if (hoursPassed > 0 && deposit > 0) {
+			const interest = Math.round(deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+			if (interest > 0) {
+				deposit += interest;
+			}
+		}
+		
+		const totalBalance = currentBalance + deposit;
+		if (totalBalance < amount) {
 			return res.status(400).json({
-				error: 'ロメコインが不足しています',
+				error: 'ロメコインが不足しています（所持金 + 預金）',
 				currentBalance,
+				deposit,
+				totalBalance,
 				required: amount,
-				shortfall: amount - currentBalance,
+				shortfall: amount - totalBalance,
 			});
 		}
 
-		// ロメコインを減らす（ログ付き）
+		// ロメコインを減らす（ログ付き、預金から自動引き出し）
 		await romecoin.updateRomecoin(userId, (current) => Math.round((current || 0) - amount), {
 			log: true,
 			client: client,
@@ -132,6 +155,7 @@ app.post('/api/romecoin/:userId/deduct', authenticateAPI, async (req, res) => {
 			metadata: {
 				commandName: 'api_deduct',
 			},
+			useDeposit: true,
 		});
 		const newBalance = await romecoin.getRomecoin(userId);
 
@@ -708,10 +732,37 @@ client.once('clientReady', async (client) => {
 	].map((command) => command.toJSON());
 
 	try {
-		await client.application.commands.set(commands);
-		console.log('スラッシュコマンドの登録が完了しました！');
+		// 既存のコマンドを取得
+		const existingCommands = await client.application.commands.fetch();
+		console.log(`[コマンド登録] 既存のコマンド数: ${existingCommands.size}`);
+		
+		// 登録するコマンドのリストをログ出力
+		console.log(`[コマンド登録] 登録するコマンド数: ${commands.length}`);
+		commands.forEach((cmd, index) => {
+			console.log(`[コマンド登録] ${index + 1}. ${cmd.name} - ${cmd.description || 'サブコマンドあり'}`);
+		});
+		
+		// コマンドを登録（既存のコマンドは自動的に上書きされる）
+		const registeredCommands = await client.application.commands.set(commands);
+		console.log(`[コマンド登録] 登録完了！登録されたコマンド数: ${registeredCommands.size}`);
+		
+		// 登録されたコマンドのリストをログ出力
+		registeredCommands.forEach((cmd) => {
+			console.log(`[コマンド登録] ✓ ${cmd.name} (ID: ${cmd.id})`);
+		});
+		
+		// 削除されたコマンドを確認（既存にあって新しいリストにないもの）
+		const newCommandNames = new Set(commands.map(cmd => cmd.name));
+		const deletedCommands = existingCommands.filter(cmd => !newCommandNames.has(cmd.name));
+		if (deletedCommands.size > 0) {
+			console.log(`[コマンド登録] 削除されたコマンド数: ${deletedCommands.size}`);
+			deletedCommands.forEach(cmd => {
+				console.log(`[コマンド登録] ✗ 削除: ${cmd.name} (ID: ${cmd.id})`);
+			});
+		}
 	} catch (e) {
-		console.error('スラッシュコマンドの登録に失敗しました:', e);
+		console.error('[コマンド登録] スラッシュコマンドの登録に失敗しました:', e);
+		console.error('[コマンド登録] エラースタック:', e.stack);
 	}
 
 	// 期限切れの借金を定期的にチェック（1時間ごと）

@@ -2183,6 +2183,7 @@ async function handleCommands(interaction, client) {
 							targetUserId: winner.user.id,
 							commandName: 'duel',
 						},
+						useDeposit: true,
 					}
 				);
 
@@ -2603,6 +2604,7 @@ async function handleCommands(interaction, client) {
 									targetUserId: winnerId,
 									commandName: 'duel_russian',
 								},
+								useDeposit: true,
 							}
 						);
 

@@ -102,6 +102,13 @@ async function interactionCreate(interaction) {
 			// クールダウンを更新
 			romecoin_ranking_cooldowns.set(guildId, now);
 
+			// 銀行データを読み込み
+			const bank = require('./bank');
+			const bankData = bank.loadBankData();
+			const { getData: getBankData } = require('./dataAccess');
+			const INTEREST_RATE_PER_HOUR = 0.00000228;
+			const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+
 			// データを配列に変換（Notion名の場合はDiscord IDを取得）
 			// 黒須銀行（クロスロイド）を除外
 			const botUserId = interaction.client.user.id;
@@ -126,7 +133,29 @@ async function interactionCreate(interaction) {
 							if (discordId === botUserId) return null;
 						}
 
-						return { key, discordId, displayName: isNotionName ? key : null, value };
+						// 預金額を取得（利子も計算）
+						let deposit = 0;
+						try {
+							const userBankData = await getBankData(discordId, bankData, {
+								deposit: 0,
+								lastInterestTime: Date.now(),
+							});
+							const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+							if (hoursPassed > 0 && userBankData.deposit > 0) {
+								const interest = Math.round(userBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+								deposit = userBankData.deposit + interest;
+							} else {
+								deposit = userBankData.deposit || 0;
+							}
+						} catch (e) {
+							// エラーが発生した場合は預金額を0とする
+							deposit = 0;
+						}
+
+						// 所持金 + 預金額を合計
+						const totalValue = (value || 0) + deposit;
+
+						return { key, discordId, displayName: isNotionName ? key : null, value: totalValue, deposit, romecoin: value || 0 };
 					})
 			);
 			
@@ -153,7 +182,10 @@ async function interactionCreate(interaction) {
 					const display = pageData[i].displayName
 						? `${pageData[i].displayName} (<@${pageData[i].discordId}>)`
 						: `<@${pageData[i].discordId}>`;
-					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
+					const totalValue = pageData[i].value;
+					const romecoin = pageData[i].romecoin || 0;
+					const deposit = pageData[i].deposit || 0;
+					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${totalValue.toLocaleString()} (所持: ${ROMECOIN_EMOJI}${romecoin.toLocaleString()}, 預金: ${ROMECOIN_EMOJI}${deposit.toLocaleString()})\n`;
 				}
 
 				if (rankingText === '') {
@@ -731,6 +763,14 @@ async function interactionCreate(interaction) {
 				});
 			}
 
+			// 銀行データを読み込み
+			const bank = require('./bank');
+			const bankData = bank.loadBankData();
+			const { getData: getBankData } = require('./dataAccess');
+			const INTEREST_RATE_PER_HOUR = 0.00000228;
+			const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+			const now = Date.now();
+
 			// データを配列に変換
 			// 黒須銀行（クロスロイド）を除外
 			const botUserId = interaction.client.user.id;
@@ -752,7 +792,29 @@ async function interactionCreate(interaction) {
 							if (discordId === botUserId) return null;
 						}
 
-						return { key, discordId, displayName: isNotionName ? key : null, value };
+						// 預金額を取得（利子も計算）
+						let deposit = 0;
+						try {
+							const userBankData = await getBankData(discordId, bankData, {
+								deposit: 0,
+								lastInterestTime: Date.now(),
+							});
+							const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+							if (hoursPassed > 0 && userBankData.deposit > 0) {
+								const interest = Math.round(userBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+								deposit = userBankData.deposit + interest;
+							} else {
+								deposit = userBankData.deposit || 0;
+							}
+						} catch (e) {
+							// エラーが発生した場合は預金額を0とする
+							deposit = 0;
+						}
+
+						// 所持金 + 預金額を合計
+						const totalValue = (value || 0) + deposit;
+
+						return { key, discordId, displayName: isNotionName ? key : null, value: totalValue, deposit, romecoin: value || 0 };
 					})
 			);
 			
@@ -782,7 +844,10 @@ async function interactionCreate(interaction) {
 					const display = pageData[i].displayName
 						? `${pageData[i].displayName} (<@${pageData[i].discordId}>)`
 						: `<@${pageData[i].discordId}>`;
-					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${pageData[i].value}\n`;
+					const totalValue = pageData[i].value;
+					const romecoin = pageData[i].romecoin || 0;
+					const deposit = pageData[i].deposit || 0;
+					rankingText += `${medal} ${display} - ${ROMECOIN_EMOJI}${totalValue.toLocaleString()} (所持: ${ROMECOIN_EMOJI}${romecoin.toLocaleString()}, 預金: ${ROMECOIN_EMOJI}${deposit.toLocaleString()})\n`;
 				}
 
 				if (rankingText === '') {
@@ -1107,6 +1172,7 @@ async function interactionCreate(interaction) {
 									targetUserId: progress.user.id,
 									commandName: 'janken',
 								},
+								useDeposit: true,
 							}
 						);
 					}
@@ -1124,6 +1190,7 @@ async function interactionCreate(interaction) {
 								targetUserId: progress.opponent.id,
 								commandName: 'janken',
 							},
+							useDeposit: true,
 						}
 					);
 					
@@ -1776,10 +1843,73 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 		romecoin_data = {};
 	}
 	
+	await migrateData(userId, romecoin_data);
+	
 	// 変更前の残高を取得
 	const previousBalance = await getData(userId, romecoin_data, 0);
 	
-	await migrateData(userId, romecoin_data);
+	// 預金から自動的に引き出す機能（useDeposit オプションが true の場合）
+	if (options.useDeposit) {
+		const bank = require('./bank');
+		const bankData = bank.loadBankData();
+		const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
+		const INTEREST_RATE_PER_HOUR = 0.00000228;
+		const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+		
+		// 預金データを取得（利子も計算）
+		const userBankData = await getBankData(userId, bankData, {
+			deposit: 0,
+			lastInterestTime: Date.now(),
+		});
+		
+		const now = Date.now();
+		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+		if (hoursPassed > 0 && userBankData.deposit > 0) {
+			const interest = Math.round(userBankData.deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+			if (interest > 0) {
+				userBankData.deposit += interest;
+				userBankData.lastInterestTime = now;
+			}
+		}
+		
+		// 更新関数を実行して、新しい残高を計算
+		const newBalance = updateFn(previousBalance);
+		const requiredDeduction = previousBalance - newBalance;
+		
+		// 減額が必要で、所持金が足りない場合、預金から引き出す
+		if (requiredDeduction > 0 && previousBalance < requiredDeduction) {
+			const shortage = requiredDeduction - previousBalance;
+			const availableDeposit = userBankData.deposit || 0;
+			
+			if (availableDeposit >= shortage) {
+				// 預金から引き出す
+				const previousDeposit = userBankData.deposit;
+				userBankData.deposit -= shortage;
+				userBankData.lastInterestTime = now;
+				await updateBankData(userId, bankData, () => userBankData);
+				bank.saveBankData(bankData);
+				
+				// 預金から引き出した分を所持金に追加
+				await updateData(userId, romecoin_data, (current) => Math.round((current || 0) + shortage));
+				
+				if (options.log && options.client) {
+					await logRomecoinChange(
+						options.client,
+						userId,
+						previousDeposit,
+						userBankData.deposit,
+						`預金からの自動引き出し: ${options.reason || 'ロメコイン変更'}`,
+						{
+							...options.metadata,
+							source: 'bank_deposit',
+						}
+					);
+				}
+			}
+		}
+	}
+	
+	// ロメコインを更新
 	await updateData(userId, romecoin_data, updateFn);
 	
 	// 変更後の残高を取得
