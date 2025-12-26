@@ -162,6 +162,10 @@ async function getTotalBalance(userId) {
 // ロメコイン変更をログに記録
 async function logRomecoinChange(client, userId, previousBalance, newBalance, reason, metadata = {}) {
 	try {
+		if (!client || !client.isReady()) {
+			console.warn('[Romecoin] クライアントが準備完了していません。ログを送信できません。');
+			return;
+		}
 		if (!ROMECOIN_LOG_CHANNEL_ID) {
 			console.warn('[Romecoin] ROMECOIN_LOG_CHANNEL_IDが設定されていません');
 			return;
@@ -197,7 +201,9 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 			embed.addFields({ name: '対象ユーザー', value: metadata.targetUserId, inline: true });
 		}
 
-		await romecoin_log_channel.send({ embeds: [embed] });
+		await romecoin_log_channel.send({ embeds: [embed] }).catch((err) => {
+			console.error('[Romecoin] ログ送信エラー:', err);
+		});
 	} catch (error) {
 		console.error('[Romecoin] ログ送信エラー:', error);
 	}

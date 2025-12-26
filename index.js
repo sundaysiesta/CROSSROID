@@ -1059,11 +1059,26 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 process.on('uncaughtException', async (error, origin) => {
 	console.error('Uncaught Exception:', error);
 	try {
-		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
+		if (!client || !client.isReady()) {
+			console.warn('[ErrorLog] クライアントが準備完了していません。エラーログを送信できません。');
+			return;
+		}
+		if (!ERRORLOG_CHANNEL_ID) {
+			console.warn('[ErrorLog] ERRORLOG_CHANNEL_IDが設定されていません');
+			return;
+		}
+		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch((err) => {
+			console.error('[ErrorLog] エラーログチャンネル取得エラー:', err);
+			return null;
+		});
 		if (errorlog_channel) {
-			await errorlog_channel.send({ content: `Uncaught Exception\n\`\`\`${error.stack}\`\`\`` }).catch(() => {
-				// エラーログ送信に失敗しても無視（無限ループを防ぐ）
+			const errorMessage = error.stack || error.toString();
+			const truncatedMessage = errorMessage.length > 1900 ? errorMessage.substring(0, 1900) + '...' : errorMessage;
+			await errorlog_channel.send({ content: `Uncaught Exception\n\`\`\`${truncatedMessage}\`\`\`` }).catch((err) => {
+				console.error('[ErrorLog] エラーログ送信に失敗:', err);
 			});
+		} else {
+			console.warn(`[ErrorLog] エラーログチャンネルが見つかりません (ID: ${ERRORLOG_CHANNEL_ID})`);
 		}
 	} catch (e) {
 		// エラーハンドリング内でエラーが発生しても無視（無限ループを防ぐ）
@@ -1075,12 +1090,26 @@ process.on('uncaughtException', async (error, origin) => {
 process.on('unhandledRejection', async (reason, promise) => {
 	console.error('Unhandled Rejection:', reason);
 	try {
-		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
+		if (!client || !client.isReady()) {
+			console.warn('[ErrorLog] クライアントが準備完了していません。エラーログを送信できません。');
+			return;
+		}
+		if (!ERRORLOG_CHANNEL_ID) {
+			console.warn('[ErrorLog] ERRORLOG_CHANNEL_IDが設定されていません');
+			return;
+		}
+		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch((err) => {
+			console.error('[ErrorLog] エラーログチャンネル取得エラー:', err);
+			return null;
+		});
 		const message = reason instanceof Error ? reason.stack : String(reason);
 		if (errorlog_channel) {
-			await errorlog_channel.send({ content: `Unhandled Rejection\n\`\`\`${message}\`\`\`` }).catch(() => {
-				// エラーログ送信に失敗しても無視（無限ループを防ぐ）
+			const truncatedMessage = message.length > 1900 ? message.substring(0, 1900) + '...' : message;
+			await errorlog_channel.send({ content: `Unhandled Rejection\n\`\`\`${truncatedMessage}\`\`\`` }).catch((err) => {
+				console.error('[ErrorLog] エラーログ送信に失敗:', err);
 			});
+		} else {
+			console.warn(`[ErrorLog] エラーログチャンネルが見つかりません (ID: ${ERRORLOG_CHANNEL_ID})`);
 		}
 	} catch (e) {
 		// エラーハンドリング内でエラーが発生しても無視（無限ループを防ぐ）
