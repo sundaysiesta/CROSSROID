@@ -306,6 +306,10 @@ app.post('/api/migrate/:userId', authenticateAPI, async (req, res) => {
 			const migrated = await migrateData(userId, romecoinData);
 			if (migrated) {
 				fs.writeFileSync(dataFiles.romecoin, JSON.stringify(romecoinData, null, 2));
+				// グローバル変数を更新（romecoin.jsのグローバル変数を更新）
+				const romecoin = require('./features/romecoin');
+				romecoin.reloadRomecoinData();
+				console.log(`[API] ロメコインデータ移行完了: userId=${userId}, グローバル変数を更新しました`);
 				results.romecoin = 'migrated';
 			} else {
 				results.romecoin = 'no_migration_needed';

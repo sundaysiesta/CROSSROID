@@ -1053,6 +1053,14 @@ async function handleVoiceStateUpdate(oldState, newState) {
 	}
 }
 
+// データを再読み込み（API移行後に使用）
+function reloadRomecoinData() {
+	console.log('[Romecoin] データを再読み込みします...');
+	romecoin_data = null; // グローバル変数をリセット
+	loadRomecoinData(); // ファイルから再読み込み
+	console.log('[Romecoin] データの再読み込みが完了しました');
+}
+
 module.exports = {
 	clientReady,
 	interactionCreate,
@@ -1064,4 +1072,5 @@ module.exports = {
 	updateRomecoin,
 	logRomecoinChange,
 	getTotalBalance,
+	reloadRomecoinData,
 };
