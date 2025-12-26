@@ -138,12 +138,22 @@ function getRomecoinData() {
 
 // ロメコイン残高を取得
 async function getRomecoin(userId) {
-	// 最新のデータを読み込む
-	const data = loadRomecoinData();
+	// 最新のデータを読み込む（グローバル変数から直接読み込む）
+	// 注意: loadRomecoinData()は毎回ファイルから読み込むので、メモリ上の変更が失われる可能性がある
+	// そのため、romecoin_dataがnullでない場合はそれを使用する
+	let data;
+	if (romecoin_data !== null) {
+		data = romecoin_data;
+		console.log(`[Romecoin] getRomecoin: グローバル変数から読み込み: userId=${userId}`);
+	} else {
+		data = loadRomecoinData();
+		console.log(`[Romecoin] getRomecoin: ファイルから読み込み: userId=${userId}`);
+	}
 	await migrateData(userId, data);
 	const balance = await getData(userId, data, 0);
 	// 負の値や無効な値を0に正規化
 	const normalizedBalance = Math.max(0, Math.min(MAX_SAFE_VALUE, Number(balance) || 0));
+	console.log(`[Romecoin] getRomecoin: userId=${userId}, balance=${balance}, normalized=${normalizedBalance}`);
 	return normalizedBalance;
 }
 
@@ -342,7 +352,8 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 						bank.saveBankData(bankData);
 						
 						// 預金から引き出した分を所持金に追加してから、updateFnを適用
-						await updateData(userId, data, () => safeTargetBalance);
+						const updatedKey = await updateData(userId, data, () => safeTargetBalance);
+						romecoin_data = data;
 						
 						if (options.log && options.client) {
 							await logRomecoinChange(
@@ -363,7 +374,8 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 						if (totalAvailable < requiredDeduction) {
 							// 合計が足りない場合、0になるように調整
 							const finalBalance = Math.max(0, totalAvailable - requiredDeduction);
-							await updateData(userId, data, () => finalBalance);
+							const updatedKey = await updateData(userId, data, () => finalBalance);
+							romecoin_data = data;
 							
 							// 預金を0にする
 							userBankData.deposit = 0;
@@ -392,7 +404,8 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 							bank.saveBankData(bankData);
 							
 							// 預金から引き出した分を所持金に追加してから、updateFnを適用
-							await updateData(userId, data, () => safeTargetBalance);
+							const updatedKey = await updateData(userId, data, () => safeTargetBalance);
+							romecoin_data = data;
 							
 							if (options.log && options.client) {
 								await logRomecoinChange(
@@ -411,13 +424,18 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 					}
 				} else {
 					// 減額が不要、または所持金が足りる場合は通常通り更新
-					await updateData(userId, data, () => safeTargetBalance);
+					const updatedKey = await updateData(userId, data, () => safeTargetBalance);
+					romecoin_data = data;
 				}
 			} else {
 				// 預金から自動引き出しを使用しない場合は通常通り更新
 				console.log(`[Romecoin] 通常更新を実行: userId=${userId}, safeTargetBalance=${safeTargetBalance}`);
-				await updateData(userId, data, () => safeTargetBalance);
-				console.log(`[Romecoin] データ更新完了: userId=${userId}`);
+				const updatedKey = await updateData(userId, data, () => safeTargetBalance);
+				console.log(`[Romecoin] データ更新完了: userId=${userId}, key=${updatedKey}, value=${data[updatedKey]}`);
+				
+				// グローバル変数を更新（dataオブジェクトへの参照を維持）
+				romecoin_data = data;
+				console.log(`[Romecoin] グローバル変数を更新: userId=${userId}, romecoin_data[${updatedKey}]=${romecoin_data[updatedKey]}`);
 			}
 			
 			// データを保存
@@ -426,6 +444,7 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 			console.log(`[Romecoin] データ保存完了: userId=${userId}`);
 			
 			// 変更後の残高を取得（正規化済み）
+			// 注意: getRomecoinはloadRomecoinData()を呼ぶので、保存直後でも最新のデータが読み込まれる
 			const newBalance = await getRomecoin(userId);
 			console.log(`[Romecoin] 変更後の残高: ${newBalance} (userId=${userId}), previousBalance=${previousBalance}`);
 			
