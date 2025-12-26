@@ -3440,6 +3440,74 @@ async function handleCommands(interaction, client) {
 			return;
 		}
 
+		// ファイル復元コマンド
+		if (interaction.commandName === 'admin_restore_file') {
+			// 権限チェック
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+			}
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+			}
+
+			try {
+				await interaction.deferReply({ ephemeral: true });
+
+				const fileName = interaction.options.getString('file_name');
+				if (!fileName) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ ファイル名を指定してください。'),
+						],
+					});
+				}
+
+				const persistence = require('../features/persistence');
+				const result = await persistence.restoreFile(interaction.client, fileName);
+
+				if (result.success) {
+					const successEmbed = new EmbedBuilder()
+						.setTitle('✅ ファイル復元成功')
+						.setDescription(result.message)
+						.addFields(
+							{ name: 'ファイル名', value: fileName, inline: true },
+							{ name: 'メッセージID', value: result.messageId || 'N/A', inline: true }
+						)
+						.setColor(0x00ff00)
+						.setTimestamp()
+						.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+					if (result.timestamp) {
+						const date = new Date(result.timestamp);
+						successEmbed.addFields({ name: '復元元の日時', value: date.toLocaleString('ja-JP'), inline: false });
+					}
+
+					await interaction.editReply({ embeds: [successEmbed] });
+				} else {
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ ファイル復元失敗')
+						.setDescription(result.message)
+						.setColor(0xff0000)
+						.setTimestamp();
+
+					await interaction.editReply({ embeds: [errorEmbed] });
+				}
+			} catch (error) {
+				console.error('ファイル復元エラー:', error);
+				await interaction.editReply({
+					embeds: [
+						new EmbedBuilder()
+							.setTitle('❌ エラー')
+							.setColor(0xff0000)
+							.setDescription(`ファイル復元中にエラーが発生しました: ${error.message}`),
+					],
+				});
+			}
+			return;
+		}
+
 		// ロメコインコマンド
 		if (interaction.commandName === 'romecoin') {
 			try {

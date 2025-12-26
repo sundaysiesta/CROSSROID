@@ -667,6 +667,29 @@ client.once('clientReady', async (client) => {
 			.addIntegerOption((option) =>
 				option.setName('amount').setDescription('減額するロメコインの量').setRequired(true)
 			),
+		new SlashCommandBuilder()
+			.setName('admin_restore_file')
+			.setDescription('データベースからJSONファイルを復元します（管理者専用）')
+			.addStringOption((option) =>
+				option
+					.setName('file_name')
+					.setDescription('復元するファイル名')
+					.setRequired(true)
+					.addChoices(
+						{ name: 'romecoin_data.json', value: 'romecoin_data.json' },
+						{ name: 'bank_data.json', value: 'bank_data.json' },
+						{ name: 'daily_data.json', value: 'daily_data.json' },
+						{ name: 'duel_data.json', value: 'duel_data.json' },
+						{ name: 'janken_data.json', value: 'janken_data.json' },
+						{ name: 'shop_data.json', value: 'shop_data.json' },
+						{ name: 'mahjong_data.json', value: 'mahjong_data.json' },
+						{ name: 'loan_data.json', value: 'loan_data.json' },
+						{ name: 'activity_data.json', value: 'activity_data.json' },
+						{ name: 'club_investment_data.json', value: 'club_investment_data.json' },
+						{ name: 'parimutuel_data.json', value: 'parimutuel_data.json' },
+						{ name: 'custom_cooldowns.json', value: 'custom_cooldowns.json' }
+					)
+			),
 		new SlashCommandBuilder().setName('shop').setDescription('ロメコインショップを表示します'),
 		new SlashCommandBuilder().setName('backpack').setDescription('購入済みの商品を確認します'),
 		new SlashCommandBuilder()

@@ -5,6 +5,7 @@ const { getData, updateData, migrateData } = require('./dataAccess');
 const { ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
 
 const ROMECOIN_DATA_FILE = path.join(__dirname, '..', 'romecoin_data.json');
+const ROMECOIN_DATA_BACKUP_FILE = path.join(__dirname, '..', 'romecoin_data.json.backup');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 
 // 数値の最大値（JavaScriptの安全な整数範囲内）
@@ -36,27 +37,50 @@ function validateAmount(amount) {
 // データ読み込み
 function loadRomecoinData() {
 	// ファイルから常に最新のデータを読み込む
+	let fileData = null;
+	
+	// まず通常のファイルを読み込む
 	if (fs.existsSync(ROMECOIN_DATA_FILE)) {
 		try {
-			const fileData = JSON.parse(fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8'));
-			// メモリ上のデータとファイルのデータをマージ（ファイルを優先）
-			if (romecoin_data === null) {
-				romecoin_data = fileData;
-			} else {
-				// ファイルのデータで上書き
-				romecoin_data = fileData;
+			const content = fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8');
+			if (content.trim() !== '') {
+				fileData = JSON.parse(content);
 			}
 		} catch (e) {
 			console.error('[Romecoin] データ読み込みエラー:', e);
-			if (romecoin_data === null) {
-				romecoin_data = {};
-			}
-		}
-	} else {
-		if (romecoin_data === null) {
-			romecoin_data = {};
 		}
 	}
+	
+	// ファイルが空または存在しない場合、バックアップから復元を試みる
+	if (!fileData || Object.keys(fileData).length === 0) {
+		console.warn('[Romecoin] メインファイルが空または存在しません。バックアップから復元を試みます...');
+		if (fs.existsSync(ROMECOIN_DATA_BACKUP_FILE)) {
+			try {
+				const backupContent = fs.readFileSync(ROMECOIN_DATA_BACKUP_FILE, 'utf8');
+				if (backupContent.trim() !== '') {
+					fileData = JSON.parse(backupContent);
+					console.log('[Romecoin] バックアップからデータを復元しました');
+					// 復元したデータをメインファイルに保存
+					romecoin_data = fileData;
+					saveRomecoinData();
+					console.log('[Romecoin] 復元したデータをメインファイルに保存しました');
+				}
+			} catch (e) {
+				console.error('[Romecoin] バックアップからの復元エラー:', e);
+			}
+		} else {
+			console.warn('[Romecoin] バックアップファイルも見つかりませんでした');
+		}
+	}
+	
+	// データを設定
+	if (romecoin_data === null) {
+		romecoin_data = fileData || {};
+	} else if (fileData) {
+		// ファイルのデータで上書き（ファイルを優先）
+		romecoin_data = fileData;
+	}
+	
 	return romecoin_data;
 }
 
@@ -66,6 +90,15 @@ function saveRomecoinData() {
 		return;
 	}
 	try {
+		// バックアップを作成（既存のファイルがある場合）
+		if (fs.existsSync(ROMECOIN_DATA_FILE)) {
+			try {
+				fs.copyFileSync(ROMECOIN_DATA_FILE, ROMECOIN_DATA_BACKUP_FILE);
+			} catch (e) {
+				console.warn('[Romecoin] バックアップ作成エラー（無視）:', e);
+			}
+		}
+		// メインファイルに保存
 		fs.writeFileSync(ROMECOIN_DATA_FILE, JSON.stringify(romecoin_data, null, 2));
 	} catch (e) {
 		console.error('[Romecoin] データ保存エラー:', e);
@@ -354,8 +387,14 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 // クライアント準備完了時の処理
 async function clientReady(client) {
 	// データを読み込む
-	loadRomecoinData();
-	console.log('[Romecoin] ロメコインデータを読み込みました');
+	const data = loadRomecoinData();
+	const dataCount = Object.keys(data).length;
+	console.log(`[Romecoin] ロメコインデータを読み込みました（${dataCount}件のエントリ）`);
+	
+	// データが空の場合、警告を出力
+	if (dataCount === 0) {
+		console.warn('[Romecoin] ⚠️ 警告: ロメコインデータが空です。バックアップからの復元を試みてください。');
+	}
 }
 
 // インタラクション作成時の処理

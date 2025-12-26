@@ -5,8 +5,10 @@ const { ADMIN_ROLE_ID, DATABASE_CHANNEL_ID } = require('../constants');
 const https = require('https');
 
 // Config
-const FILES = ['activity_data.json', 'custom_cooldowns.json', 'duel_data.json', 'janken_data.json', 'shop_data.json', 'mahjong_data.json', 'bank_data.json', 'loan_data.json', 'daily_data.json', 'club_investment_data.json'];
+const FILES = ['romecoin_data.json', 'activity_data.json', 'custom_cooldowns.json', 'duel_data.json', 'janken_data.json', 'shop_data.json', 'mahjong_data.json', 'bank_data.json', 'loan_data.json', 'daily_data.json', 'club_investment_data.json', 'parimutuel_data.json'];
 const SAVE_INTERVAL = 60 * 1000; // 1 min
+// Discordのメッセージには添付ファイル数の上限があるため、分割送信する
+const MAX_FILES_PER_MESSAGE = 10;
 
 // --- Helper: Download File ---
 function downloadFile(url, destPath) {
@@ -87,9 +89,13 @@ async function save(client) {
 
 		if (uploads.length === 0) return;
 
-		// ロメコインと同じ方式：新しいメッセージとして送信（編集しない）
-		await db_channel.send({ files: uploads });
-		console.log(`[Persistence] Saved ${uploads.length} file(s) to database channel: ${FILES.filter(f => fs.existsSync(path.join(__dirname, '..', f))).join(', ')}`);
+		// Discordのメッセージには添付ファイル数の上限があるため、分割送信
+		for (let i = 0; i < uploads.length; i += MAX_FILES_PER_MESSAGE) {
+			const batch = uploads.slice(i, i + MAX_FILES_PER_MESSAGE);
+			await db_channel.send({ files: batch });
+			console.log(`[Persistence] Saved batch ${Math.floor(i / MAX_FILES_PER_MESSAGE) + 1}: ${batch.map(f => path.basename(f)).join(', ')}`);
+		}
+		console.log(`[Persistence] Saved ${uploads.length} file(s) to database channel (${Math.ceil(uploads.length / MAX_FILES_PER_MESSAGE)} message(s))`);
 	} catch (e) {
 		console.error('[Persistence] Save failed:', e);
 	}
@@ -137,5 +143,56 @@ function startSync(client) {
 	setInterval(() => safeSave(client), SAVE_INTERVAL);
 }
 
-module.exports = { restore, startSync, save: safeSave };
+// 管理者コマンド用：特定のファイルを復元
+async function restoreFile(client, fileName) {
+	console.log(`[Persistence] Attempting to restore ${fileName} from Discord...`);
+	
+	try {
+		const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
+		const messages = await db_channel.messages.fetch({ limit: 200, cache: false });
+		
+		// 指定されたファイル名の最新のメッセージを探す
+		let latestMessage = null;
+		let latestAttachment = null;
+		let latestTimestamp = 0;
+		
+		for (const [msgId, message] of messages) {
+			for (const [attachmentId, attachment] of message.attachments) {
+				if (attachment.name === fileName) {
+					if (message.createdTimestamp > latestTimestamp) {
+						latestTimestamp = message.createdTimestamp;
+						latestMessage = message;
+						latestAttachment = attachment;
+					}
+				}
+			}
+		}
+
+		if (!latestMessage || !latestAttachment) {
+			console.log(`[Persistence] File ${fileName} not found in database channel.`);
+			return { success: false, message: `ファイル ${fileName} が見つかりませんでした。` };
+		}
+
+		// ファイルを復元
+		const dest = path.join(__dirname, '..', fileName);
+		try {
+			await downloadFile(latestAttachment.url, dest);
+			console.log(`[Persistence] Restored ${fileName} from message ${latestMessage.id}`);
+			return { 
+				success: true, 
+				message: `ファイル ${fileName} を復元しました（メッセージID: ${latestMessage.id}）`,
+				messageId: latestMessage.id,
+				timestamp: latestMessage.createdTimestamp
+			};
+		} catch (e) {
+			console.error(`[Persistence] ファイル復元失敗: ${fileName}`, e);
+			return { success: false, message: `ファイル ${fileName} の復元に失敗しました: ${e.message}` };
+		}
+	} catch (e) {
+		console.error('[Persistence] Restore file failed:', e);
+		return { success: false, message: `復元処理に失敗しました: ${e.message}` };
+	}
+}
+
+module.exports = { restore, startSync, save: safeSave, restoreFile };
 
