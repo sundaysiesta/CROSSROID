@@ -3454,6 +3454,8 @@ async function handleCommands(interaction, client) {
 				await interaction.deferReply({ ephemeral: true });
 
 				const fileName = interaction.options.getString('file_name');
+				const messageId = interaction.options.getString('message_id');
+				
 				if (!fileName) {
 					return interaction.editReply({
 						embeds: [
@@ -3465,7 +3467,7 @@ async function handleCommands(interaction, client) {
 				}
 
 				const persistence = require('../features/persistence');
-				const result = await persistence.restoreFile(interaction.client, fileName);
+				const result = await persistence.restoreFile(interaction.client, fileName, messageId || null);
 
 				if (result.success) {
 					const successEmbed = new EmbedBuilder()

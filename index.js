@@ -689,6 +689,12 @@ client.once('clientReady', async (client) => {
 						{ name: 'parimutuel_data.json', value: 'parimutuel_data.json' },
 						{ name: 'custom_cooldowns.json', value: 'custom_cooldowns.json' }
 					)
+			)
+			.addStringOption((option) =>
+				option
+					.setName('message_id')
+					.setDescription('特定のメッセージIDから復元（未指定時は最新のファイルを復元）')
+					.setRequired(false)
 			),
 		new SlashCommandBuilder().setName('shop').setDescription('ロメコインショップを表示します'),
 		new SlashCommandBuilder().setName('backpack').setDescription('購入済みの商品を確認します'),

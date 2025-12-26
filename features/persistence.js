@@ -144,12 +144,49 @@ function startSync(client) {
 }
 
 // 管理者コマンド用：特定のファイルを復元
-async function restoreFile(client, fileName) {
+async function restoreFile(client, fileName, messageId = null) {
 	console.log(`[Persistence] Attempting to restore ${fileName} from Discord...`);
 	
 	try {
 		const db_channel = await client.channels.fetch(DATABASE_CHANNEL_ID);
-		const messages = await db_channel.messages.fetch({ limit: 200, cache: false });
+		
+		// メッセージIDが指定されている場合、そのメッセージから直接復元
+		if (messageId) {
+			try {
+				const message = await db_channel.messages.fetch(messageId);
+				let targetAttachment = null;
+				
+				for (const [attachmentId, attachment] of message.attachments) {
+					if (attachment.name === fileName) {
+						targetAttachment = attachment;
+						break;
+					}
+				}
+				
+				if (!targetAttachment) {
+					return { 
+						success: false, 
+						message: `メッセージID ${messageId} にファイル ${fileName} が見つかりませんでした。` 
+					};
+				}
+				
+				const dest = path.join(__dirname, '..', fileName);
+				await downloadFile(targetAttachment.url, dest);
+				console.log(`[Persistence] Restored ${fileName} from message ${messageId}`);
+				return { 
+					success: true, 
+					message: `ファイル ${fileName} を復元しました（メッセージID: ${messageId}）`,
+					messageId: messageId,
+					timestamp: message.createdTimestamp
+				};
+			} catch (e) {
+				console.error(`[Persistence] メッセージ取得エラー: ${messageId}`, e);
+				return { success: false, message: `メッセージID ${messageId} の取得に失敗しました: ${e.message}` };
+			}
+		}
+		
+		// メッセージIDが指定されていない場合、最新のファイルを探す
+		const messages = await db_channel.messages.fetch({ limit: 100, cache: false });
 		
 		// 指定されたファイル名の最新のメッセージを探す
 		let latestMessage = null;
