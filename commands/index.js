@@ -343,19 +343,6 @@ async function handleCommands(interaction, client) {
 					.setColor(0xff0000);
 				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
-
-			// 残高チェック
-			if (currentBalance < amount) {
-				const errorEmbed = new EmbedBuilder()
-					.setTitle('❌ エラー')
-					.setDescription('ロメコインが不足しています')
-					.addFields(
-						{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${currentBalance}`, inline: true },
-						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${amount}`, inline: true }
-					)
-					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
-			}
 			
 			// ロメコインを譲渡
 			try {
@@ -413,13 +400,27 @@ async function handleCommands(interaction, client) {
 					.setColor(0x00ff00)
 					.setTimestamp();
 
-				await interaction.reply({ embeds: [successEmbed] });
+				if (!interaction.replied && !interaction.deferred) {
+					await interaction.reply({ embeds: [successEmbed] });
+				} else if (interaction.deferred) {
+					await interaction.editReply({ embeds: [successEmbed] });
+				}
 			} catch (error) {
 				console.error('[Give] エラー:', error);
-				return interaction.reply({
-					content: '❌ ロメコインの譲渡中にエラーが発生しました。',
-					flags: MessageFlags.Ephemeral,
-				});
+				try {
+					if (!interaction.replied && !interaction.deferred) {
+						await interaction.reply({
+							content: '❌ ロメコインの譲渡中にエラーが発生しました。',
+							flags: MessageFlags.Ephemeral,
+						});
+					} else if (interaction.deferred) {
+						await interaction.editReply({
+							content: '❌ ロメコインの譲渡中にエラーが発生しました。',
+						});
+					}
+				} catch (replyErr) {
+					console.error('[Give] エラーレスポンス送信失敗:', replyErr);
+				}
 			}
 			return;
 		}

@@ -20,6 +20,32 @@ const updateLocks = new Map();
 // ランキングコマンドのクールダウン
 let romecoin_ranking_cooldowns = new Map();
 
+// ランキングデータのキャッシュ（ページネーション用）
+// key: cacheKey, value: { data: Array, timestamp: number }
+const rankingCache = new Map();
+
+// キャッシュのクリーンアップ（5分ごと、10分以上古いデータを削除）
+setInterval(() => {
+	const now = Date.now();
+	const maxAge = 10 * 60 * 1000; // 10分
+	for (const [key, value] of rankingCache) {
+		if (now - value.timestamp > maxAge) {
+			rankingCache.delete(key);
+		}
+	}
+}, 5 * 60 * 1000); // 5分ごと
+
+// メッセージ送信報酬のクールダウン
+let messageRewardCooldowns = new Map();
+
+// 会話参加者数の追跡（過去5分以内のメッセージ送信者を記録）
+// key: timestamp (分単位), value: Set of userIds
+let conversationParticipants = new Map();
+
+// VC参加者の追跡（定期的にロメコインを付与）
+// key: userId, value: { channelId, lastReward, intervalId }
+let vcParticipants = new Map();
+
 // 数値の検証関数
 function validateAmount(amount) {
 	if (typeof amount !== 'number' || isNaN(amount) || !isFinite(amount)) {
@@ -555,12 +581,24 @@ async function interactionCreate(interaction) {
 			const validData = userData.filter((item) => item !== null);
 			validData.sort((a, b) => b.value - a.value);
 			
-			// 上位10名を表示
-			const top10 = validData.slice(0, 10);
+			// ページネーション用のデータを保存（ユーザーごと）
+			const rankingCacheKey = `ranking_${interaction.user.id}_${Date.now()}`;
+			rankingCache.set(rankingCacheKey, {
+				data: validData,
+				timestamp: Date.now()
+			});
 			
-			const rankingText = top10
+			// 1ページ目を表示（1ページあたり10名）
+			const page = 1;
+			const itemsPerPage = 10;
+			const startIndex = (page - 1) * itemsPerPage;
+			const endIndex = startIndex + itemsPerPage;
+			const pageData = validData.slice(startIndex, endIndex);
+			const totalPages = Math.ceil(validData.length / itemsPerPage);
+			
+			const rankingText = pageData
 				.map((item, index) => {
-					const rank = index + 1;
+					const rank = startIndex + index + 1;
 					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
 					const displayName = item.displayName || `<@${item.discordId}>`;
 					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
@@ -570,10 +608,26 @@ async function interactionCreate(interaction) {
 			const embed = new EmbedBuilder()
 				.setTitle('💰 ロメコインランキング')
 				.setDescription(rankingText || 'ランキングデータがありません')
+				.setFooter({ text: `ページ ${page}/${totalPages} | 総ユーザー数: ${validData.length}人` })
 				.setColor(0xffd700)
 				.setTimestamp();
 			
-			await interaction.editReply({ embeds: [embed] });
+			// ページネーションボタンを作成
+			const row = new ActionRowBuilder();
+			const prevButton = new ButtonBuilder()
+				.setCustomId(`romecoin_ranking_prev_${rankingCacheKey}_${page}`)
+				.setLabel('前へ')
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(page === 1);
+			const nextButton = new ButtonBuilder()
+				.setCustomId(`romecoin_ranking_next_${rankingCacheKey}_${page}`)
+				.setLabel('次へ')
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(page >= totalPages);
+			
+			row.addComponents(prevButton, nextButton);
+			
+			await interaction.editReply({ embeds: [embed], components: [row] });
 		} catch (error) {
 			console.error('[Romecoin] ランキングエラー:', error);
 			if (!interaction.replied && !interaction.deferred) {
@@ -586,23 +640,412 @@ async function interactionCreate(interaction) {
 	
 	// ページネーションボタンの処理
 	if (interaction.isButton() && interaction.customId.startsWith('romecoin_ranking_')) {
-		// ページネーション機能は将来の実装用（現在は簡易版のみ）
+		try {
+			const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+			const notionManager = require('./notion');
+			
+			// customIdの形式: romecoin_ranking_{action}_{cacheKey}_{currentPage}
+			const parts = interaction.customId.split('_');
+			if (parts.length < 5) {
+				return interaction.reply({ content: '❌ 無効なボタンです。', ephemeral: true }).catch(() => {});
+			}
+			
+			const action = parts[3]; // 'prev' or 'next'
+			const cacheKey = parts[4];
+			const currentPage = parseInt(parts[5]) || 1;
+			
+			// キャッシュからデータを取得
+			const cacheEntry = rankingCache.get(cacheKey);
+			if (!cacheEntry || !cacheEntry.data) {
+				return interaction.reply({ content: '❌ ランキングデータの有効期限が切れました。再度コマンドを実行してください。', ephemeral: true }).catch(() => {});
+			}
+			const validData = cacheEntry.data;
+			
+			// ページを計算
+			const itemsPerPage = 10;
+			let newPage = currentPage;
+			if (action === 'prev' && currentPage > 1) {
+				newPage = currentPage - 1;
+			} else if (action === 'next') {
+				const totalPages = Math.ceil(validData.length / itemsPerPage);
+				if (currentPage < totalPages) {
+					newPage = currentPage + 1;
+				}
+			}
+			
+			// ページデータを取得
+			const startIndex = (newPage - 1) * itemsPerPage;
+			const endIndex = startIndex + itemsPerPage;
+			const pageData = validData.slice(startIndex, endIndex);
+			const totalPages = Math.ceil(validData.length / itemsPerPage);
+			
+			const rankingText = pageData
+				.map((item, index) => {
+					const rank = startIndex + index + 1;
+					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+					const displayName = item.displayName || `<@${item.discordId}>`;
+					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
+				})
+				.join('\n');
+			
+			const embed = new EmbedBuilder()
+				.setTitle('💰 ロメコインランキング')
+				.setDescription(rankingText || 'ランキングデータがありません')
+				.setFooter({ text: `ページ ${newPage}/${totalPages} | 総ユーザー数: ${validData.length}人` })
+				.setColor(0xffd700)
+				.setTimestamp();
+			
+			// ページネーションボタンを作成
+			const row = new ActionRowBuilder();
+			const prevButton = new ButtonBuilder()
+				.setCustomId(`romecoin_ranking_prev_${cacheKey}_${newPage}`)
+				.setLabel('前へ')
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(newPage === 1);
+			const nextButton = new ButtonBuilder()
+				.setCustomId(`romecoin_ranking_next_${cacheKey}_${newPage}`)
+				.setLabel('次へ')
+				.setStyle(ButtonStyle.Primary)
+				.setDisabled(newPage >= totalPages);
+			
+			row.addComponents(prevButton, nextButton);
+			
+			await interaction.update({ embeds: [embed], components: [row] });
+		} catch (error) {
+			console.error('[Romecoin] ページネーションエラー:', error);
+			try {
+				if (interaction.deferred || interaction.replied) {
+					await interaction.editReply({ content: '❌ ページ切り替え中にエラーが発生しました。', components: [] }).catch(() => {});
+				} else {
+					await interaction.reply({ content: '❌ ページ切り替え中にエラーが発生しました。', ephemeral: true }).catch(() => {});
+				}
+			} catch (replyErr) {
+				console.error('[Romecoin] エラーレスポンス送信失敗:', replyErr);
+			}
+		}
 	}
 }
 
 // メッセージ作成時の処理
 async function messageCreate(message) {
-	// 特に処理なし
+	try {
+		// Botのメッセージは無視
+		if (message.author.bot) {
+			return;
+		}
+
+		// メインチャンネル以外は無視
+		const { MAIN_CHANNEL_ID, RADIATION_ROLE_ID } = require('../constants');
+		if (message.channel.id !== MAIN_CHANNEL_ID) {
+			return;
+		}
+
+		// 被爆ロールチェック：被爆ロールを持っている場合はロメコインを付与しない
+		if (message.member && RADIATION_ROLE_ID && message.member.roles.cache.has(RADIATION_ROLE_ID)) {
+			return;
+		}
+
+		// クールダウン管理（1分ごとに1回のみ付与）
+		const userId = message.author.id;
+		const cooldownKey = `message_reward_${userId}`;
+		const lastReward = messageRewardCooldowns?.get(cooldownKey) || 0;
+		const cooldownTime = 60 * 1000; // 1分
+		const now = Date.now();
+
+		if (now - lastReward < cooldownTime) {
+			return; // クールダウン中
+		}
+
+		// クールダウンを更新
+		if (!messageRewardCooldowns) {
+			messageRewardCooldowns = new Map();
+		}
+		messageRewardCooldowns.set(cooldownKey, now);
+
+		// 基本報酬
+		let rewardAmount = 10;
+
+		// 会話参加者数ボーナス（過去5分以内のメッセージ送信者数をカウント）
+		// 現在時刻を分単位で取得
+		const currentMinute = Math.floor(now / (60 * 1000));
+		
+		// 過去5分以内の参加者を集計
+		const participantSet = new Set();
+		for (let i = 0; i < 5; i++) {
+			const minuteKey = currentMinute - i;
+			const participants = conversationParticipants.get(minuteKey);
+			if (participants) {
+				participants.forEach(id => participantSet.add(id));
+			}
+		}
+		
+		// botと被爆ロールを除外してカウント
+		let participantCount = 0;
+		for (const participantId of participantSet) {
+			// 自分自身は既にカウントされているので除外しない
+			if (participantId === userId) continue;
+			
+			// botチェック
+			const participant = message.guild?.members.cache.get(participantId);
+			if (participant?.user.bot) continue;
+			
+			// 被爆ロールチェック
+			if (participant && RADIATION_ROLE_ID && participant.roles.cache.has(RADIATION_ROLE_ID)) continue;
+			
+			participantCount++;
+		}
+		
+		// 会話参加者数ボーナス: 1 + (参加者数/10) → 最大2倍
+		const conversationBonus = Math.min(2, 1 + (participantCount / 10));
+		rewardAmount = Math.round(rewardAmount * conversationBonus);
+		
+		// 現在の分に参加者を追加
+		if (!conversationParticipants.has(currentMinute)) {
+			conversationParticipants.set(currentMinute, new Set());
+		}
+		conversationParticipants.get(currentMinute).add(userId);
+		
+		// 古いデータを削除（5分以上前のデータ）
+		const cutoffMinute = currentMinute - 5;
+		for (const [minuteKey] of conversationParticipants) {
+			if (minuteKey < cutoffMinute) {
+				conversationParticipants.delete(minuteKey);
+			}
+		}
+
+		// 深夜ボーナス（6時前）: 1.5倍
+		const jst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+		const hour = jst.getHours();
+		if (hour < 6) {
+			rewardAmount = Math.round(rewardAmount * 1.5);
+		}
+
+		// 返信チェック（メッセージに返信が含まれている場合）
+		if (message.reference && message.reference.messageId) {
+			rewardAmount += 5;
+		}
+
+		// リアクションボーナスはリアクション追加時に処理されるため、ここでは処理しない
+		
+		const bonusText = participantCount > 0 ? ` [会話参加者${participantCount}人ボーナス]` : '';
+		console.log(`[Romecoin] メッセージ送信報酬: userId=${userId}, amount=${rewardAmount}, hour=${hour}, isReply=${!!(message.reference && message.reference.messageId)}, participants=${participantCount}`);
+		
+		await updateRomecoin(
+			userId,
+			(current) => Math.round((current || 0) + rewardAmount),
+			{
+				log: true,
+				client: message.client,
+				reason: `メッセージ送信報酬（メインチャンネル）${bonusText}${hour < 6 ? ' [深夜ボーナス]' : ''}${message.reference && message.reference.messageId ? ' [返信ボーナス]' : ''}`,
+				metadata: {
+					commandName: 'message_reward',
+					channelId: message.channel.id,
+					hour: hour,
+					isReply: !!(message.reference && message.reference.messageId),
+					participantCount: participantCount,
+				},
+			}
+		);
+	} catch (error) {
+		console.error('[Romecoin] メッセージ送信報酬エラー:', error);
+		// エラーが発生しても処理を続行（メッセージ送信を妨げない）
+	}
 }
 
 // リアクション追加時の処理
 async function messageReactionAdd(reaction, user) {
-	// 特に処理なし
+	try {
+		// Botのリアクションは無視
+		if (user.bot) {
+			return;
+		}
+
+		// メインチャンネル以外は無視
+		const { MAIN_CHANNEL_ID, RADIATION_ROLE_ID } = require('../constants');
+		if (reaction.message.channel.id !== MAIN_CHANNEL_ID) {
+			return;
+		}
+
+		// 被爆ロールチェック
+		const member = reaction.message.guild?.members.cache.get(user.id);
+		if (member && RADIATION_ROLE_ID && member.roles.cache.has(RADIATION_ROLE_ID)) {
+			return;
+		}
+
+		// 自分のメッセージへのリアクションは無視（自己リアクション防止）
+		if (reaction.message.author.id === user.id) {
+			return;
+		}
+
+		// クールダウン管理（1分ごとに1回のみ付与）
+		const userId = user.id;
+		const cooldownKey = `reaction_reward_${userId}_${reaction.message.id}`;
+		const lastReward = messageRewardCooldowns?.get(cooldownKey) || 0;
+		const cooldownTime = 60 * 1000; // 1分
+		const now = Date.now();
+
+		if (now - lastReward < cooldownTime) {
+			return; // クールダウン中
+		}
+
+		// クールダウンを更新
+		if (!messageRewardCooldowns) {
+			messageRewardCooldowns = new Map();
+		}
+		messageRewardCooldowns.set(cooldownKey, now);
+
+		// リアクションボーナス: +5コイン
+		const rewardAmount = 5;
+		
+		console.log(`[Romecoin] リアクションボーナス: userId=${userId}, amount=${rewardAmount}, messageId=${reaction.message.id}`);
+		
+		await updateRomecoin(
+			userId,
+			(current) => Math.round((current || 0) + rewardAmount),
+			{
+				log: true,
+				client: reaction.message.client,
+				reason: `リアクションボーナス（メインチャンネル）`,
+				metadata: {
+					commandName: 'reaction_reward',
+					channelId: reaction.message.channel.id,
+					messageId: reaction.message.id,
+				},
+			}
+		);
+	} catch (error) {
+		console.error('[Romecoin] リアクションボーナスエラー:', error);
+		// エラーが発生しても処理を続行
+	}
 }
 
 // ボイスステート更新時の処理
 async function handleVoiceStateUpdate(oldState, newState) {
-	// 特に処理なし
+	try {
+		const { RADIATION_ROLE_ID } = require('../constants');
+		const userId = newState.member?.id;
+		
+		if (!userId) {
+			return;
+		}
+
+		// VCから退出した場合
+		if (oldState?.channel && !newState.channel) {
+			const vcData = vcParticipants.get(userId);
+			if (vcData && vcData.intervalId) {
+				clearInterval(vcData.intervalId);
+				vcParticipants.delete(userId);
+				console.log(`[Romecoin] VC退出: userId=${userId}`);
+			}
+			return;
+		}
+
+		// 新しいVCチャンネルに参加した場合
+		if (newState.channel && (!oldState?.channel || oldState.channel.id !== newState.channel.id)) {
+			// Botは無視
+			if (newState.member.user.bot) {
+				return;
+			}
+
+			// 被爆ロールチェック
+			if (RADIATION_ROLE_ID && newState.member.roles.cache.has(RADIATION_ROLE_ID)) {
+				return;
+			}
+
+			// 既存のインターバルをクリア（チャンネル移動時）
+			const existingVcData = vcParticipants.get(userId);
+			if (existingVcData && existingVcData.intervalId) {
+				clearInterval(existingVcData.intervalId);
+			}
+
+			// 定期的にVC参加者にロメコインを付与する処理
+			const vcRewardInterval = setInterval(async () => {
+				try {
+					// ユーザーがまだVCに参加しているか確認
+					const member = newState.guild.members.cache.get(userId);
+					if (!member || !member.voice.channel || member.voice.channel.id !== newState.channel.id) {
+						const vcData = vcParticipants.get(userId);
+						if (vcData && vcData.intervalId) {
+							clearInterval(vcData.intervalId);
+							vcParticipants.delete(userId);
+						}
+						return;
+					}
+
+					// ミュート状態チェック（selfMuteまたはserverMuteがtrueの場合は付与しない）
+					if (member.voice.mute || member.voice.selfMute) {
+						return;
+					}
+
+					// VC参加者数をカウント（botと被爆ロールは除外、ミュート中も除外）
+					const channel = member.voice.channel;
+					let participantCount = 0;
+					for (const [memberId, vcMember] of channel.members) {
+						if (vcMember.user.bot) continue;
+						if (RADIATION_ROLE_ID && vcMember.roles.cache.has(RADIATION_ROLE_ID)) continue;
+						if (vcMember.voice.mute || vcMember.voice.selfMute) continue; // ミュート中はカウントしない
+						participantCount++;
+					}
+
+					// 参加者数が2人以上の場合のみ付与（1人では会話にならない）
+					if (participantCount < 2) {
+						return;
+					}
+
+					// クールダウン管理（1分ごとに1回のみ付与）
+					const vcData = vcParticipants.get(userId);
+					const now = Date.now();
+					if (vcData && now - vcData.lastReward < 60 * 1000) {
+						return; // クールダウン中
+					}
+
+					// クールダウンを更新
+					if (vcData) {
+						vcData.lastReward = now;
+					}
+
+					// VC参加報酬: 固定額（参加者数が2人以上の場合）
+					const rewardAmount = 10; // メッセージ送信報酬と同額
+					
+					console.log(`[Romecoin] VC参加報酬: userId=${userId}, amount=${rewardAmount}, participants=${participantCount}, channel=${channel.name}`);
+					
+					await updateRomecoin(
+						userId,
+						(current) => Math.round((current || 0) + rewardAmount),
+						{
+							log: true,
+							client: newState.client,
+							reason: `VC参加報酬（${channel.name}、参加者${participantCount}人）`,
+							metadata: {
+								commandName: 'vc_reward',
+								channelId: channel.id,
+								channelName: channel.name,
+								participantCount: participantCount,
+							},
+						}
+					);
+				} catch (error) {
+					console.error('[Romecoin] VC参加報酬エラー:', error);
+					const vcData = vcParticipants.get(userId);
+					if (vcData && vcData.intervalId) {
+						clearInterval(vcData.intervalId);
+						vcParticipants.delete(userId);
+					}
+				}
+			}, 60 * 1000); // 1分ごと
+
+			// VC参加者情報を保存
+			vcParticipants.set(userId, {
+				channelId: newState.channel.id,
+				lastReward: 0,
+				intervalId: vcRewardInterval,
+			});
+
+			console.log(`[Romecoin] VC参加: userId=${userId}, channel=${newState.channel.name}`);
+		}
+	} catch (error) {
+		console.error('[Romecoin] VC参加処理エラー:', error);
+	}
 }
 
 module.exports = {
