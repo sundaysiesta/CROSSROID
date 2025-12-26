@@ -119,7 +119,9 @@ async function handleClubInvestInfo(interaction, client) {
 		const channel = interaction.options.getChannel('channel') || interaction.channel;
 		
 		// 部活チャンネルかチェック
-		if (!CLUB_CATEGORY_IDS.includes(channel.parentId)) {
+		const parentId = channel.parentId ? String(channel.parentId) : null;
+		if (!parentId || !CLUB_CATEGORY_IDS.includes(parentId)) {
+			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId}, CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS)}`);
 			return interaction.reply({
 				content: '部活チャンネルで実行してください。',
 				flags: [MessageFlags.Ephemeral],
@@ -215,7 +217,9 @@ async function handleClubInvestBuy(interaction, client) {
 		const amount = interaction.options.getInteger('amount');
 
 		// 部活チャンネルかチェック
-		if (!CLUB_CATEGORY_IDS.includes(channel.parentId)) {
+		const parentId = channel.parentId ? String(channel.parentId) : null;
+		if (!parentId || !CLUB_CATEGORY_IDS.includes(parentId)) {
+			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId}, CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS)}`);
 			return interaction.reply({
 				content: '部活チャンネルで実行してください。',
 				flags: [MessageFlags.Ephemeral],
@@ -372,7 +376,9 @@ async function handleClubInvestSell(interaction, client) {
 		const shares = interaction.options.getInteger('shares');
 
 		// 部活チャンネルかチェック
-		if (!CLUB_CATEGORY_IDS.includes(channel.parentId)) {
+		const parentId = channel.parentId ? String(channel.parentId) : null;
+		if (!parentId || !CLUB_CATEGORY_IDS.includes(parentId)) {
+			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId}, CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS)}`);
 			return interaction.reply({
 				content: '部活チャンネルで実行してください。',
 				flags: [MessageFlags.Ephemeral],
