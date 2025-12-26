@@ -344,11 +344,7 @@ async function handleCommands(interaction, client) {
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
 			}
 
-			// 取引手数料を計算（インフレ対策）
-			const { applyTransactionFee } = require('../features/inflationControl');
-			const { netAmount, fee } = applyTransactionFee(amount);
-			
-			// 手数料を考慮した残高チェック
+			// 残高チェック
 			if (currentBalance < amount) {
 				const errorEmbed = new EmbedBuilder()
 					.setTitle('❌ エラー')
@@ -361,66 +357,39 @@ async function handleCommands(interaction, client) {
 				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
 			}
 			
-			// ロメコインを譲渡（手数料込み）
+			// ロメコインを譲渡
 			try {
-				// 送信者のロメコインを減らす（手数料込み、ログ付き）
+				// 送信者のロメコインを減らす（ログ付き）
 				await updateRomecoin(
 					senderId,
 					(current) => Math.round((current || 0) - amount),
 					{
 						log: true,
 						client: interaction.client,
-						reason: `giveコマンド: ${targetUser.tag} への譲渡（手数料: ${ROMECOIN_EMOJI}${fee.toLocaleString()}）`,
+						reason: `giveコマンド: ${targetUser.tag} への譲渡`,
 						metadata: {
 							executorId: interaction.user.id,
 							targetUserId: targetUser.id,
 							commandName: 'give',
-							fee: fee,
 						},
 					}
 				);
-				// 受信者のロメコインを増やす（手数料を差し引いた金額、ログ付き）
+				// 受信者のロメコインを増やす（ログ付き）
 				await updateRomecoin(
 					targetUser.id,
-					(current) => Math.round((current || 0) + netAmount),
+					(current) => Math.round((current || 0) + amount),
 					{
 						log: true,
 						client: interaction.client,
-						reason: `giveコマンド: ${interaction.user.tag} からの譲渡（手数料差引後: ${ROMECOIN_EMOJI}${netAmount.toLocaleString()}）`,
+						reason: `giveコマンド: ${interaction.user.tag} からの譲渡`,
 						metadata: {
 							executorId: interaction.user.id,
 							targetUserId: senderId,
 							commandName: 'give',
-							originalAmount: amount,
-							fee: fee,
+							amount: amount,
 						},
 					}
 				);
-				
-				// 手数料をBotアカウント（黒須銀行）に送る
-				const botUserId = interaction.client.user?.id;
-				if (botUserId && fee > 0) {
-					try {
-						await updateRomecoin(
-							botUserId,
-							(current) => Math.round((current || 0) + fee),
-							{
-								log: true,
-								client: interaction.client,
-								reason: `giveコマンド取引手数料（1%）`,
-								metadata: {
-									commandName: 'give_fee',
-									senderId: senderId,
-									receiverId: targetUser.id,
-									amount: amount,
-									fee: fee,
-								},
-							}
-						);
-					} catch (botError) {
-						console.error('[Give] Botアカウントへの手数料追加エラー:', botError);
-					}
-				}
 
 				// 成功メッセージ
 				const senderNewBalance = await getRomecoin(senderId);
@@ -2254,23 +2223,18 @@ async function handleCommands(interaction, client) {
 					winner = actualOpponentMember;
 				}
 
-				// 取引手数料を計算（インフレ対策：勝者が受け取る金額から手数料を差し引く）
-				const { applyTransactionFee } = require('../features/inflationControl');
-				const { netAmount: winnerReward, fee } = applyTransactionFee(bet);
-				
-				// ロメコインのやり取り（手数料込み、ログ付き）
+				// ロメコインのやり取り（ログ付き）
 				await updateRomecoin(
 					winner.user.id,
-					(current) => Math.round((current || 0) + winnerReward),
+					(current) => Math.round((current || 0) + bet),
 					{
 						log: true,
 						client: interaction.client,
-						reason: `決闘勝利: ${loser.user.tag} との対戦（手数料差引後: ${ROMECOIN_EMOJI}${winnerReward.toLocaleString()}）`,
+						reason: `決闘勝利: ${loser.user.tag} との対戦`,
 						metadata: {
 							targetUserId: loser.user.id,
 							commandName: 'duel',
-							originalBet: bet,
-							fee: fee,
+							bet: bet,
 						},
 					}
 				);
@@ -2288,31 +2252,6 @@ async function handleCommands(interaction, client) {
 						useDeposit: true,
 					}
 				);
-				
-				// 手数料をBotアカウント（黒須銀行）に送る
-				const botUserId = interaction.client.user?.id;
-				if (botUserId && fee > 0) {
-					try {
-						await updateRomecoin(
-							botUserId,
-							(current) => Math.round((current || 0) + fee),
-							{
-								log: true,
-								client: interaction.client,
-								reason: `決闘取引手数料（1%）`,
-								metadata: {
-									commandName: 'duel_fee',
-									winnerId: winner.user.id,
-									loserId: loser.user.id,
-									bet: bet,
-									fee: fee,
-								},
-							}
-						);
-					} catch (botError) {
-						console.error('[Duel] Botアカウントへの手数料追加エラー:', botError);
-					}
-				}
 
 				// 戦績記録
 				const DATA_FILE = path.join(__dirname, '..', 'duel_data.json');
@@ -2724,23 +2663,18 @@ async function handleCommands(interaction, client) {
 						const loserMember = await interaction.guild.members.fetch(loserId).catch(() => null);
 						const winnerMember = await interaction.guild.members.fetch(winnerId).catch(() => null);
 
-						// 取引手数料を計算（インフレ対策：勝者が受け取る金額から手数料を差し引く）
-						const { applyTransactionFee } = require('../features/inflationControl');
-						const { netAmount: winnerReward, fee } = applyTransactionFee(bet);
-						
-						// ロメコインのやり取り（手数料込み、ログ付き）
+						// ロメコインのやり取り（ログ付き）
 						await updateRomecoin(
 							winnerId,
-							(current) => Math.round((current || 0) + winnerReward),
+							(current) => Math.round((current || 0) + bet),
 							{
 								log: true,
 								client: interaction.client,
-								reason: `ロシアンルーレット勝利: ${loserUser.tag} との対戦（手数料差引後: ${ROMECOIN_EMOJI}${winnerReward.toLocaleString()}）`,
+								reason: `ロシアンルーレット勝利: ${loserUser.tag} との対戦`,
 								metadata: {
 									targetUserId: loserId,
 									commandName: 'duel_russian',
-									originalBet: bet,
-									fee: fee,
+									bet: bet,
 								},
 							}
 						);
@@ -2758,31 +2692,6 @@ async function handleCommands(interaction, client) {
 								useDeposit: true,
 							}
 						);
-						
-						// 手数料をBotアカウント（黒須銀行）に送る
-						const botUserId = interaction.client.user?.id;
-						if (botUserId && fee > 0) {
-							try {
-								await updateRomecoin(
-									botUserId,
-									(current) => Math.round((current || 0) + fee),
-									{
-										log: true,
-										client: interaction.client,
-										reason: `ロシアンルーレット取引手数料（1%）`,
-										metadata: {
-											commandName: 'duel_russian_fee',
-											winnerId: winnerId,
-											loserId: loserId,
-											bet: bet,
-											fee: fee,
-										},
-									}
-								);
-							} catch (botError) {
-								console.error('[Duel Russian] Botアカウントへの手数料追加エラー:', botError);
-							}
-						}
 
 						// ペナルティ: タイムアウト
 						if (loserMember) {
@@ -3236,15 +3145,11 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// 消費税を計算（インフレ対策）
-				const { applyConsumptionTax } = require('../features/inflationControl');
-				const { totalPrice, tax } = applyConsumptionTax(item.price);
-				
-				// ロメコイン残高を確認（税込み価格）
+				// ロメコイン残高を確認
 				const balance = await getRomecoin(userId);
-				if (balance < totalPrice) {
+				if (balance < item.price) {
 					return interaction.reply({
-						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${totalPrice.toLocaleString()} (税込み、内消費税: ${ROMECOIN_EMOJI}${tax.toLocaleString()})\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
 						ephemeral: true,
 					});
 				}
@@ -3255,11 +3160,9 @@ async function handleCommands(interaction, client) {
 					.setColor(0xffa500)
 					.setDescription(`**${item.name}** を購入しますか？`)
 					.addFields(
-						{ name: '税抜き価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
-						{ name: '消費税 (5%)', value: `${ROMECOIN_EMOJI}${tax.toLocaleString()}`, inline: true },
-						{ name: '税込み価格', value: `${ROMECOIN_EMOJI}${totalPrice.toLocaleString()}`, inline: true },
+						{ name: '価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
 						{ name: '現在の残高', value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`, inline: true },
-						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${(balance - totalPrice).toLocaleString()}`, inline: true },
+						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${(balance - item.price).toLocaleString()}`, inline: true },
 						{ name: '説明', value: item.description, inline: false }
 					)
 					.setFooter({ text: '※ この商品は一度購入すると再度購入できません' })
@@ -3362,15 +3265,11 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// 消費税を計算（インフレ対策）
-				const { applyConsumptionTax } = require('../features/inflationControl');
-				const { totalPrice, tax } = applyConsumptionTax(item.price);
-				
-				// ロメコイン残高を確認（税込み価格）
+				// ロメコイン残高を確認
 				const balance = await getRomecoin(userId);
-				if (balance < totalPrice) {
+				if (balance < item.price) {
 					return interaction.reply({
-						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${totalPrice.toLocaleString()} (税込み、内消費税: ${ROMECOIN_EMOJI}${tax.toLocaleString()})\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
 						ephemeral: true,
 					});
 				}
@@ -3412,42 +3311,39 @@ async function handleCommands(interaction, client) {
 					console.error('[ショップ] 購入履歴保存エラー:', e);
 				}
 
-				// ユーザーのロメコインを減額（税込み価格、ログ付き）
+				// ユーザーのロメコインを減額（ログ付き）
 				const previousBalance = balance;
 				await updateRomecoin(
 					userId,
-					(current) => Math.round((current || 0) - totalPrice),
+					(current) => Math.round((current || 0) - item.price),
 					{
 						log: true,
 						client: client,
-						reason: `ショップ購入: ${item.name} (消費税: ${ROMECOIN_EMOJI}${tax.toLocaleString()})`,
+						reason: `ショップ購入: ${item.name}`,
 						metadata: {
 							commandName: 'shop_buy',
 							itemId: item.id,
-							tax: tax,
-							originalPrice: item.price,
+							price: item.price,
 						},
 					}
 				);
 				const newBalance = await getRomecoin(userId);
 
-				// クロスロイドのロメコインを増額（税抜き価格 + 消費税、ログ付き）
+				// クロスロイドのロメコインを増額（ログ付き）
 				const botUserId = client.user.id;
 				const botPreviousBalance = await getRomecoin(botUserId);
 				await updateRomecoin(
 					botUserId,
-					(current) => Math.round((current || 0) + totalPrice),
+					(current) => Math.round((current || 0) + item.price),
 					{
 						log: true,
 						client: client,
-						reason: `ショップ収益: ${item.name} (購入者: ${interaction.user.tag}、税込み: ${ROMECOIN_EMOJI}${totalPrice.toLocaleString()})`,
+						reason: `ショップ収益: ${item.name} (購入者: ${interaction.user.tag})`,
 						metadata: {
 							commandName: 'shop_revenue',
 							itemId: item.id,
 							buyerId: userId,
-							originalPrice: item.price,
-							tax: tax,
-							totalPrice: totalPrice,
+							price: item.price,
 						},
 					}
 				);
@@ -3462,9 +3358,7 @@ async function handleCommands(interaction, client) {
 					.setColor(0x00ff00)
 					.setDescription(`**${item.name}** の購入が完了しました！`)
 					.addFields(
-						{ name: '税抜き価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
-						{ name: '消費税 (5%)', value: `${ROMECOIN_EMOJI}${tax.toLocaleString()}`, inline: true },
-						{ name: '支払額 (税込み)', value: `${ROMECOIN_EMOJI}${totalPrice.toLocaleString()}`, inline: true },
+						{ name: '価格', value: `${ROMECOIN_EMOJI}${item.price.toLocaleString()}`, inline: true },
 						{ name: '購入前の残高', value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`, inline: true },
 						{ name: '購入後の残高', value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`, inline: true }
 					)
@@ -3545,6 +3439,59 @@ async function handleCommands(interaction, client) {
 			}
 			return;
 		}
+
+		// ロメコインコマンド
+		if (interaction.commandName === 'romecoin') {
+			try {
+				const userId = interaction.options.getUser('user')?.id || interaction.user.id;
+				const balance = await getRomecoin(userId);
+				const targetUser = interaction.options.getUser('user') || interaction.user;
+				
+				const embed = new EmbedBuilder()
+					.setTitle('💰 ロメコイン残高')
+					.setDescription(`${targetUser} のロメコイン残高`)
+					.addFields({
+						name: '所持金',
+						value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+						inline: true,
+					})
+					.setColor(0xffd700)
+					.setTimestamp();
+				
+				await interaction.reply({ embeds: [embed] });
+			} catch (error) {
+				console.error('[Romecoin] コマンドエラー:', error);
+				if (!interaction.replied && !interaction.deferred) {
+					await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+				} else {
+					await interaction.editReply({ content: 'エラーが発生しました。' });
+				}
+			}
+			return;
+		}
+
+		// パリミュチュエル機能
+		if (interaction.commandName === 'race') {
+			const parimutuel = require('../features/parimutuel');
+			const subcommand = interaction.options.getSubcommand();
+			
+			if (subcommand === 'create') {
+				await handleRaceCreate(interaction, client, parimutuel);
+			} else if (subcommand === 'list') {
+				await handleRaceList(interaction, client, parimutuel);
+			} else if (subcommand === 'info') {
+				await handleRaceInfo(interaction, client, parimutuel);
+			} else if (subcommand === 'bet') {
+				await handleRaceBet(interaction, client, parimutuel);
+			} else if (subcommand === 'close') {
+				await handleRaceClose(interaction, client, parimutuel);
+			} else if (subcommand === 'result') {
+				await handleRaceResult(interaction, client, parimutuel);
+			} else if (subcommand === 'mybets') {
+				await handleRaceMyBets(interaction, client, parimutuel);
+			}
+			return;
+		}
 	}
 
 }
@@ -3565,5 +3512,473 @@ setInterval(() => {
 		processingCommands.delete(id);
 	}
 }, 30 * 60 * 1000);
+
+// パリミュチュエルコマンドハンドラー
+async function handleRaceCreate(interaction, client, parimutuel) {
+	try {
+		// 管理者権限チェック
+		if (!checkAdmin(interaction.member)) {
+			return interaction.reply({
+				content: '❌ このコマンドは管理者のみ使用できます',
+				ephemeral: true,
+			});
+		}
+
+		const raceId = interaction.options.getString('race_id');
+		const name = interaction.options.getString('name');
+		const candidatesStr = interaction.options.getString('candidates');
+		
+		if (!raceId || !name || !candidatesStr) {
+			return interaction.reply({
+				content: '❌ すべてのパラメータが必要です',
+				ephemeral: true,
+			});
+		}
+
+		// 候補者をパース（カンマ区切り）
+		const candidates = candidatesStr.split(',').map(c => c.trim()).filter(c => c.length > 0);
+		
+		if (candidates.length < 2) {
+			return interaction.reply({
+				content: '❌ 候補者は2名以上必要です',
+				ephemeral: true,
+			});
+		}
+
+		await interaction.deferReply();
+
+		const race = await parimutuel.createRace(raceId, name, candidates, interaction.user.id);
+
+		const embed = new EmbedBuilder()
+			.setTitle('🏁 レース作成完了')
+			.setDescription(`**${name}** のレースを作成しました`)
+			.addFields(
+				{ name: 'レースID', value: raceId, inline: true },
+				{ name: '候補者数', value: `${candidates.length}名`, inline: true },
+				{ name: 'ステータス', value: '受付中', inline: true },
+				{ name: '候補者', value: candidates.join(', '), inline: false }
+			)
+			.setColor(0x00ff00)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race Create] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
+
+async function handleRaceList(interaction, client, parimutuel) {
+	try {
+		await interaction.deferReply();
+
+		const races = parimutuel.getAllRaces();
+		
+		if (races.length === 0) {
+			return interaction.editReply({ content: '📋 現在開催中のレースはありません' });
+		}
+
+		const openRaces = races.filter(r => r.status === 'open');
+		const closedRaces = races.filter(r => r.status === 'closed');
+		const finishedRaces = races.filter(r => r.status === 'finished');
+
+		let description = '';
+		if (openRaces.length > 0) {
+			description += '**受付中**\n';
+			openRaces.forEach(race => {
+				description += `• ${race.name} (ID: ${race.id}) - ${race.candidates.length}名\n`;
+			});
+			description += '\n';
+		}
+		if (closedRaces.length > 0) {
+			description += '**締切済み**\n';
+			closedRaces.forEach(race => {
+				description += `• ${race.name} (ID: ${race.id})\n`;
+			});
+			description += '\n';
+		}
+		if (finishedRaces.length > 0) {
+			description += '**終了**\n';
+			finishedRaces.forEach(race => {
+				description += `• ${race.name} (ID: ${race.id})\n`;
+			});
+		}
+
+		const embed = new EmbedBuilder()
+			.setTitle('🏁 レース一覧')
+			.setDescription(description || 'レースがありません')
+			.setColor(0x0099ff)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race List] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
+
+async function handleRaceInfo(interaction, client, parimutuel) {
+	try {
+		const raceId = interaction.options.getString('race_id');
+		
+		if (!raceId) {
+			return interaction.reply({
+				content: '❌ レースIDを指定してください',
+				ephemeral: true,
+			});
+		}
+
+		await interaction.deferReply();
+
+		const race = parimutuel.getRace(raceId);
+		
+		if (!race) {
+			return interaction.editReply({ content: '❌ レースが見つかりません' });
+		}
+
+		const odds = parimutuel.calculateOdds(raceId);
+		const data = parimutuel.loadParimutuelData();
+		const bets = data.bets[raceId] || {};
+
+		// 全賭け金の合計
+		let totalPool = 0;
+		for (const betKey in bets) {
+			totalPool += bets[betKey].totalAmount;
+		}
+
+		// 各賭けの種類ごとのプール合計
+		const pools = {
+			tansho: 0,
+			fukusho: 0,
+			wide: 0,
+			sanrenpuku: 0,
+			sanrentan: 0,
+		};
+		for (const betKey in bets) {
+			const betType = bets[betKey].betType;
+			if (pools[betType] !== undefined) {
+				pools[betType] += bets[betKey].totalAmount;
+			}
+		}
+
+		let oddsText = '';
+		if (Object.keys(odds).length > 0) {
+			// 単勝オッズ
+			oddsText += '**単勝**\n';
+			for (const candidate of race.candidates) {
+				const key = `tansho_${candidate}`;
+				if (odds[key]) {
+					oddsText += `  ${candidate}: ${odds[key].display}\n`;
+				}
+			}
+			oddsText += '\n';
+
+			// 複勝オッズ
+			if (pools.fukusho > 0) {
+				oddsText += '**複勝**\n';
+				for (const candidate of race.candidates) {
+					const key = `fukusho_${candidate}`;
+					if (odds[key]) {
+						oddsText += `  ${candidate}: ${odds[key].display}\n`;
+					}
+				}
+				oddsText += '\n';
+			}
+
+			// ワイドオッズ（主要な組み合わせのみ）
+			if (pools.wide > 0) {
+				oddsText += '**ワイド** (主要な組み合わせ)\n';
+				let wideCount = 0;
+				for (const betKey in odds) {
+					if (betKey.startsWith('wide_') && wideCount < 5) {
+						const selections = betKey.replace('wide_', '').split('_');
+						oddsText += `  ${selections.join(' - ')}: ${odds[betKey].display}\n`;
+						wideCount++;
+					}
+				}
+				oddsText += '\n';
+			}
+
+			// 三連複・三連単オッズ（主要な組み合わせのみ）
+			if (pools.sanrenpuku > 0 || pools.sanrentan > 0) {
+				oddsText += '**三連複・三連単** (主要な組み合わせ)\n';
+				let comboCount = 0;
+				for (const betKey in odds) {
+					if ((betKey.startsWith('sanrenpuku_') || betKey.startsWith('sanrentan_')) && comboCount < 5) {
+						const type = betKey.startsWith('sanrenpuku_') ? '三連複' : '三連単';
+						const selections = betKey.replace(/^(sanrenpuku|sanrentan)_/, '').split('_');
+						oddsText += `  ${type} ${selections.join(' → ')}: ${odds[betKey].display}\n`;
+						comboCount++;
+					}
+				}
+			}
+		} else {
+			oddsText = 'まだ賭けがありません';
+		}
+
+		const statusText = race.status === 'open' ? '受付中' : race.status === 'closed' ? '締切済み' : '終了';
+		const resultText = race.result ? `結果: ${race.result.join(' → ')}` : '未確定';
+
+		const embed = new EmbedBuilder()
+			.setTitle(`🏁 ${race.name}`)
+			.addFields(
+				{ name: 'レースID', value: raceId, inline: true },
+				{ name: 'ステータス', value: statusText, inline: true },
+				{ name: '候補者数', value: `${race.candidates.length}名`, inline: true },
+				{ name: '総賭け金', value: `${ROMECOIN_EMOJI}${totalPool.toLocaleString()}`, inline: true },
+				{ name: '候補者', value: race.candidates.join(', '), inline: false }
+			)
+			.setColor(race.status === 'open' ? 0x00ff00 : race.status === 'closed' ? 0xffaa00 : 0x888888)
+			.setTimestamp();
+
+		// 各プールの合計を表示
+		const poolInfo = [];
+		if (pools.tansho > 0) poolInfo.push(`単勝: ${ROMECOIN_EMOJI}${pools.tansho.toLocaleString()}`);
+		if (pools.fukusho > 0) poolInfo.push(`複勝: ${ROMECOIN_EMOJI}${pools.fukusho.toLocaleString()}`);
+		if (pools.wide > 0) poolInfo.push(`ワイド: ${ROMECOIN_EMOJI}${pools.wide.toLocaleString()}`);
+		if (pools.sanrenpuku > 0) poolInfo.push(`三連複: ${ROMECOIN_EMOJI}${pools.sanrenpuku.toLocaleString()}`);
+		if (pools.sanrentan > 0) poolInfo.push(`三連単: ${ROMECOIN_EMOJI}${pools.sanrentan.toLocaleString()}`);
+		
+		if (poolInfo.length > 0) {
+			embed.addFields({ name: 'プール別賭け金', value: poolInfo.join(' | '), inline: false });
+		}
+
+		embed.addFields({ name: 'オッズ', value: oddsText || 'まだ賭けがありません', inline: false });
+
+		if (race.result) {
+			embed.addFields({ name: '結果', value: resultText, inline: false });
+		}
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race Info] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
+
+async function handleRaceBet(interaction, client, parimutuel) {
+	try {
+		const raceId = interaction.options.getString('race_id');
+		const betType = interaction.options.getString('bet_type');
+		const amount = interaction.options.getInteger('amount');
+		
+		await interaction.deferReply({ ephemeral: true });
+
+		const race = parimutuel.getRace(raceId);
+		
+		if (!race) {
+			return interaction.editReply({ content: '❌ レースが見つかりません' });
+		}
+
+		if (race.status !== 'open') {
+			return interaction.editReply({ content: '❌ このレースは既に締め切られています' });
+		}
+
+		let selections = [];
+		if (betType === 'tansho' || betType === 'fukusho') {
+			const selection = interaction.options.getString('selection1');
+			if (!selection) {
+				return interaction.editReply({ content: '❌ 選択を指定してください' });
+			}
+			selections = [selection];
+		} else if (betType === 'wide') {
+			const sel1 = interaction.options.getString('selection1');
+			const sel2 = interaction.options.getString('selection2');
+			if (!sel1 || !sel2) {
+				return interaction.editReply({ content: '❌ 3着以内の2名を選択してください' });
+			}
+			selections = [sel1, sel2];
+		} else if (betType === 'sanrenpuku' || betType === 'sanrentan') {
+			const sel1 = interaction.options.getString('selection1');
+			const sel2 = interaction.options.getString('selection2');
+			const sel3 = interaction.options.getString('selection3');
+			if (!sel1 || !sel2 || !sel3) {
+				return interaction.editReply({ content: '❌ 3名を選択してください' });
+			}
+			selections = [sel1, sel2, sel3];
+		}
+
+		const bet = await parimutuel.placeBet(interaction.user.id, raceId, betType, selections, amount, client);
+
+		const betTypeNames = {
+			tansho: '単勝',
+			fukusho: '複勝',
+			wide: 'ワイド',
+			sanrenpuku: '三連複',
+			sanrentan: '三連単',
+		};
+
+		const embed = new EmbedBuilder()
+			.setTitle('✅ 賭け完了')
+			.setDescription(`**${race.name}** への賭けが完了しました`)
+			.addFields(
+				{ name: '種類', value: betTypeNames[betType], inline: true },
+				{ name: '選択', value: selections.join(', '), inline: true },
+				{ name: '金額', value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`, inline: true }
+			)
+			.setColor(0x00ff00)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race Bet] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
+
+async function handleRaceClose(interaction, client, parimutuel) {
+	try {
+		// 管理者権限チェック
+		if (!checkAdmin(interaction.member)) {
+			return interaction.reply({
+				content: '❌ このコマンドは管理者のみ使用できます',
+				ephemeral: true,
+			});
+		}
+
+		const raceId = interaction.options.getString('race_id');
+		
+		if (!raceId) {
+			return interaction.reply({
+				content: '❌ レースIDを指定してください',
+				ephemeral: true,
+			});
+		}
+
+		await interaction.deferReply();
+
+		const race = parimutuel.closeRace(raceId);
+
+		const embed = new EmbedBuilder()
+			.setTitle('🔒 レース締切完了')
+			.setDescription(`**${race.name}** の受付を締め切りました`)
+			.addFields(
+				{ name: 'レースID', value: raceId, inline: true },
+				{ name: 'ステータス', value: '締切済み', inline: true }
+			)
+			.setColor(0xffaa00)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race Close] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
+
+async function handleRaceResult(interaction, client, parimutuel) {
+	try {
+		// 管理者権限チェック
+		if (!checkAdmin(interaction.member)) {
+			return interaction.reply({
+				content: '❌ このコマンドは管理者のみ使用できます',
+				ephemeral: true,
+			});
+		}
+
+		const raceId = interaction.options.getString('race_id');
+		const resultStr = interaction.options.getString('result');
+		
+		if (!raceId || !resultStr) {
+			return interaction.reply({
+				content: '❌ レースIDと結果を指定してください',
+				ephemeral: true,
+			});
+		}
+
+		await interaction.deferReply();
+
+		// 結果をパース（カンマ区切り、順番通り）
+		const result = resultStr.split(',').map(r => r.trim()).filter(r => r.length > 0);
+
+		const race = await parimutuel.setRaceResult(raceId, result, client);
+
+		const embed = new EmbedBuilder()
+			.setTitle('🏆 結果確定完了')
+			.setDescription(`**${race.name}** の結果を確定しました`)
+			.addFields(
+				{ name: 'レースID', value: raceId, inline: true },
+				{ name: '結果', value: result.join(' → '), inline: false }
+			)
+			.setColor(0x00ff00)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race Result] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
+
+async function handleRaceMyBets(interaction, client, parimutuel) {
+	try {
+		const raceId = interaction.options.getString('race_id');
+		
+		await interaction.deferReply({ ephemeral: true });
+
+		const userBets = parimutuel.getUserBets(interaction.user.id, raceId || null);
+
+		if (userBets.length === 0) {
+			return interaction.editReply({ content: '📋 賭けの記録がありません' });
+		}
+
+		const betTypeNames = {
+			tansho: '単勝',
+			fukusho: '複勝',
+			wide: 'ワイド',
+			sanrenpuku: '三連複',
+			sanrentan: '三連単',
+		};
+
+		let description = '';
+		for (const bet of userBets) {
+			const race = parimutuel.getRace(bet.raceId);
+			const raceName = race ? race.name : bet.raceId;
+			description += `**${raceName}**\n`;
+			description += `種類: ${betTypeNames[bet.betType]}\n`;
+			description += `選択: ${bet.selections.join(', ')}\n`;
+			description += `金額: ${ROMECOIN_EMOJI}${bet.amount.toLocaleString()}\n\n`;
+		}
+
+		const embed = new EmbedBuilder()
+			.setTitle('📋 あなたの賭け一覧')
+			.setDescription(description)
+			.setColor(0x0099ff)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race MyBets] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+		}
+	}
+}
 
 module.exports = { handleCommands };

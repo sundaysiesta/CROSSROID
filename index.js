@@ -707,6 +707,101 @@ client.once('clientReady', async (client) => {
 			),
 		new SlashCommandBuilder().setName('daily').setDescription('デイリーログインボーナスを受け取ります'),
 		new SlashCommandBuilder()
+			.setName('race')
+			.setDescription('パリミュチュエル方式のレース賭け機能')
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('create')
+					.setDescription('レースを作成します（管理者専用）')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID（一意の識別子）').setRequired(true)
+					)
+					.addStringOption((option) =>
+						option.setName('name').setDescription('レース名').setRequired(true)
+					)
+					.addStringOption((option) =>
+						option
+							.setName('candidates')
+							.setDescription('候補者名（カンマ区切り、例: 候補者1,候補者2,候補者3）')
+							.setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) => subcommand.setName('list').setDescription('開催中のレース一覧を表示します'))
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('info')
+					.setDescription('レース情報とオッズを表示します')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('bet')
+					.setDescription('レースに賭けます')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID').setRequired(true)
+					)
+					.addStringOption((option) =>
+						option
+							.setName('bet_type')
+							.setDescription('賭けの種類')
+							.setRequired(true)
+							.addChoices(
+								{ name: '単勝', value: 'tansho' },
+								{ name: '複勝', value: 'fukusho' },
+								{ name: 'ワイド', value: 'wide' },
+								{ name: '三連複', value: 'sanrenpuku' },
+								{ name: '三連単', value: 'sanrentan' }
+							)
+					)
+					.addIntegerOption((option) =>
+						option.setName('amount').setDescription('賭け金（最低100ロメコイン）').setRequired(true).setMinValue(100)
+					)
+					.addStringOption((option) =>
+						option.setName('selection1').setDescription('選択1（単勝・複勝: 1名、ワイド: 1名目、三連複・三連単: 1着）').setRequired(true)
+					)
+					.addStringOption((option) =>
+						option
+							.setName('selection2')
+							.setDescription('選択2（ワイド: 3着以内の2名目、三連複・三連単: 2着）')
+							.setRequired(false)
+					)
+					.addStringOption((option) =>
+						option.setName('selection3').setDescription('選択3（三連複・三連単: 3着）').setRequired(false)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('close')
+					.setDescription('レースの受付を締め切ります（管理者専用）')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID').setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('result')
+					.setDescription('レースの結果を確定します（管理者専用）')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID').setRequired(true)
+					)
+					.addStringOption((option) =>
+						option
+							.setName('result')
+							.setDescription('結果（カンマ区切り、順番通り、例: 1着,2着,3着）')
+							.setRequired(true)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('mybets')
+					.setDescription('自分の賭け一覧を表示します')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID（未指定時は全レース）').setRequired(false)
+					)
+			),
+		new SlashCommandBuilder()
 			.setName('bank')
 			.setDescription('黒須銀行機能')
 			.addSubcommand((subcommand) =>

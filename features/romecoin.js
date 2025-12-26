@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 const { getData, updateData, migrateData } = require('./dataAccess');
-const { ERRORLOG_CHANNEL_ID } = require('../constants');
+const { ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
 
 const ROMECOIN_DATA_FILE = path.join(__dirname, '..', 'romecoin_data.json');
 const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
@@ -119,8 +119,8 @@ async function getTotalBalance(userId) {
 // ロメコイン変更をログに記録
 async function logRomecoinChange(client, userId, previousBalance, newBalance, reason, metadata = {}) {
 	try {
-		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch(() => null);
-		if (!errorlog_channel) return;
+		const romecoin_log_channel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch(() => null);
+		if (!romecoin_log_channel) return;
 
 		const diff = newBalance - previousBalance;
 		const diffText = diff >= 0 ? `+${diff.toLocaleString()}` : `${diff.toLocaleString()}`;
@@ -144,7 +144,7 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 			embed.addFields({ name: '対象ユーザー', value: metadata.targetUserId, inline: true });
 		}
 
-		await errorlog_channel.send({ embeds: [embed] });
+		await romecoin_log_channel.send({ embeds: [embed] });
 	} catch (error) {
 		console.error('[Romecoin] ログ送信エラー:', error);
 	}
@@ -344,7 +344,7 @@ async function interactionCreate(interaction) {
 	if (interaction.isChatInputCommand() && interaction.commandName === 'romecoin_ranking') {
 		try {
 			const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-			const notionManager = require('./notionManager');
+			const notionManager = require('./notion');
 			const botUserId = interaction.client.user?.id;
 			
 			// クールダウン（30秒）
