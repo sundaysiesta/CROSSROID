@@ -1059,7 +1059,13 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 process.on('uncaughtException', async (error, origin) => {
 	console.error('Uncaught Exception:', error);
 	try {
-		if (!client || !client.isReady()) {
+		console.log(`[ErrorLog] uncaughtException処理開始: ERRORLOG_CHANNEL_ID=${ERRORLOG_CHANNEL_ID}`);
+		
+		if (!client) {
+			console.warn('[ErrorLog] クライアントがnullです。エラーログを送信できません。');
+			return;
+		}
+		if (!client.isReady()) {
 			console.warn('[ErrorLog] クライアントが準備完了していません。エラーログを送信できません。');
 			return;
 		}
@@ -1067,15 +1073,35 @@ process.on('uncaughtException', async (error, origin) => {
 			console.warn('[ErrorLog] ERRORLOG_CHANNEL_IDが設定されていません');
 			return;
 		}
+		
+		console.log(`[ErrorLog] チャンネル取得を試みます: ${ERRORLOG_CHANNEL_ID}`);
 		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch((err) => {
 			console.error('[ErrorLog] エラーログチャンネル取得エラー:', err);
+			console.error('[ErrorLog] エラー詳細:', JSON.stringify(err, null, 2));
 			return null;
 		});
+		
 		if (errorlog_channel) {
+			console.log(`[ErrorLog] チャンネル取得成功: ${errorlog_channel.name} (${errorlog_channel.id})`);
+			
+			// 送信権限を確認
+			const botMember = errorlog_channel.guild?.members.cache.get(client.user.id);
+			if (botMember) {
+				const permissions = errorlog_channel.permissionsFor(botMember);
+				if (!permissions || !permissions.has('SendMessages')) {
+					console.error(`[ErrorLog] チャンネルへの送信権限がありません。SendMessages: ${permissions?.has('SendMessages')}`);
+					return;
+				}
+			}
+			
 			const errorMessage = error.stack || error.toString();
 			const truncatedMessage = errorMessage.length > 1900 ? errorMessage.substring(0, 1900) + '...' : errorMessage;
-			await errorlog_channel.send({ content: `Uncaught Exception\n\`\`\`${truncatedMessage}\`\`\`` }).catch((err) => {
+			console.log(`[ErrorLog] エラーログ送信を試みます...`);
+			await errorlog_channel.send({ content: `Uncaught Exception\n\`\`\`${truncatedMessage}\`\`\`` }).then(() => {
+				console.log(`[ErrorLog] エラーログ送信成功`);
+			}).catch((err) => {
 				console.error('[ErrorLog] エラーログ送信に失敗:', err);
+				console.error('[ErrorLog] エラー詳細:', JSON.stringify(err, null, 2));
 			});
 		} else {
 			console.warn(`[ErrorLog] エラーログチャンネルが見つかりません (ID: ${ERRORLOG_CHANNEL_ID})`);
@@ -1083,6 +1109,7 @@ process.on('uncaughtException', async (error, origin) => {
 	} catch (e) {
 		// エラーハンドリング内でエラーが発生しても無視（無限ループを防ぐ）
 		console.error('エラーログ送信に失敗:', e);
+		console.error('エラースタック:', e.stack);
 	}
 	// プロセスを終了させない
 });
@@ -1090,7 +1117,13 @@ process.on('uncaughtException', async (error, origin) => {
 process.on('unhandledRejection', async (reason, promise) => {
 	console.error('Unhandled Rejection:', reason);
 	try {
-		if (!client || !client.isReady()) {
+		console.log(`[ErrorLog] unhandledRejection処理開始: ERRORLOG_CHANNEL_ID=${ERRORLOG_CHANNEL_ID}`);
+		
+		if (!client) {
+			console.warn('[ErrorLog] クライアントがnullです。エラーログを送信できません。');
+			return;
+		}
+		if (!client.isReady()) {
 			console.warn('[ErrorLog] クライアントが準備完了していません。エラーログを送信できません。');
 			return;
 		}
@@ -1098,15 +1131,35 @@ process.on('unhandledRejection', async (reason, promise) => {
 			console.warn('[ErrorLog] ERRORLOG_CHANNEL_IDが設定されていません');
 			return;
 		}
+		
+		console.log(`[ErrorLog] チャンネル取得を試みます: ${ERRORLOG_CHANNEL_ID}`);
 		const errorlog_channel = await client.channels.fetch(ERRORLOG_CHANNEL_ID).catch((err) => {
 			console.error('[ErrorLog] エラーログチャンネル取得エラー:', err);
+			console.error('[ErrorLog] エラー詳細:', JSON.stringify(err, null, 2));
 			return null;
 		});
+		
 		const message = reason instanceof Error ? reason.stack : String(reason);
 		if (errorlog_channel) {
+			console.log(`[ErrorLog] チャンネル取得成功: ${errorlog_channel.name} (${errorlog_channel.id})`);
+			
+			// 送信権限を確認
+			const botMember = errorlog_channel.guild?.members.cache.get(client.user.id);
+			if (botMember) {
+				const permissions = errorlog_channel.permissionsFor(botMember);
+				if (!permissions || !permissions.has('SendMessages')) {
+					console.error(`[ErrorLog] チャンネルへの送信権限がありません。SendMessages: ${permissions?.has('SendMessages')}`);
+					return;
+				}
+			}
+			
 			const truncatedMessage = message.length > 1900 ? message.substring(0, 1900) + '...' : message;
-			await errorlog_channel.send({ content: `Unhandled Rejection\n\`\`\`${truncatedMessage}\`\`\`` }).catch((err) => {
+			console.log(`[ErrorLog] エラーログ送信を試みます...`);
+			await errorlog_channel.send({ content: `Unhandled Rejection\n\`\`\`${truncatedMessage}\`\`\`` }).then(() => {
+				console.log(`[ErrorLog] エラーログ送信成功`);
+			}).catch((err) => {
 				console.error('[ErrorLog] エラーログ送信に失敗:', err);
+				console.error('[ErrorLog] エラー詳細:', JSON.stringify(err, null, 2));
 			});
 		} else {
 			console.warn(`[ErrorLog] エラーログチャンネルが見つかりません (ID: ${ERRORLOG_CHANNEL_ID})`);
@@ -1114,6 +1167,7 @@ process.on('unhandledRejection', async (reason, promise) => {
 	} catch (e) {
 		// エラーハンドリング内でエラーが発生しても無視（無限ループを防ぐ）
 		console.error('エラーログ送信に失敗:', e);
+		console.error('エラースタック:', e.stack);
 	}
 	// プロセスを終了させない
 });

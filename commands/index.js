@@ -47,7 +47,7 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'anonymous') {
 			const commandKey = `anonymous_${interaction.user.id}_${interaction.id}`;
 			if (processingCommands.has(commandKey))
-				return interaction.reply({ content: '処理中です。', ephemeral: true });
+				return interaction.reply({ content: '処理中です。', flags: MessageFlags.Ephemeral });
 			processingCommands.add(commandKey);
 
 			const now = Date.now();
@@ -78,7 +78,7 @@ async function handleCommands(interaction, client) {
 			if (elapsed < cooldownTime) {
 				processingCommands.delete(commandKey);
 				const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
-				return interaction.reply({ content: `連投制限中です（残り${remainSec}秒）`, ephemeral: true });
+				return interaction.reply({ content: `連投制限中です（残り${remainSec}秒）`, flags: MessageFlags.Ephemeral });
 			}
 
 			const content = interaction.options.getString('内容');
@@ -93,7 +93,7 @@ async function handleCommands(interaction, client) {
 				const errEmbed = new EmbedBuilder()
 					.setColor(0xff0000)
 					.setDescription('❌ エラー: 改行不可/256文字以内/メンション不可');
-				return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			try {
@@ -128,12 +128,12 @@ async function handleCommands(interaction, client) {
 				const successEmbed = new EmbedBuilder()
 					.setColor(0x00ff00)
 					.setDescription(`✅ 送信しました (本日${usageData.count}回目)`);
-				await interaction.reply({ embeds: [successEmbed], ephemeral: true }).catch((err) => {
+				await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch((err) => {
 					if (err.code !== 10062) console.error('Silent Error:', err);
 				});
 			} catch (e) {
 				console.error(e);
-				if (!interaction.replied) await interaction.reply({ content: 'エラー', ephemeral: true });
+				if (!interaction.replied) await interaction.reply({ content: 'エラー', flags: MessageFlags.Ephemeral });
 			} finally {
 				processingCommands.delete(commandKey);
 			}
@@ -148,12 +148,12 @@ async function handleCommands(interaction, client) {
 			if (now - last < BUMP_COOLDOWN_MS)
 				return interaction.reply({
 					embeds: [new EmbedBuilder().setColor(0xffa500).setDescription('⏳ クールダウン中')],
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			bumpCooldowns.set(userId, now);
 			await interaction.reply({
 				embeds: [new EmbedBuilder().setColor(0x00ff00).setDescription('👊 Bumpしました')],
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 			return;
 		}
@@ -164,7 +164,7 @@ async function handleCommands(interaction, client) {
 			if (now - (randomMentionCooldowns.get(userId) || 0) < RANDOM_MENTION_COOLDOWN_MS)
 				return interaction.reply({
 					embeds: [new EmbedBuilder().setColor(0xffa500).setDescription('⏳ Cooling down')],
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			randomMentionCooldowns.set(userId, now);
 			const members = await interaction.guild.members.fetch();
@@ -195,7 +195,7 @@ async function handleCommands(interaction, client) {
 							.setDescription('データがまだありません。')
 							.setColor(0x2f3136),
 					],
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -204,7 +204,7 @@ async function handleCommands(interaction, client) {
 				duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 			} catch (e) {
 				console.error(e);
-				return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
+				return interaction.reply({ content: 'データ読み込みエラー', flags: MessageFlags.Ephemeral });
 			}
 
 			// Convert object to array & Sanitize
@@ -287,14 +287,14 @@ async function handleCommands(interaction, client) {
 			if (!targetUser) {
 				return interaction.reply({
 					content: '❌ ユーザーを指定してください。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
 			if (!amount || amount <= 0) {
 				return interaction.reply({
 					content: '❌ 有効な金額（1以上）を指定してください。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -302,7 +302,7 @@ async function handleCommands(interaction, client) {
 			if (targetUser.id === interaction.user.id) {
 				return interaction.reply({
 					content: '❌ 自分自身にロメコインを譲渡することはできません。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -310,7 +310,7 @@ async function handleCommands(interaction, client) {
 			if (targetUser.bot) {
 				return interaction.reply({
 					content: '❌ Botにロメコインを譲渡することはできません。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -324,7 +324,7 @@ async function handleCommands(interaction, client) {
 			if (!hasGenerationRole) {
 				return interaction.reply({
 					content: '❌ ロメコインを譲渡するには世代ロールが必要です。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -341,7 +341,7 @@ async function handleCommands(interaction, client) {
 						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${amount}`, inline: true }
 					)
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			// 残高チェック
@@ -354,7 +354,7 @@ async function handleCommands(interaction, client) {
 						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${amount}`, inline: true }
 					)
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 			
 			// ロメコインを譲渡
@@ -418,7 +418,7 @@ async function handleCommands(interaction, client) {
 				console.error('[Give] エラー:', error);
 				return interaction.reply({
 					content: '❌ ロメコインの譲渡中にエラーが発生しました。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 			return;
@@ -436,7 +436,7 @@ async function handleCommands(interaction, client) {
 							.setDescription('データがまだありません。')
 							.setColor(0x2f3136),
 					],
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -445,7 +445,7 @@ async function handleCommands(interaction, client) {
 				jankenData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 			} catch (e) {
 				console.error(e);
-				return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
+				return interaction.reply({ content: 'データ読み込みエラー', flags: MessageFlags.Ephemeral });
 			}
 
 			// Convert object to array & Sanitize
@@ -531,7 +531,7 @@ async function handleCommands(interaction, client) {
 						'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
 					)
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			// 即座にロックをかける（重複対戦を防ぐ）
@@ -546,7 +546,7 @@ async function handleCommands(interaction, client) {
 						.setTitle('❌ エラー')
 						.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
 						.setColor(0xff0000);
-					return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+					return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 				}
 
 			const opponentUser = interaction.options.getUser('対戦相手');
@@ -555,7 +555,7 @@ async function handleCommands(interaction, client) {
 			if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
 				return interaction.reply({
 					content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
@@ -575,14 +575,14 @@ async function handleCommands(interaction, client) {
 							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 						)
 						.setColor(0xff0000);
-					return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+					return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 				}
 
 				// 相手が指定されている場合のバリデーション
 				if (opponentUser) {
 					if (opponentUser.id === userId || opponentUser.bot) {
 						clearUserGame(userId);
-						return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+						return interaction.reply({ content: '自分自身やBotとは対戦できません。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 対戦相手のロメコインチェック（所持金 + 預金）
@@ -607,7 +607,7 @@ async function handleCommands(interaction, client) {
 								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
-						return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+						return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 				}
 
@@ -630,7 +630,7 @@ async function handleCommands(interaction, client) {
 				if (now - lastUsed < CD_DURATION) {
 					clearUserGame(userId);
 					const h = Math.ceil((CD_DURATION - (now - lastUsed)) / (60 * 60 * 1000));
-					return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, ephemeral: true });
+					return interaction.reply({ content: `🔫 整備中です。あと ${h}時間 お待ちください。`, flags: MessageFlags.Ephemeral });
 				}
 
 			// UI
@@ -712,7 +712,7 @@ async function handleCommands(interaction, client) {
 						.catch(() => null);
 
 					if (!actualOpponentMember) {
-						return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
+						return i.reply({ content: 'メンバー情報を取得できませんでした。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 被爆ロールチェック：受諾者が被爆ロールを持っている場合は受諾できない
@@ -721,16 +721,16 @@ async function handleCommands(interaction, client) {
 							.setTitle('❌ エラー')
 							.setDescription('被爆ロールがついているため、対戦を受諾できません。')
 							.setColor(0xff0000);
-						return i.reply({ embeds: [errorEmbed], ephemeral: true });
+						return i.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 
 					if (actualOpponentUser.bot) {
-						return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
+						return i.reply({ content: 'Botと対戦することはできません。', flags: MessageFlags.Ephemeral });
 					}
 				} else {
 					actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
 					if (!actualOpponentMember) {
-						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', flags: MessageFlags.Ephemeral });
 					}
 				}
 
@@ -781,7 +781,7 @@ async function handleCommands(interaction, client) {
 
 				gameCollector.on('collect', async (move) => {
 					if (move.user.id !== state.turn)
-						return move.reply({ content: 'あなたの番ではありません。', ephemeral: true });
+						return move.reply({ content: 'あなたの番ではありません。', flags: MessageFlags.Ephemeral });
 
 					// 完全ランダム（シリンダーの結果のみ）
 					const isHit = cylinder[state.current] === 1;
@@ -947,7 +947,7 @@ async function handleCommands(interaction, client) {
 				clearUserGame(userId);
 				console.error('duel_russianコマンドエラー:', error);
 				if (!interaction.replied && !interaction.deferred) {
-					await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+					await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 				}
 			}
 			return;
@@ -958,16 +958,16 @@ async function handleCommands(interaction, client) {
 		if (ADMIN_COMMANDS.includes(interaction.commandName)) {
 			// Permission Check
 			if (!interaction.member) {
-				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
 			}
 			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 			}
 
 			// Defer Reply
 			try {
 				if (!interaction.deferred && !interaction.replied) {
-					await interaction.deferReply({ ephemeral: true });
+					await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 				}
 			} catch (deferErr) {
 				if (deferErr.code === 10062 || deferErr.code === 40060) return; // Interaction expired
@@ -1319,14 +1319,24 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'monthly_ranking_rewards') {
 			// 権限チェック
 			if (!interaction.member) {
-				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
 			}
 			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 			}
 
 			try {
-				await interaction.deferReply({ ephemeral: true });
+				// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+				try {
+					if (!interaction.deferred && !interaction.replied) {
+						await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+					}
+				} catch (deferErr) {
+					if (deferErr.code === 10062 || deferErr.code === 40060) {
+						return; // インタラクションがタイムアウト
+					}
+					throw deferErr;
+				}
 
 				// 賞金額の定義（MDファイルの通り）
 				const rewards = {
@@ -1489,14 +1499,24 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'popularity_championship_rewards') {
 			// 権限チェック
 			if (!interaction.member) {
-				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
 			}
 			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 			}
 
 			try {
-				await interaction.deferReply({ ephemeral: true });
+				// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+				try {
+					if (!interaction.deferred && !interaction.replied) {
+						await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+					}
+				} catch (deferErr) {
+					if (deferErr.code === 10062 || deferErr.code === 40060) {
+						return; // インタラクションがタイムアウト
+					}
+					throw deferErr;
+				}
 
 				// 月間ランキングの賞金額の2倍（MDファイルの通り）
 				const rewards = {
@@ -1659,14 +1679,14 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'admin_romecoin_add') {
 			// 権限チェック
 			if (!interaction.member) {
-				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
 			}
 			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 			}
 
 			try {
-				await interaction.deferReply({ ephemeral: true });
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
 				const targetUser = interaction.options.getUser('user');
 				const amount = interaction.options.getInteger('amount');
@@ -1745,17 +1765,37 @@ async function handleCommands(interaction, client) {
 					.setTimestamp()
 					.setFooter({ text: `実行者: ${interaction.user.tag}` });
 
-				await interaction.editReply({ embeds: [successEmbed] });
+				if (interaction.deferred || interaction.replied) {
+					await interaction.editReply({ embeds: [successEmbed] }).catch(() => {});
+				} else {
+					await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch(() => {});
+				}
 			} catch (error) {
 				console.error('ロメコイン増額エラー:', error);
-				await interaction.editReply({
-					embeds: [
-						new EmbedBuilder()
-							.setTitle('❌ エラー')
-							.setColor(0xff0000)
-							.setDescription(`ロメコインの増額中にエラーが発生しました: ${error.message}`),
-					],
-				});
+				try {
+					if (interaction.deferred || interaction.replied) {
+						await interaction.editReply({
+							embeds: [
+								new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setColor(0xff0000)
+									.setDescription(`ロメコインの増額中にエラーが発生しました: ${error.message}`),
+							],
+						}).catch(() => {});
+					} else {
+						await interaction.reply({
+							embeds: [
+								new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setColor(0xff0000)
+									.setDescription(`ロメコインの増額中にエラーが発生しました: ${error.message}`),
+							],
+							flags: MessageFlags.Ephemeral,
+						}).catch(() => {});
+					}
+				} catch (replyErr) {
+					console.error('エラーレスポンス送信失敗:', replyErr);
+				}
 			}
 			return;
 		}
@@ -1763,14 +1803,24 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'admin_romecoin_deduct') {
 			// 権限チェック
 			if (!interaction.member) {
-				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
 			}
 			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 			}
 
 			try {
-				await interaction.deferReply({ ephemeral: true });
+				// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+				try {
+					if (!interaction.deferred && !interaction.replied) {
+						await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+					}
+				} catch (deferErr) {
+					if (deferErr.code === 10062 || deferErr.code === 40060) {
+						return; // インタラクションがタイムアウト
+					}
+					throw deferErr;
+				}
 
 				const targetUser = interaction.options.getUser('user');
 				const amount = interaction.options.getInteger('amount');
@@ -1838,17 +1888,37 @@ async function handleCommands(interaction, client) {
 					.setTimestamp()
 					.setFooter({ text: `実行者: ${interaction.user.tag}` });
 
-				await interaction.editReply({ embeds: [successEmbed] });
+				if (interaction.deferred || interaction.replied) {
+					await interaction.editReply({ embeds: [successEmbed] }).catch(() => {});
+				} else {
+					await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch(() => {});
+				}
 			} catch (error) {
 				console.error('ロメコイン減額エラー:', error);
-				await interaction.editReply({
-					embeds: [
-						new EmbedBuilder()
-							.setTitle('❌ エラー')
-							.setColor(0xff0000)
-							.setDescription(`ロメコインの減額中にエラーが発生しました: ${error.message}`),
-					],
-				});
+				try {
+					if (interaction.deferred || interaction.replied) {
+						await interaction.editReply({
+							embeds: [
+								new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setColor(0xff0000)
+									.setDescription(`ロメコインの減額中にエラーが発生しました: ${error.message}`),
+							],
+						}).catch(() => {});
+					} else {
+						await interaction.reply({
+							embeds: [
+								new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setColor(0xff0000)
+									.setDescription(`ロメコインの減額中にエラーが発生しました: ${error.message}`),
+							],
+							flags: MessageFlags.Ephemeral,
+						}).catch(() => {});
+					}
+				} catch (replyErr) {
+					console.error('エラーレスポンス送信失敗:', replyErr);
+				}
 			}
 			return;
 		}
@@ -1879,7 +1949,7 @@ async function handleCommands(interaction, client) {
 							if (!targetId && !targetWacchoi) {
 								return await interaction.followUp({
 									content: '❌ メッセージからIDまたはワッチョイを読み取れませんでした。',
-									ephemeral: true,
+									flags: MessageFlags.Ephemeral,
 								});
 							}
 
@@ -1913,7 +1983,7 @@ async function handleCommands(interaction, client) {
 							if (foundMember) {
 								return await interaction.followUp({
 									content: `🕵️ **特定成功**\nユーザー: ${foundMember} (${foundMember.user.tag})\nUID: \`${foundMember.id}\`\n根拠: ${reason}`,
-									ephemeral: true,
+									flags: MessageFlags.Ephemeral,
 								});
 							} else {
 								return await interaction.followUp({
@@ -1922,22 +1992,22 @@ async function handleCommands(interaction, client) {
 									}, Wacchoi: ${
 										targetWacchoi || 'None'
 									})\n※ユーザーが退出したか、日付計算の不一致の可能性があります。`,
-									ephemeral: true,
+									flags: MessageFlags.Ephemeral,
 								});
 							}
 						}
 					}
 					return await interaction.followUp({
 						content: '❌ 匿名メッセージとして認識できませんでした。',
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				} else {
-					return await interaction.followUp({ content: '⛔ 権限がありません。', ephemeral: true });
+					return await interaction.followUp({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 				}
 			} catch (e) {
 				console.error('Anonymous Disclosure Error:', e);
 				await interaction
-					.followUp({ content: '❌ 処理中にエラーが発生しました。', ephemeral: true })
+					.followUp({ content: '❌ 処理中にエラーが発生しました。', flags: MessageFlags.Ephemeral })
 					.catch(() => {});
 			}
 		}
@@ -1956,7 +2026,7 @@ async function handleCommands(interaction, client) {
 						'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
 					)
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			// 即座にロックをかける（重複対戦を防ぐ）
@@ -1970,7 +2040,7 @@ async function handleCommands(interaction, client) {
 					.setTitle('❌ エラー')
 					.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			const opponentUser = interaction.options.getUser('対戦相手');
@@ -1979,7 +2049,7 @@ async function handleCommands(interaction, client) {
 			if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
 				return interaction.reply({
 					content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
@@ -2001,7 +2071,7 @@ async function handleCommands(interaction, client) {
 						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 					)
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			// ロールチェック（世代ロール必須）- 挑戦者のみ
@@ -2014,7 +2084,7 @@ async function handleCommands(interaction, client) {
 				clearUserGame(userId);
 				return interaction.reply({
 					content: 'あなたは決闘に参加するための世代ロールを持っていません。',
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -2022,11 +2092,11 @@ async function handleCommands(interaction, client) {
 			if (opponentUser) {
 				if (opponentUser.id === userId) {
 					clearUserGame(userId);
-					return interaction.reply({ content: '自分自身と決闘することはできません。', ephemeral: true });
+					return interaction.reply({ content: '自分自身と決闘することはできません。', flags: MessageFlags.Ephemeral });
 				}
 				if (opponentUser.bot) {
 					clearUserGame(userId);
-					return interaction.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
+					return interaction.reply({ content: 'Botと決闘することはできません。', flags: MessageFlags.Ephemeral });
 				}
 
 				const opponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
@@ -2034,7 +2104,7 @@ async function handleCommands(interaction, client) {
 					clearUserGame(userId);
 					return interaction.reply({
 						content: '対戦相手のメンバー情報を取得できませんでした。',
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -2045,7 +2115,7 @@ async function handleCommands(interaction, client) {
 					clearUserGame(userId);
 					return interaction.reply({
 						content: '対戦相手は決闘に参加するための世代ロールを持っていません。',
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 			}
@@ -2106,7 +2176,7 @@ async function handleCommands(interaction, client) {
 						.catch(() => null);
 
 					if (!actualOpponentMember) {
-						return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
+						return i.reply({ content: 'メンバー情報を取得できませんでした。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 被爆ロールチェック：受諾者が被爆ロールを持っている場合は受諾できない
@@ -2115,7 +2185,7 @@ async function handleCommands(interaction, client) {
 							.setTitle('❌ エラー')
 							.setDescription('被爆ロールがついているため、対戦を受諾できません。')
 							.setColor(0xff0000);
-						return i.reply({ embeds: [errorEmbed], ephemeral: true });
+						return i.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 
 					// 受諾者のロールチェック
@@ -2127,12 +2197,12 @@ async function handleCommands(interaction, client) {
 					if (!isOpponentEligible) {
 						return i.reply({
 							content: 'あなたは決闘に参加するための世代ロールを持っていません。',
-							ephemeral: true,
+							flags: MessageFlags.Ephemeral,
 						});
 					}
 
 					if (actualOpponentUser.bot) {
-						return i.reply({ content: 'Botと決闘することはできません。', ephemeral: true });
+						return i.reply({ content: 'Botと決闘することはできません。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 受諾者のロメコインチェック（所持金 + 預金）
@@ -2157,12 +2227,12 @@ async function handleCommands(interaction, client) {
 								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
-						return i.reply({ embeds: [errorEmbed], ephemeral: true });
+						return i.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 				} else {
 					actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
 					if (!actualOpponentMember) {
-						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 対戦相手のロメコインチェック（所持金 + 預金）
@@ -2187,7 +2257,7 @@ async function handleCommands(interaction, client) {
 								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
-						return i.reply({ embeds: [errorEmbed], ephemeral: true });
+						return i.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 				}
 
@@ -2421,7 +2491,7 @@ async function handleCommands(interaction, client) {
 			if (interaction.deferred || interaction.replied) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });
 			}
-			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 		}
 		return;
 	}
@@ -2436,7 +2506,7 @@ async function handleCommands(interaction, client) {
 			if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
 				return interaction.reply({
 					content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 			const isOpenChallenge = !opponentUser; // 相手が指定されていない場合は誰でも挑戦可能
@@ -2455,13 +2525,13 @@ async function handleCommands(interaction, client) {
 						{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 					)
 					.setColor(0xff0000);
-				return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+				return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 			}
 
 			// 相手が指定されている場合のバリデーション
 			if (opponentUser) {
 				if (opponentUser.id === userId || opponentUser.bot) {
-					return interaction.reply({ content: '自分自身やBotとは対戦できません。', ephemeral: true });
+					return interaction.reply({ content: '自分自身やBotとは対戦できません。', flags: MessageFlags.Ephemeral });
 				}
 
 				// 対戦相手のロメコインチェック（所持金 + 預金）
@@ -2480,7 +2550,7 @@ async function handleCommands(interaction, client) {
 							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet}`, inline: true }
 						)
 						.setColor(0xff0000);
-					return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+					return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 				}
 			}
 
@@ -2539,7 +2609,7 @@ async function handleCommands(interaction, client) {
 						.catch(() => null);
 
 					if (!actualOpponentMember) {
-						return i.reply({ content: 'メンバー情報を取得できませんでした。', ephemeral: true });
+						return i.reply({ content: 'メンバー情報を取得できませんでした。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 被爆ロールチェック：受諾者が被爆ロールを持っている場合は受諾できない
@@ -2548,11 +2618,11 @@ async function handleCommands(interaction, client) {
 							.setTitle('❌ エラー')
 							.setDescription('被爆ロールがついているため、対戦を受諾できません。')
 							.setColor(0xff0000);
-						return i.reply({ embeds: [errorEmbed], ephemeral: true });
+						return i.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 
 					if (actualOpponentUser.bot) {
-						return i.reply({ content: 'Botと対戦することはできません。', ephemeral: true });
+						return i.reply({ content: 'Botと対戦することはできません。', flags: MessageFlags.Ephemeral });
 					}
 
 					// 受諾者のロメコインチェック（所持金 + 預金）
@@ -2577,12 +2647,12 @@ async function handleCommands(interaction, client) {
 								{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
 							)
 							.setColor(0xff0000);
-						return i.reply({ embeds: [errorEmbed], ephemeral: true });
+						return i.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
 					}
 				} else {
 					actualOpponentMember = await interaction.guild.members.fetch(opponentUser.id).catch(() => null);
 					if (!actualOpponentMember) {
-						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', ephemeral: true });
+						return i.reply({ content: '対戦相手のメンバー情報を取得できませんでした。', flags: MessageFlags.Ephemeral });
 					}
 				}
 
@@ -2627,7 +2697,7 @@ async function handleCommands(interaction, client) {
 
 				gameCollector.on('collect', async (move) => {
 					if (move.user.id !== state.turn) {
-						return move.reply({ content: 'あなたの番ではありません。', ephemeral: true });
+						return move.reply({ content: 'あなたの番ではありません。', flags: MessageFlags.Ephemeral });
 					}
 
 					const isHit = cylinder[state.current] === 1;
@@ -2849,7 +2919,7 @@ async function handleCommands(interaction, client) {
 			if (interaction.deferred || interaction.replied) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });
 			}
-			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 		}
 		return;
 	}
@@ -2867,7 +2937,7 @@ async function handleCommands(interaction, client) {
 							.setDescription('データがまだありません。')
 							.setColor(0x2f3136),
 					],
-					ephemeral: true,
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -2876,7 +2946,7 @@ async function handleCommands(interaction, client) {
 				duelData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 			} catch (e) {
 				console.error('ランキングデータ読み込みエラー:', e);
-				return interaction.reply({ content: 'データ読み込みエラー', ephemeral: true });
+				return interaction.reply({ content: 'データ読み込みエラー', flags: MessageFlags.Ephemeral });
 			}
 
 			// オブジェクトを配列に変換
@@ -2924,7 +2994,7 @@ async function handleCommands(interaction, client) {
 			if (interaction.deferred || interaction.replied) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });
 			}
-			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 		}
 		return;
 	}
@@ -2994,7 +3064,7 @@ async function handleCommands(interaction, client) {
 			if (interaction.deferred || interaction.replied) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });
 			}
-			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 		}
 		return;
 	}
@@ -3047,7 +3117,7 @@ async function handleCommands(interaction, client) {
 					.setDescription('購入済みの商品はありません。\n`/shop`で商品を確認できます。')
 					.setTimestamp();
 
-				return interaction.reply({ embeds: [embed], ephemeral: true });
+				return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 			}
 
 			const itemsList = purchasedItems
@@ -3063,13 +3133,13 @@ async function handleCommands(interaction, client) {
 				.setDescription(`購入済みの商品 (${purchasedItems.length}件)\n\n${itemsList}`)
 				.setTimestamp();
 
-			await interaction.reply({ embeds: [embed], ephemeral: true });
+			await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 		} catch (error) {
 			console.error('バックパックコマンドエラー:', error);
 			if (interaction.deferred || interaction.replied) {
 				return interaction.editReply({ content: 'エラーが発生しました。' });
 			}
-			return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+			return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 		}
 		return;
 	}
@@ -3093,7 +3163,7 @@ async function handleCommands(interaction, client) {
 					const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
 					return interaction.reply({
 						content: `⏰ サーバー間クールダウン中です（残り${remainSec}秒）`,
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3130,7 +3200,7 @@ async function handleCommands(interaction, client) {
 				if (!item) {
 					return interaction.reply({
 						content: '❌ 無効な商品IDです。',
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3141,7 +3211,7 @@ async function handleCommands(interaction, client) {
 				if (shopData[userId][item.id]) {
 					return interaction.reply({
 						content: `❌ この商品は既に購入済みです。`,
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3150,7 +3220,7 @@ async function handleCommands(interaction, client) {
 				if (balance < item.price) {
 					return interaction.reply({
 						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3182,13 +3252,13 @@ async function handleCommands(interaction, client) {
 
 				const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
 
-				await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
+				await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], flags: MessageFlags.Ephemeral });
 			} catch (error) {
 				console.error('ショップ商品選択エラー:', error);
 				if (interaction.deferred || interaction.replied) {
 					return interaction.editReply({ content: 'エラーが発生しました。' });
 				}
-				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+				return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 			}
 			return;
 		}
@@ -3213,7 +3283,7 @@ async function handleCommands(interaction, client) {
 					const remainSec = Math.ceil((cooldownTime - elapsed) / 1000);
 					return interaction.reply({
 						content: `⏰ サーバー間クールダウン中です（残り${remainSec}秒）`,
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3250,7 +3320,7 @@ async function handleCommands(interaction, client) {
 				if (!item) {
 					return interaction.reply({
 						content: '❌ 無効な商品IDです。',
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3261,7 +3331,7 @@ async function handleCommands(interaction, client) {
 				if (shopData[userId][item.id]) {
 					return interaction.reply({
 						content: `❌ この商品は既に購入済みです。`,
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3270,7 +3340,7 @@ async function handleCommands(interaction, client) {
 				if (balance < item.price) {
 					return interaction.reply({
 						content: `❌ ロメコインが不足しています。\n必要: ${ROMECOIN_EMOJI}${item.price.toLocaleString()}\n所持: ${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3279,7 +3349,7 @@ async function handleCommands(interaction, client) {
 				if (!member) {
 					return interaction.reply({
 						content: '❌ メンバー情報を取得できませんでした。',
-						ephemeral: true,
+						flags: MessageFlags.Ephemeral,
 					});
 				}
 
@@ -3371,7 +3441,7 @@ async function handleCommands(interaction, client) {
 				if (interaction.deferred || interaction.replied) {
 					return interaction.editReply({ content: 'エラーが発生しました。' });
 				}
-				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+				return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 			}
 			return;
 		}
@@ -3391,7 +3461,7 @@ async function handleCommands(interaction, client) {
 				if (interaction.deferred || interaction.replied) {
 					return interaction.editReply({ content: 'エラーが発生しました。' });
 				}
-				return interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+				return interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 			}
 			return;
 		}
@@ -3444,14 +3514,14 @@ async function handleCommands(interaction, client) {
 		if (interaction.commandName === 'admin_restore_file') {
 			// 権限チェック
 			if (!interaction.member) {
-				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
 			}
 			if (!(await checkAdmin(interaction.member))) {
-				return interaction.reply({ content: '⛔ 権限がありません。', ephemeral: true });
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
 			}
 
 			try {
-				await interaction.deferReply({ ephemeral: true });
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
 				const fileName = interaction.options.getString('file_name');
 				const messageId = interaction.options.getString('message_id');
@@ -3532,7 +3602,7 @@ async function handleCommands(interaction, client) {
 			} catch (error) {
 				console.error('[Romecoin] コマンドエラー:', error);
 				if (!interaction.replied && !interaction.deferred) {
-					await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+					await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
 				} else {
 					await interaction.editReply({ content: 'エラーが発生しました。' });
 				}
@@ -3590,7 +3660,7 @@ async function handleRaceCreate(interaction, client, parimutuel) {
 		if (!checkAdmin(interaction.member)) {
 			return interaction.reply({
 				content: '❌ このコマンドは管理者のみ使用できます',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3601,7 +3671,7 @@ async function handleRaceCreate(interaction, client, parimutuel) {
 		if (!raceId || !name || !candidatesStr) {
 			return interaction.reply({
 				content: '❌ すべてのパラメータが必要です',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3611,7 +3681,7 @@ async function handleRaceCreate(interaction, client, parimutuel) {
 		if (candidates.length < 2) {
 			return interaction.reply({
 				content: '❌ 候補者は2名以上必要です',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3637,7 +3707,7 @@ async function handleRaceCreate(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }
@@ -3690,7 +3760,7 @@ async function handleRaceList(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }
@@ -3702,7 +3772,7 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 		if (!raceId) {
 			return interaction.reply({
 				content: '❌ レースIDを指定してください',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3833,7 +3903,7 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }
@@ -3844,7 +3914,17 @@ async function handleRaceBet(interaction, client, parimutuel) {
 		const betType = interaction.options.getString('bet_type');
 		const amount = interaction.options.getInteger('amount');
 		
-		await interaction.deferReply({ ephemeral: true });
+		// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+		try {
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+			}
+		} catch (deferErr) {
+			if (deferErr.code === 10062 || deferErr.code === 40060) {
+				return; // インタラクションがタイムアウト
+			}
+			throw deferErr;
+		}
 
 		const race = parimutuel.getRace(raceId);
 		
@@ -3907,7 +3987,7 @@ async function handleRaceBet(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }
@@ -3918,7 +3998,7 @@ async function handleRaceClose(interaction, client, parimutuel) {
 		if (!checkAdmin(interaction.member)) {
 			return interaction.reply({
 				content: '❌ このコマンドは管理者のみ使用できます',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3927,7 +4007,7 @@ async function handleRaceClose(interaction, client, parimutuel) {
 		if (!raceId) {
 			return interaction.reply({
 				content: '❌ レースIDを指定してください',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3951,7 +4031,7 @@ async function handleRaceClose(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }
@@ -3962,7 +4042,7 @@ async function handleRaceResult(interaction, client, parimutuel) {
 		if (!checkAdmin(interaction.member)) {
 			return interaction.reply({
 				content: '❌ このコマンドは管理者のみ使用できます',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3972,7 +4052,7 @@ async function handleRaceResult(interaction, client, parimutuel) {
 		if (!raceId || !resultStr) {
 			return interaction.reply({
 				content: '❌ レースIDと結果を指定してください',
-				ephemeral: true,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
@@ -3999,7 +4079,7 @@ async function handleRaceResult(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }
@@ -4008,7 +4088,17 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 	try {
 		const raceId = interaction.options.getString('race_id');
 		
-		await interaction.deferReply({ ephemeral: true });
+		// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+		try {
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+			}
+		} catch (deferErr) {
+			if (deferErr.code === 10062 || deferErr.code === 40060) {
+				return; // インタラクションがタイムアウト
+			}
+			throw deferErr;
+		}
 
 		const userBets = parimutuel.getUserBets(interaction.user.id, raceId || null);
 
@@ -4046,7 +4136,7 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {
-			await interaction.reply({ content: `❌ エラー: ${error.message}`, ephemeral: true });
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
 		}
 	}
 }

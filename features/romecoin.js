@@ -162,7 +162,13 @@ async function getTotalBalance(userId) {
 // ロメコイン変更をログに記録
 async function logRomecoinChange(client, userId, previousBalance, newBalance, reason, metadata = {}) {
 	try {
-		if (!client || !client.isReady()) {
+		console.log(`[Romecoin] logRomecoinChange呼び出し: userId=${userId}, previous=${previousBalance}, new=${newBalance}, reason=${reason}`);
+		
+		if (!client) {
+			console.warn('[Romecoin] クライアントがnullです。ログを送信できません。');
+			return;
+		}
+		if (!client.isReady()) {
 			console.warn('[Romecoin] クライアントが準備完了していません。ログを送信できません。');
 			return;
 		}
@@ -170,13 +176,29 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 			console.warn('[Romecoin] ROMECOIN_LOG_CHANNEL_IDが設定されていません');
 			return;
 		}
+		
+		console.log(`[Romecoin] チャンネル取得を試みます: ${ROMECOIN_LOG_CHANNEL_ID}`);
 		const romecoin_log_channel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch((err) => {
 			console.error('[Romecoin] ログチャンネル取得エラー:', err);
+			console.error('[Romecoin] エラー詳細:', JSON.stringify(err, null, 2));
 			return null;
 		});
+		
 		if (!romecoin_log_channel) {
 			console.warn(`[Romecoin] ログチャンネルが見つかりません (ID: ${ROMECOIN_LOG_CHANNEL_ID})`);
 			return;
+		}
+		
+		console.log(`[Romecoin] チャンネル取得成功: ${romecoin_log_channel.name} (${romecoin_log_channel.id})`);
+		
+		// 送信権限を確認
+		const botMember = romecoin_log_channel.guild?.members.cache.get(client.user.id);
+		if (botMember) {
+			const permissions = romecoin_log_channel.permissionsFor(botMember);
+			if (!permissions || !permissions.has('SendMessages') || !permissions.has('EmbedLinks')) {
+				console.error(`[Romecoin] チャンネルへの送信権限がありません。SendMessages: ${permissions?.has('SendMessages')}, EmbedLinks: ${permissions?.has('EmbedLinks')}`);
+				return;
+			}
 		}
 
 		const diff = newBalance - previousBalance;
@@ -201,11 +223,16 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 			embed.addFields({ name: '対象ユーザー', value: metadata.targetUserId, inline: true });
 		}
 
-		await romecoin_log_channel.send({ embeds: [embed] }).catch((err) => {
+		console.log(`[Romecoin] ログ送信を試みます...`);
+		await romecoin_log_channel.send({ embeds: [embed] }).then(() => {
+			console.log(`[Romecoin] ログ送信成功: userId=${userId}`);
+		}).catch((err) => {
 			console.error('[Romecoin] ログ送信エラー:', err);
+			console.error('[Romecoin] エラー詳細:', JSON.stringify(err, null, 2));
 		});
 	} catch (error) {
 		console.error('[Romecoin] ログ送信エラー:', error);
+		console.error('[Romecoin] エラースタック:', error.stack);
 	}
 }
 
