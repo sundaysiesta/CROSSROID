@@ -36,6 +36,8 @@ function validateAmount(amount) {
 
 // データ読み込み
 function loadRomecoinData() {
+	console.log(`[Romecoin] loadRomecoinData: データ読み込み開始`);
+	
 	// ファイルから常に最新のデータを読み込む
 	let fileData = null;
 	
@@ -43,12 +45,19 @@ function loadRomecoinData() {
 	if (fs.existsSync(ROMECOIN_DATA_FILE)) {
 		try {
 			const content = fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8');
+			console.log(`[Romecoin] メインファイル読み込み: ${ROMECOIN_DATA_FILE} (${content.length} bytes)`);
 			if (content.trim() !== '') {
 				fileData = JSON.parse(content);
+				console.log(`[Romecoin] メインファイル解析完了: エントリ数=${Object.keys(fileData).length}`);
+			} else {
+				console.warn(`[Romecoin] メインファイルが空です: ${ROMECOIN_DATA_FILE}`);
 			}
 		} catch (e) {
 			console.error('[Romecoin] データ読み込みエラー:', e);
+			console.error('[Romecoin] エラースタック:', e.stack);
 		}
+	} else {
+		console.warn(`[Romecoin] メインファイルが存在しません: ${ROMECOIN_DATA_FILE}`);
 	}
 	
 	// ファイルが空または存在しない場合、バックアップから復元を試みる
@@ -59,7 +68,7 @@ function loadRomecoinData() {
 				const backupContent = fs.readFileSync(ROMECOIN_DATA_BACKUP_FILE, 'utf8');
 				if (backupContent.trim() !== '') {
 					fileData = JSON.parse(backupContent);
-					console.log('[Romecoin] バックアップからデータを復元しました');
+					console.log(`[Romecoin] バックアップからデータを復元しました: エントリ数=${Object.keys(fileData).length}`);
 					// 復元したデータをメインファイルに保存
 					romecoin_data = fileData;
 					saveRomecoinData();
@@ -67,6 +76,7 @@ function loadRomecoinData() {
 				}
 			} catch (e) {
 				console.error('[Romecoin] バックアップからの復元エラー:', e);
+				console.error('[Romecoin] エラースタック:', e.stack);
 			}
 		} else {
 			console.warn('[Romecoin] バックアップファイルも見つかりませんでした');
@@ -76,32 +86,43 @@ function loadRomecoinData() {
 	// データを設定
 	if (romecoin_data === null) {
 		romecoin_data = fileData || {};
+		console.log(`[Romecoin] グローバル変数を初期化: エントリ数=${Object.keys(romecoin_data).length}`);
 	} else if (fileData) {
 		// ファイルのデータで上書き（ファイルを優先）
 		romecoin_data = fileData;
+		console.log(`[Romecoin] グローバル変数を更新: エントリ数=${Object.keys(romecoin_data).length}`);
 	}
 	
+	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${Object.keys(romecoin_data).length}`);
 	return romecoin_data;
 }
 
 // データ保存
 function saveRomecoinData() {
 	if (romecoin_data === null) {
+		console.warn('[Romecoin] saveRomecoinData: romecoin_dataがnullです。保存をスキップします。');
 		return;
 	}
 	try {
+		const dataCount = Object.keys(romecoin_data).length;
+		console.log(`[Romecoin] saveRomecoinData: エントリ数=${dataCount}`);
+		
 		// バックアップを作成（既存のファイルがある場合）
 		if (fs.existsSync(ROMECOIN_DATA_FILE)) {
 			try {
 				fs.copyFileSync(ROMECOIN_DATA_FILE, ROMECOIN_DATA_BACKUP_FILE);
+				console.log(`[Romecoin] バックアップ作成完了: ${ROMECOIN_DATA_BACKUP_FILE}`);
 			} catch (e) {
 				console.warn('[Romecoin] バックアップ作成エラー（無視）:', e);
 			}
 		}
 		// メインファイルに保存
-		fs.writeFileSync(ROMECOIN_DATA_FILE, JSON.stringify(romecoin_data, null, 2));
+		const jsonData = JSON.stringify(romecoin_data, null, 2);
+		fs.writeFileSync(ROMECOIN_DATA_FILE, jsonData);
+		console.log(`[Romecoin] データ保存完了: ${ROMECOIN_DATA_FILE} (${jsonData.length} bytes)`);
 	} catch (e) {
 		console.error('[Romecoin] データ保存エラー:', e);
+		console.error('[Romecoin] エラースタック:', e.stack);
 	}
 }
 
@@ -237,6 +258,8 @@ async function logRomecoinChange(client, userId, previousBalance, newBalance, re
 }
 
 async function updateRomecoin(userId, updateFn, options = {}) {
+	console.log(`[Romecoin] updateRomecoin呼び出し: userId=${userId}, log=${options.log}, client=${!!options.client}, reason=${options.reason}`);
+	
 	// 同時実行制御：同じユーザーIDの更新を順次処理
 	if (!updateLocks.has(userId)) {
 		updateLocks.set(userId, Promise.resolve());
@@ -244,16 +267,22 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 	
 	const lockPromise = updateLocks.get(userId).then(async () => {
 		try {
+			console.log(`[Romecoin] updateRomecoin処理開始: userId=${userId}`);
+			
 			// romecoin_dataを初期化
 			const data = loadRomecoinData();
+			console.log(`[Romecoin] データ読み込み完了: エントリ数=${Object.keys(data).length}`);
 			
 			await migrateData(userId, data);
+			console.log(`[Romecoin] データ移行完了: userId=${userId}`);
 			
 			// 変更前の残高を取得（正規化済み）
 			const previousBalance = await getRomecoin(userId);
+			console.log(`[Romecoin] 変更前の残高: ${previousBalance} (userId=${userId})`);
 			
 			// 更新関数を実行して、目標残高を計算
 			const targetBalance = updateFn(previousBalance);
+			console.log(`[Romecoin] 目標残高: ${targetBalance} (userId=${userId})`);
 			
 			// 目標残高の検証
 			const targetValidation = validateAmount(targetBalance);
@@ -263,6 +292,7 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 			
 			// 目標残高を最大値以内に制限
 			const safeTargetBalance = Math.min(MAX_SAFE_VALUE, Math.max(0, Math.round(targetBalance)));
+			console.log(`[Romecoin] 安全な目標残高: ${safeTargetBalance} (userId=${userId})`);
 			
 			// 預金から自動的に引き出す機能（useDeposit オプションが true の場合）
 			if (options.useDeposit) {
@@ -385,28 +415,45 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 				}
 			} else {
 				// 預金から自動引き出しを使用しない場合は通常通り更新
+				console.log(`[Romecoin] 通常更新を実行: userId=${userId}, safeTargetBalance=${safeTargetBalance}`);
 				await updateData(userId, data, () => safeTargetBalance);
+				console.log(`[Romecoin] データ更新完了: userId=${userId}`);
 			}
 			
 			// データを保存
+			console.log(`[Romecoin] データ保存を実行: userId=${userId}`);
 			saveRomecoinData();
+			console.log(`[Romecoin] データ保存完了: userId=${userId}`);
 			
 			// 変更後の残高を取得（正規化済み）
 			const newBalance = await getRomecoin(userId);
+			console.log(`[Romecoin] 変更後の残高: ${newBalance} (userId=${userId}), previousBalance=${previousBalance}`);
 			
 			// ログ送信（オプションで指定された場合）
-			if (options.log && options.client && previousBalance !== newBalance) {
-				await logRomecoinChange(
-					options.client,
-					userId,
-					previousBalance,
-					newBalance,
-					options.reason || 'ロメコイン変更',
-					options.metadata || {}
-				);
+			console.log(`[Romecoin] ログ送信チェック: log=${options.log}, client=${!!options.client}, balanceChanged=${previousBalance !== newBalance}`);
+			if (options.log && options.client) {
+				// 残高が変わった場合のみログ送信（ただし、ログ送信自体は常に試みる）
+				if (previousBalance !== newBalance) {
+					console.log(`[Romecoin] ログ送信を実行: userId=${userId}, previous=${previousBalance}, new=${newBalance}`);
+					await logRomecoinChange(
+						options.client,
+						userId,
+						previousBalance,
+						newBalance,
+						options.reason || 'ロメコイン変更',
+						options.metadata || {}
+					);
+				} else {
+					console.warn(`[Romecoin] 残高が変更されていません。ログを送信しません: userId=${userId}, balance=${previousBalance}`);
+				}
+			} else {
+				console.warn(`[Romecoin] ログ送信条件を満たしていません: log=${options.log}, client=${!!options.client}`);
 			}
+			
+			console.log(`[Romecoin] updateRomecoin処理完了: userId=${userId}`);
 		} catch (error) {
 			console.error(`[Romecoin] updateRomecoin エラー (userId: ${userId}):`, error);
+			console.error(`[Romecoin] エラースタック:`, error.stack);
 			throw error;
 		}
 	});
