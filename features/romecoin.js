@@ -35,19 +35,27 @@ function validateAmount(amount) {
 
 // データ読み込み
 function loadRomecoinData() {
-	if (romecoin_data !== null) {
-		return romecoin_data;
-	}
-	
+	// ファイルから常に最新のデータを読み込む
 	if (fs.existsSync(ROMECOIN_DATA_FILE)) {
 		try {
-			romecoin_data = JSON.parse(fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8'));
+			const fileData = JSON.parse(fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8'));
+			// メモリ上のデータとファイルのデータをマージ（ファイルを優先）
+			if (romecoin_data === null) {
+				romecoin_data = fileData;
+			} else {
+				// ファイルのデータで上書き
+				romecoin_data = fileData;
+			}
 		} catch (e) {
 			console.error('[Romecoin] データ読み込みエラー:', e);
-			romecoin_data = {};
+			if (romecoin_data === null) {
+				romecoin_data = {};
+			}
 		}
 	} else {
-		romecoin_data = {};
+		if (romecoin_data === null) {
+			romecoin_data = {};
+		}
 	}
 	return romecoin_data;
 }
@@ -76,11 +84,13 @@ function getRomecoinData() {
 
 // ロメコイン残高を取得
 async function getRomecoin(userId) {
+	// 最新のデータを読み込む
 	const data = loadRomecoinData();
 	await migrateData(userId, data);
 	const balance = await getData(userId, data, 0);
 	// 負の値や無効な値を0に正規化
-	return Math.max(0, Math.min(MAX_SAFE_VALUE, Number(balance) || 0));
+	const normalizedBalance = Math.max(0, Math.min(MAX_SAFE_VALUE, Number(balance) || 0));
+	return normalizedBalance;
 }
 
 // 所持金と預金の合計を取得するヘルパー関数
@@ -119,8 +129,18 @@ async function getTotalBalance(userId) {
 // ロメコイン変更をログに記録
 async function logRomecoinChange(client, userId, previousBalance, newBalance, reason, metadata = {}) {
 	try {
-		const romecoin_log_channel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch(() => null);
-		if (!romecoin_log_channel) return;
+		if (!ROMECOIN_LOG_CHANNEL_ID) {
+			console.warn('[Romecoin] ROMECOIN_LOG_CHANNEL_IDが設定されていません');
+			return;
+		}
+		const romecoin_log_channel = await client.channels.fetch(ROMECOIN_LOG_CHANNEL_ID).catch((err) => {
+			console.error('[Romecoin] ログチャンネル取得エラー:', err);
+			return null;
+		});
+		if (!romecoin_log_channel) {
+			console.warn(`[Romecoin] ログチャンネルが見つかりません (ID: ${ROMECOIN_LOG_CHANNEL_ID})`);
+			return;
+		}
 
 		const diff = newBalance - previousBalance;
 		const diffText = diff >= 0 ? `+${diff.toLocaleString()}` : `${diff.toLocaleString()}`;
@@ -370,8 +390,8 @@ async function interactionCreate(interaction) {
 			
 			await interaction.deferReply();
 			
-			// ロメコインデータを取得
-			const data = getRomecoinData();
+			// ロメコインデータを取得（最新のデータを読み込む）
+			const data = loadRomecoinData();
 			
 			// 全ユーザーのデータを取得（預金込みの合計で計算）
 			const userData = await Promise.all(
