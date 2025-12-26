@@ -582,10 +582,12 @@ async function interactionCreate(interaction) {
 			validData.sort((a, b) => b.value - a.value);
 			
 			// ページネーション用のデータを保存（ユーザーごと）
-			const rankingCacheKey = `ranking_${interaction.user.id}_${Date.now()}`;
+			// キャッシュキーはアンダースコアを含まない形式にする（パースしやすくするため）
+			const cacheKeyTimestamp = Date.now();
+			const rankingCacheKey = `${interaction.user.id}_${cacheKeyTimestamp}`;
 			rankingCache.set(rankingCacheKey, {
 				data: validData,
-				timestamp: Date.now()
+				timestamp: cacheKeyTimestamp
 			});
 			
 			// 1ページ目を表示（1ページあたり10名）
@@ -644,14 +646,17 @@ async function interactionCreate(interaction) {
 			const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 			const notionManager = require('./notion');
 			
-			// customIdの形式: romecoin_ranking_{action}_{cacheKey}_{currentPage}
+			// customIdの形式: romecoin_ranking_{action}_{userId}_{timestamp}_{currentPage}
+			// 例: romecoin_ranking_prev_123456789_1704067200000_1
 			const parts = interaction.customId.split('_');
-			if (parts.length < 5) {
+			if (parts.length < 6) {
 				return interaction.reply({ content: '❌ 無効なボタンです。', ephemeral: true }).catch(() => {});
 			}
 			
-			const action = parts[3]; // 'prev' or 'next'
-			const cacheKey = parts[4];
+			const action = parts[2]; // 'prev' or 'next'
+			const userId = parts[3];
+			const timestamp = parts[4];
+			const cacheKey = `${userId}_${timestamp}`; // キャッシュキーを再構築
 			const currentPage = parseInt(parts[5]) || 1;
 			
 			// キャッシュからデータを取得

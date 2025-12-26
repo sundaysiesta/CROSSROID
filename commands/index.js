@@ -9,7 +9,7 @@ const {
 	StringSelectMenuOptionBuilder,
 	MessageFlags,
 } = require('discord.js');
-const { generateWacchoi, generateDailyUserId, getAnonymousName } = require('../utils');
+const { generateDailyUserId, getAnonymousName } = require('../utils');
 const {
 	ANONYMOUS_COOLDOWN_TIERS,
 	BUMP_COOLDOWN_MS,
@@ -97,11 +97,10 @@ async function handleCommands(interaction, client) {
 			}
 
 			try {
-				const wacchoi = generateWacchoi(interaction.user.id);
 				const dailyId = generateDailyUserId(interaction.user.id);
 
-				const uglyName = getAnonymousName(wacchoi.daily);
-				const displayName = `${uglyName} ID:${dailyId} (ﾜｯﾁｮｲ ${wacchoi.full})`;
+				const uglyName = getAnonymousName(dailyId);
+				const displayName = `${uglyName} ID:${dailyId}`;
 				const avatarURL = client.user.displayAvatarURL();
 
 				const webhooks = await interaction.channel.fetchWebhooks();
@@ -1942,19 +1941,17 @@ async function handleCommands(interaction, client) {
 							// Parse Info using Regex (Robust against format changes)
 							const username = interaction.targetMessage.author.username;
 							const idMatch = username.match(/ID:([a-z0-9]+)/i);
-							const wacchoiMatch = username.match(/[(\uff08]ﾜｯﾁｮｲ\s+([a-z0-9-]+)[)\uff09]/i);
 
 							const targetId = idMatch ? idMatch[1] : null;
-							const targetWacchoi = wacchoiMatch ? wacchoiMatch[1] : null;
 
-							if (!targetId && !targetWacchoi) {
+							if (!targetId) {
 								return await interaction.followUp({
-									content: '❌ メッセージからIDまたはワッチョイを読み取れませんでした。',
+									content: '❌ メッセージからIDを読み取れませんでした。',
 									flags: MessageFlags.Ephemeral,
 								});
 							}
 
-							const { generateDailyUserIdForDate, generateWacchoi } = require('../utils');
+							const { generateDailyUserIdForDate } = require('../utils');
 							const msgDate = interaction.targetMessage.createdAt;
 							const members = await interaction.guild.members.fetch();
 
@@ -1963,21 +1960,11 @@ async function handleCommands(interaction, client) {
 
 							// Sequential Search
 							for (const [_mid, m] of members) {
-								if (targetId) {
-									const genId = generateDailyUserIdForDate(m.id, msgDate);
-									if (genId === targetId) {
-										foundMember = m;
-										reason = `ID一致: \`${genId}\``;
-										break;
-									}
-								}
-								if (!foundMember && targetWacchoi) {
-									const genWacchoi = generateWacchoi(m.id, msgDate).full;
-									if (genWacchoi === targetWacchoi) {
-										foundMember = m;
-										reason = `ワッチョイ一致: \`${genWacchoi}\``;
-										break;
-									}
+								const genId = generateDailyUserIdForDate(m.id, msgDate);
+								if (genId === targetId) {
+									foundMember = m;
+									reason = `ID一致: \`${genId}\``;
+									break;
 								}
 							}
 
@@ -1988,11 +1975,7 @@ async function handleCommands(interaction, client) {
 								});
 							} else {
 								return await interaction.followUp({
-									content: `❌ 該当するユーザーが見つかりませんでした。\n(Target ID: ${
-										targetId || 'None'
-									}, Wacchoi: ${
-										targetWacchoi || 'None'
-									})\n※ユーザーが退出したか、日付計算の不一致の可能性があります。`,
+									content: `❌ 該当するユーザーが見つかりませんでした。\n(Target ID: ${targetId || 'None'})\n※ユーザーが退出したか、日付計算の不一致の可能性があります。`,
 									flags: MessageFlags.Ephemeral,
 								});
 							}
