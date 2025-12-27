@@ -320,18 +320,14 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 			const targetBalance = updateFn(previousBalance);
 			console.log(`[Romecoin] 目標残高: ${targetBalance} (userId=${userId})`);
 			
-			// 目標残高の検証
-			const targetValidation = validateAmount(targetBalance);
-			if (!targetValidation.valid) {
-				throw new Error(`目標残高が無効です: ${targetValidation.error}`);
-			}
-			
-			// 目標残高を最大値以内に制限
+			// 目標残高を最大値以内に制限（負の値は0に制限）
 			const safeTargetBalance = Math.min(MAX_SAFE_VALUE, Math.max(0, Math.round(targetBalance)));
 			console.log(`[Romecoin] 安全な目標残高: ${safeTargetBalance} (userId=${userId})`);
 			
 			// 預金から自動的に引き出す機能（useDeposit オプションが true の場合）
 			if (options.useDeposit) {
+				// useDepositが有効な場合、預金から引き出せる可能性があるため、
+				// 目標残高が負でも一時的に許可し、預金から引き出した後に最終的な残高を検証する
 				const bank = require('./bank');
 				const bankData = bank.loadBankData();
 				const { getData: getBankData, updateData: updateBankData } = require('./dataAccess');
@@ -455,6 +451,12 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 				}
 			} else {
 				// 預金から自動引き出しを使用しない場合は通常通り更新
+				// 目標残高の検証（useDepositが無効な場合のみ）
+				const targetValidation = validateAmount(targetBalance);
+				if (!targetValidation.valid) {
+					throw new Error(`目標残高が無効です: ${targetValidation.error}`);
+				}
+				
 				console.log(`[Romecoin] 通常更新を実行: userId=${userId}, safeTargetBalance=${safeTargetBalance}`);
 				const updatedKey = await updateData(userId, data, () => safeTargetBalance);
 				console.log(`[Romecoin] データ更新完了: userId=${userId}, key=${updatedKey}, value=${data[updatedKey]}`);

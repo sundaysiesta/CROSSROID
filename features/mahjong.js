@@ -388,6 +388,7 @@ async function handleAgreement(interaction, client) {
 }
 
 async function handleResult(interaction, client) {
+	let lockTimestamp = null; // エラーハンドリングで使用するため、関数スコープで定義
 	try {
 		const tableId = interaction.options.getString('table_id');
 		const hostScore = interaction.options.getInteger('player1_score'); // 部屋主の点数
@@ -426,8 +427,10 @@ async function handleResult(interaction, client) {
 			});
 		}
 
-		// 既に結果が入力されているかチェック
-		if (table.completedAt) {
+		// 既に結果が入力されているかチェック（データベースから最新の状態を確認）
+		const dataCheck = loadMahjongData();
+		const savedTableCheck = dataCheck[tableId];
+		if (savedTableCheck && savedTableCheck.completedAt) {
 			return interaction.reply({
 				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
 				flags: [MessageFlags.Ephemeral],
@@ -480,41 +483,105 @@ async function handleResult(interaction, client) {
 			});
 		}
 
+		// 重複実行を防ぐため、ロメコイン更新前にcompletedAtを設定して保存
+		const dataLock = loadMahjongData();
+		if (dataLock[tableId] && dataLock[tableId].completedAt) {
+			return interaction.reply({
+				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+				flags: [MessageFlags.Ephemeral],
+			});
+		}
+		
+		// 一時的にcompletedAtを設定してロック（ロメコイン更新前に）
+		lockTimestamp = Date.now();
+		if (!dataLock[tableId]) {
+			dataLock[tableId] = {};
+		}
+		dataLock[tableId].completedAt = lockTimestamp;
+		dataLock[tableId].processing = true; // 処理中フラグ
+		saveMahjongData(dataLock);
+
 		// ロメコイン計算と更新
 		const results = [];
-		for (let i = 0; i < allPlayers.length; i++) {
-			const playerId = allPlayers[i];
-			const diff = scoreDiffs[i];
-			const romecoinChange = Math.round(diff * table.rate);
+		let romecoinUpdateError = null;
+		try {
+			for (let i = 0; i < allPlayers.length; i++) {
+				const playerId = allPlayers[i];
+				const diff = scoreDiffs[i];
+				const romecoinChange = Math.round(diff * table.rate);
 
-			const currentBalance = await require('./romecoin').getRomecoin(playerId);
-			const newBalance = currentBalance + romecoinChange;
+				const currentBalance = await require('./romecoin').getRomecoin(playerId);
+				const newBalance = currentBalance + romecoinChange;
 
-			await updateRomecoin(
-				playerId,
-				(current) => newBalance,
-				{
-					log: true,
-					client: client,
-					reason: `賭け麻雀（${table.gameType}）: ${scores[i]}点`,
-					metadata: {
-						commandName: 'mahjong_result',
-						targetUserId: playerId,
-					},
-					useDeposit: romecoinChange < 0, // 減額の場合のみ預金から自動引き出し
+				await updateRomecoin(
+					playerId,
+					(current) => newBalance,
+					{
+						log: true,
+						client: client,
+						reason: `賭け麻雀（${table.gameType}）: ${scores[i]}点`,
+						metadata: {
+							commandName: 'mahjong_result',
+							targetUserId: playerId,
+						},
+						useDeposit: romecoinChange < 0, // 減額の場合のみ預金から自動引き出し
+					}
+				);
+
+				results.push({
+					player: playerId,
+					score: scores[i],
+					diff: diff,
+					romecoinChange: romecoinChange,
+					newBalance: newBalance,
+				});
+			}
+		} catch (error) {
+			romecoinUpdateError = error;
+			// エラーが発生した場合、ロックを解除
+			const dataUnlock = loadMahjongData();
+			if (dataUnlock[tableId] && dataUnlock[tableId].completedAt === lockTimestamp) {
+				delete dataUnlock[tableId].completedAt;
+				delete dataUnlock[tableId].processing;
+				saveMahjongData(dataUnlock);
+			}
+			throw error;
+		}
+		
+		// ロメコイン更新後に再度チェック（他のプロセスが既に処理した可能性がある）
+		const dataRecheck = loadMahjongData();
+		if (dataRecheck[tableId] && dataRecheck[tableId].completedAt && dataRecheck[tableId].completedAt !== lockTimestamp) {
+			// 他のプロセスが既に処理した場合は、ロメコインの変更を元に戻す
+			console.error(`[麻雀] 重複実行検出（ロメコイン更新後）: tableId=${tableId}, lockTimestamp=${lockTimestamp}, existingCompletedAt=${dataRecheck[tableId].completedAt}`);
+			// ロメコインの変更を元に戻す
+			for (let i = 0; i < allPlayers.length; i++) {
+				const playerId = allPlayers[i];
+				const romecoinChange = results[i].romecoinChange;
+				try {
+					await updateRomecoin(
+						playerId,
+						(current) => Math.round((current || 0) - romecoinChange),
+						{
+							log: true,
+							client: client,
+							reason: `賭け麻雀（重複実行のため取り消し）: ${scores[i]}点`,
+							metadata: {
+								commandName: 'mahjong_result',
+								targetUserId: playerId,
+							},
+						}
+					);
+				} catch (rollbackError) {
+					console.error(`[麻雀] ロメコイン取り消しエラー: playerId=${playerId}`, rollbackError);
 				}
-			);
-
-			results.push({
-				player: playerId,
-				score: scores[i],
-				diff: diff,
-				romecoinChange: romecoinChange,
-				newBalance: newBalance,
+			}
+			return interaction.reply({
+				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
-		// 試合記録を保存
+		// 試合記録を保存（completedAtは既に設定済み）
 		const matchRecord = {
 			tableId: tableId,
 			host: table.host,
@@ -525,11 +592,18 @@ async function handleResult(interaction, client) {
 			scoreDiffs: scoreDiffs,
 			romecoinChanges: results.map((r) => r.romecoinChange),
 			createdAt: table.createdAt,
-			completedAt: Date.now(),
+			completedAt: lockTimestamp, // ロック時に設定したタイムスタンプを使用
 		};
 
 		const data = loadMahjongData();
+		// ロックが有効であることを確認（他のプロセスが既に処理した場合は、上記のチェックで既に処理済み）
+		if (data[tableId] && data[tableId].completedAt && data[tableId].completedAt !== lockTimestamp) {
+			// この時点で既に他のプロセスが処理した場合は、上記のチェックで既に処理済みのはず
+			// 念のため、エラーをログに記録
+			console.error(`[麻雀] 予期しない状態: tableId=${tableId}, lockTimestamp=${lockTimestamp}, existingCompletedAt=${data[tableId].completedAt}`);
+		}
 		data[tableId] = matchRecord;
+		delete data[tableId].processing; // 処理中フラグを削除
 		
 		// ユーザーごとの累計獲得賞金・負けた金額を更新
 		if (!data.stats) {
@@ -579,6 +653,27 @@ async function handleResult(interaction, client) {
 		activeTables.delete(tableId);
 	} catch (error) {
 		console.error('[麻雀] 結果処理エラー:', error);
+		
+		// エラーが発生した場合、ロックを解除（ロックが設定されていた場合）
+		try {
+			const tableId = interaction.options?.getString('table_id');
+			if (tableId && lockTimestamp !== null) {
+				const dataUnlock = loadMahjongData();
+				if (dataUnlock[tableId] && dataUnlock[tableId].processing) {
+					// processingフラグがあるが、completedAtが設定されていない場合はロックを解除
+					// completedAtが設定されている場合は、他のプロセスが既に処理した可能性がある
+					if (!dataUnlock[tableId].completedAt || dataUnlock[tableId].completedAt === lockTimestamp) {
+						delete dataUnlock[tableId].completedAt;
+						delete dataUnlock[tableId].processing;
+						saveMahjongData(dataUnlock);
+						console.log(`[麻雀] エラー発生によりロック解除: tableId=${tableId}`);
+					}
+				}
+			}
+		} catch (unlockError) {
+			console.error('[麻雀] ロック解除エラー:', unlockError);
+		}
+		
 		if (!interaction.replied && !interaction.deferred) {
 			try {
 				await interaction.reply({
