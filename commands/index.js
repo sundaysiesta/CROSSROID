@@ -1922,6 +1922,119 @@ async function handleCommands(interaction, client) {
 			}
 			return;
 		}
+
+		if (interaction.commandName === 'admin_romecoin_set') {
+			// 権限チェック
+			if (!interaction.member) {
+				return interaction.reply({ content: '⛔ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
+			}
+			if (!(await checkAdmin(interaction.member))) {
+				return interaction.reply({ content: '⛔ 権限がありません。', flags: MessageFlags.Ephemeral });
+			}
+
+			try {
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+				const targetUser = interaction.options.getUser('user');
+				const amount = interaction.options.getInteger('amount');
+
+				if (!targetUser) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription('❌ ユーザーを指定してください。'),
+						],
+					});
+				}
+
+				if (amount === null || amount === undefined || !Number.isInteger(amount) || amount < 0 || amount > Number.MAX_SAFE_INTEGER) {
+					return interaction.editReply({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0xff0000)
+								.setDescription(`❌ 有効な金額（0以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`),
+						],
+					});
+				}
+
+				// 現在の残高を取得
+				const previousBalance = await getRomecoin(targetUser.id);
+
+				// ロメコインを設定（ログ付き）
+				await updateRomecoin(
+					targetUser.id,
+					() => Math.round(amount),
+					{
+						log: true,
+						client: interaction.client,
+						reason: `管理者による手動設定`,
+						metadata: {
+							executorId: interaction.user.id,
+							commandName: 'admin_romecoin_set',
+						},
+					}
+				);
+				const newBalance = await getRomecoin(targetUser.id);
+
+				const successEmbed = new EmbedBuilder()
+					.setTitle('✅ ロメコイン設定成功')
+					.setDescription(`${targetUser} のロメコインを ${ROMECOIN_EMOJI}${amount.toLocaleString()} に設定しました`)
+					.addFields(
+						{
+							name: '設定前の残高',
+							value: `${ROMECOIN_EMOJI}${previousBalance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '設定後の残高',
+							value: `${ROMECOIN_EMOJI}${newBalance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '設定額',
+							value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+							inline: true,
+						}
+					)
+					.setColor(0x00ff00)
+					.setTimestamp()
+					.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+				if (interaction.deferred || interaction.replied) {
+					await interaction.editReply({ embeds: [successEmbed] }).catch(() => {});
+				} else {
+					await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch(() => {});
+				}
+			} catch (error) {
+				console.error('ロメコイン設定エラー:', error);
+				try {
+					if (interaction.deferred || interaction.replied) {
+						await interaction.editReply({
+							embeds: [
+								new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setColor(0xff0000)
+									.setDescription(`ロメコインの設定中にエラーが発生しました: ${error.message}`),
+							],
+						}).catch(() => {});
+					} else {
+						await interaction.reply({
+							embeds: [
+								new EmbedBuilder()
+									.setTitle('❌ エラー')
+									.setColor(0xff0000)
+									.setDescription(`ロメコインの設定中にエラーが発生しました: ${error.message}`),
+							],
+							flags: MessageFlags.Ephemeral,
+						}).catch(() => {});
+					}
+				} catch (replyErr) {
+					console.error('エラーレスポンス送信失敗:', replyErr);
+				}
+			}
+			return;
+		}
 	} else if (interaction.isMessageContextMenuCommand()) {
 		if (interaction.commandName === '匿名開示 (運営専用)') {
 			try {
@@ -3571,14 +3684,94 @@ async function handleCommands(interaction, client) {
 				const balance = await getRomecoin(userId);
 				const targetUser = interaction.options.getUser('user') || interaction.user;
 				
+				// 預金を取得
+				const bank = require('../features/bank');
+				const bankData = bank.loadBankData();
+				const { getData: getBankData } = require('../features/dataAccess');
+				const INTEREST_RATE_PER_HOUR = 0.00000228;
+				const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+				const now = Date.now();
+				
+				const userBankData = await getBankData(userId, bankData, {
+					deposit: 0,
+					lastInterestTime: Date.now(),
+				});
+				
+				const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+				let deposit = userBankData.deposit || 0;
+				if (hoursPassed > 0 && deposit > 0) {
+					const interest = Math.round(deposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+					if (interest > 0) {
+						deposit += interest;
+					}
+				}
+				
+				// 貸付額を取得（loanで貸してる金額）
+				const loanData = bank.loadLoanData();
+				const { getDataKey } = require('../features/dataAccess');
+				const lenderKey = await getDataKey(userId);
+				let totalLent = 0;
+				for (const [key, loan] of Object.entries(loanData)) {
+					if (key.startsWith(`${lenderKey}_`) || loan.lenderId === userId) {
+						// 利子を含めた現在の借金額を計算
+						const loanHoursPassed = (now - loan.createdAt) / INTEREST_INTERVAL_MS;
+						const loanInterest = Math.round(loan.amount * (Math.pow(1 + 0.015, loanHoursPassed) - 1));
+						totalLent += loan.amount + loanInterest;
+					}
+				}
+				
+				// 部活投資額を取得
+				const clubInvestment = require('../features/clubInvestment');
+				const clubData = clubInvestment.loadClubInvestmentData();
+				const { getData: getClubData } = require('../features/dataAccess');
+				let totalClubInvestment = 0;
+				for (const [channelId, clubInfo] of Object.entries(clubData)) {
+					if (channelId === 'stats') continue;
+					if (clubInfo.investors) {
+						const investorKey = await getClubData(userId, clubInfo.investors, {
+							shares: 0,
+							totalInvested: 0,
+							averagePrice: 0,
+						});
+						if (investorKey && investorKey.totalInvested) {
+							totalClubInvestment += investorKey.totalInvested;
+						}
+					}
+				}
+				
+				// 総資産を計算
+				const totalAssets = balance + deposit + totalLent + totalClubInvestment;
+				
 				const embed = new EmbedBuilder()
 					.setTitle('💰 ロメコイン残高')
-					.setDescription(`${targetUser} のロメコイン残高`)
-					.addFields({
-						name: '所持金',
-						value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
-						inline: true,
-					})
+					.setDescription(`${targetUser} の資産情報`)
+					.addFields(
+						{
+							name: '所持金',
+							value: `${ROMECOIN_EMOJI}${balance.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '預金',
+							value: `${ROMECOIN_EMOJI}${deposit.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '貸付額',
+							value: `${ROMECOIN_EMOJI}${totalLent.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '部活投資額',
+							value: `${ROMECOIN_EMOJI}${totalClubInvestment.toLocaleString()}`,
+							inline: true,
+						},
+						{
+							name: '総資産',
+							value: `${ROMECOIN_EMOJI}${totalAssets.toLocaleString()}`,
+							inline: false,
+						}
+					)
 					.setColor(0xffd700)
 					.setTimestamp();
 				

@@ -139,7 +139,7 @@ async function createTable(interaction, client) {
 			});
 		}
 
-		const gameType = player3 ? '四麻' : 'サンマ';
+		const gameType = player3 ? '四麻' : '三麻';
 		const tableId = `mahjong_${host.id}_${Date.now()}`;
 
 		// テーブル作成
@@ -469,16 +469,16 @@ async function handleResult(interaction, client) {
 			});
 		}
 
-		// 基準点で計算（サンマ: 35000点、四麻: 25000点）
+		// 基準点で計算（三麻: 35000点、四麻: 25000点）
 		const BASE_SCORE = table.gameType === '四麻' ? 25000 : 35000;
 		const scoreDiffs = scores.map((score) => score - BASE_SCORE);
 
-		// 点数整合性チェック（サンマ: 合計105000点、四麻: 合計100000点）
+		// 点数整合性チェック（三麻: 合計105000点、四麻: 合計100000点）
 		const expectedTotal = table.gameType === '四麻' ? 100000 : 105000;
 		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
 		if (Math.abs(actualTotal - expectedTotal) > 1) {
 			return interaction.reply({
-				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : '三麻'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
@@ -794,22 +794,22 @@ async function handleEdit(interaction, client) {
 			});
 		}
 
-		// 点数整合性チェック（サンマ: 合計105000点、四麻: 合計100000点）
+		// 点数整合性チェック（三麻: 合計105000点、四麻: 合計100000点）
 		const expectedTotal = table.gameType === '四麻' ? 100000 : 105000;
 		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
 		if (Math.abs(actualTotal - expectedTotal) > 1) {
 			if (deferred) {
 				return interaction.editReply({
-					content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+					content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : '三麻'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
 				});
 			}
 			return interaction.reply({
-				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : 'サンマ'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : '三麻'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
-		// 基準点で計算（サンマ: 35000点、四麻: 25000点）
+		// 基準点で計算（三麻: 35000点、四麻: 25000点）
 		const BASE_SCORE = table.gameType === '四麻' ? 25000 : 35000;
 
 		// 旧記録のロメコイン変更を元に戻す（既に結果が入力されている場合のみ）

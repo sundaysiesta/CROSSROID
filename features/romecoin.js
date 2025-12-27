@@ -566,16 +566,22 @@ async function interactionCreate(interaction) {
 					.map(async ([key, value]) => {
 						const isNotionName = !/^\d+$/.test(key);
 						let discordId = key;
+						let notionName = null;
 
 						if (isNotionName) {
 							discordId = (await notionManager.getDiscordId(key)) || key;
+							if (discordId === botUserId) return null;
+							notionName = key;
+						} else {
+							// Discord IDからNotion名を取得
+							notionName = await notionManager.getNotionName(discordId).catch(() => null);
 							if (discordId === botUserId) return null;
 						}
 
 						// 預金を含めた合計を計算
 						const totalValue = await getTotalBalance(discordId);
 
-						return { key, discordId, displayName: isNotionName ? key : null, value: totalValue };
+						return { key, discordId, displayName: isNotionName ? key : null, notionName, value: totalValue };
 					})
 			);
 			
@@ -605,7 +611,8 @@ async function interactionCreate(interaction) {
 					const rank = startIndex + index + 1;
 					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
 					const displayName = item.displayName || `<@${item.discordId}>`;
-					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
+					const notionDisplay = item.notionName ? ` (${item.notionName})` : '';
+					return `${medal} ${displayName}${notionDisplay}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
 				})
 				.join('\n');
 			
@@ -691,7 +698,8 @@ async function interactionCreate(interaction) {
 					const rank = startIndex + index + 1;
 					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
 					const displayName = item.displayName || `<@${item.discordId}>`;
-					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
+					const notionDisplay = item.notionName ? ` (${item.notionName})` : '';
+					return `${medal} ${displayName}${notionDisplay}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
 				})
 				.join('\n');
 			

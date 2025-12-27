@@ -568,7 +568,7 @@ client.once('clientReady', async (client) => {
 			.addUserOption((option) =>
 				option
 					.setName('player1')
-					.setDescription('参加メンバー1（サンマの場合は2人、四麻の場合は3人必要）')
+					.setDescription('参加メンバー1（三麻の場合は2人、四麻の場合は3人必要）')
 					.setRequired(true)
 			)
 			.addUserOption((option) => option.setName('player2').setDescription('参加メンバー2').setRequired(true))
@@ -670,6 +670,15 @@ client.once('clientReady', async (client) => {
 			)
 			.addIntegerOption((option) =>
 				option.setName('amount').setDescription('減額するロメコインの量').setRequired(true)
+			),
+		new SlashCommandBuilder()
+			.setName('admin_romecoin_set')
+			.setDescription('指定ユーザーのロメコインを特定の金額に設定します（管理者専用）')
+			.addUserOption((option) =>
+				option.setName('user').setDescription('ロメコインを設定するユーザー').setRequired(true)
+			)
+			.addIntegerOption((option) =>
+				option.setName('amount').setDescription('設定するロメコインの量').setRequired(true)
 			),
 		new SlashCommandBuilder()
 			.setName('admin_restore_file')
