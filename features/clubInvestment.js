@@ -119,9 +119,17 @@ async function handleClubInvestInfo(interaction, client) {
 		const channel = interaction.options.getChannel('channel') || interaction.channel;
 		
 		// 部活チャンネルかチェック
-		const parentId = channel.parentId ? String(channel.parentId) : null;
-		if (!parentId || !CLUB_CATEGORY_IDS.includes(parentId)) {
-			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId}, CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS)}`);
+		// channel.parentIdがnullの場合や、型が一致しない場合を考慮
+		let parentId = null;
+		if (channel.parentId !== null && channel.parentId !== undefined) {
+			parentId = String(channel.parentId);
+		}
+		
+		// CLUB_CATEGORY_IDSの各要素も文字列として比較
+		const parentIdInList = parentId && CLUB_CATEGORY_IDS.some(catId => String(catId) === parentId);
+		
+		if (!parentId || !parentIdInList) {
+			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId} (type: ${typeof parentId}), CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS.map(id => String(id)))}`);
 			return interaction.reply({
 				content: '部活チャンネルで実行してください。',
 				flags: [MessageFlags.Ephemeral],
@@ -217,9 +225,17 @@ async function handleClubInvestBuy(interaction, client) {
 		const amount = interaction.options.getInteger('amount');
 
 		// 部活チャンネルかチェック
-		const parentId = channel.parentId ? String(channel.parentId) : null;
-		if (!parentId || !CLUB_CATEGORY_IDS.includes(parentId)) {
-			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId}, CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS)}`);
+		// channel.parentIdがnullの場合や、型が一致しない場合を考慮
+		let parentId = null;
+		if (channel.parentId !== null && channel.parentId !== undefined) {
+			parentId = String(channel.parentId);
+		}
+		
+		// CLUB_CATEGORY_IDSの各要素も文字列として比較
+		const parentIdInList = parentId && CLUB_CATEGORY_IDS.some(catId => String(catId) === parentId);
+		
+		if (!parentId || !parentIdInList) {
+			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId} (type: ${typeof parentId}), CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS.map(id => String(id)))}`);
 			return interaction.reply({
 				content: '部活チャンネルで実行してください。',
 				flags: [MessageFlags.Ephemeral],
@@ -376,9 +392,17 @@ async function handleClubInvestSell(interaction, client) {
 		const shares = interaction.options.getInteger('shares');
 
 		// 部活チャンネルかチェック
-		const parentId = channel.parentId ? String(channel.parentId) : null;
-		if (!parentId || !CLUB_CATEGORY_IDS.includes(parentId)) {
-			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId}, CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS)}`);
+		// channel.parentIdがnullの場合や、型が一致しない場合を考慮
+		let parentId = null;
+		if (channel.parentId !== null && channel.parentId !== undefined) {
+			parentId = String(channel.parentId);
+		}
+		
+		// CLUB_CATEGORY_IDSの各要素も文字列として比較
+		const parentIdInList = parentId && CLUB_CATEGORY_IDS.some(catId => String(catId) === parentId);
+		
+		if (!parentId || !parentIdInList) {
+			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId} (type: ${typeof parentId}), CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS.map(id => String(id)))}`);
 			return interaction.reply({
 				content: '部活チャンネルで実行してください。',
 				flags: [MessageFlags.Ephemeral],
