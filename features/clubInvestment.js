@@ -44,7 +44,7 @@ function saveClubInvestmentData(data) {
 }
 
 // ヒサメbotからアクティブポイントを取得（リトライ機能付き）
-async function getClubActivityPoint(channelId, retries = 3) {
+async function getClubActivityPoint(channelId, retries = 5) {
 	const url = `${HISAME_BOT_API_URL}/api/club/activity/${channelId}`;
 	
 	for (let attempt = 1; attempt <= retries; attempt++) {
@@ -53,7 +53,7 @@ async function getClubActivityPoint(channelId, retries = 3) {
 				headers: {
 					'x-api-token': HISAME_BOT_API_TOKEN,
 				},
-				timeout: 15000, // タイムアウトを15秒に延長
+				timeout: 30000, // タイムアウトを30秒に延長
 			});
 
 			const data = response.data;
@@ -73,12 +73,26 @@ async function getClubActivityPoint(channelId, retries = 3) {
 			// タイムアウトエラーの場合
 			if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
 				if (attempt < retries) {
-					const delay = attempt * 1000; // 1秒、2秒、3秒と段階的に遅延
+					const delay = attempt * 2000; // 2秒、4秒、6秒、8秒、10秒と段階的に遅延
 					console.warn(`[ClubInvestment] アクティブポイント取得タイムアウト (channelId: ${channelId}, 試行 ${attempt}/${retries}), ${delay}ms後にリトライ...`);
 					await new Promise(resolve => setTimeout(resolve, delay));
 					continue;
 				} else {
-					console.error(`[ClubInvestment] アクティブポイント取得タイムアウト (channelId: ${channelId}): 最大リトライ回数に達しました`);
+					console.warn(`[ClubInvestment] アクティブポイント取得タイムアウト (channelId: ${channelId}): 最大リトライ回数に達しました。このチャンネルをスキップします。`);
+					// タイムアウト時はnullを返して処理を続行（他のチャンネルの取得を妨げない）
+					return null;
+				}
+			}
+			
+			// ネットワークエラーの場合（ECONNREFUSED, ENOTFOUNDなど）
+			if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+				if (attempt < retries) {
+					const delay = attempt * 2000;
+					console.warn(`[ClubInvestment] ネットワークエラー (channelId: ${channelId}, 試行 ${attempt}/${retries}), ${delay}ms後にリトライ...`);
+					await new Promise(resolve => setTimeout(resolve, delay));
+					continue;
+				} else {
+					console.warn(`[ClubInvestment] ネットワークエラー (channelId: ${channelId}): 最大リトライ回数に達しました。このチャンネルをスキップします。`);
 					return null;
 				}
 			}
@@ -127,8 +141,8 @@ async function calculateBaseActivityPoint(client) {
 			}
 		}
 
-		// 並行処理を制限（同時に3つまで）
-		const CONCURRENT_LIMIT = 3;
+		// 並行処理を制限（同時に2つまで、タイムアウト対策）
+		const CONCURRENT_LIMIT = 2;
 		for (let i = 0; i < allChannels.length; i += CONCURRENT_LIMIT) {
 			const batch = allChannels.slice(i, i + CONCURRENT_LIMIT);
 			const promises = batch.map(async (channel) => {
@@ -147,12 +161,14 @@ async function calculateBaseActivityPoint(client) {
 			for (const result of results) {
 				if (result.status === 'fulfilled' && result.value !== null) {
 					activityPoints.push(result.value);
+				} else if (result.status === 'rejected') {
+					console.error(`[ClubInvestment] チャンネル処理エラー:`, result.reason);
 				}
 			}
 			
-			// バッチ間で少し待機（API負荷を軽減）
+			// バッチ間で少し待機（API負荷を軽減、タイムアウト対策）
 			if (i + CONCURRENT_LIMIT < allChannels.length) {
-				await new Promise(resolve => setTimeout(resolve, 200));
+				await new Promise(resolve => setTimeout(resolve, 500));
 			}
 		}
 
