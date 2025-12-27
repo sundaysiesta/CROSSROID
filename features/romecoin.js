@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
-const { getData, updateData, migrateData } = require('./dataAccess');
+const { getData, updateData, migrateData, findDataKey } = require('./dataAccess');
 const { ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
 const persistence = require('./persistence');
 
@@ -319,22 +319,24 @@ function getRomecoinData() {
 
 // ロメコイン残高を取得
 async function getRomecoin(userId) {
-	// 最新のデータを読み込む（グローバル変数から直接読み込む）
-	// 注意: loadRomecoinData()は毎回ファイルから読み込むので、メモリ上の変更が失われる可能性がある
-	// そのため、romecoin_dataがnullでない場合はそれを使用する
-	let data;
-	if (romecoin_data !== null) {
-		data = romecoin_data;
-		console.log(`[Romecoin] getRomecoin: グローバル変数から読み込み: userId=${userId}`);
-	} else {
-		data = loadRomecoinData();
-		console.log(`[Romecoin] getRomecoin: ファイルから読み込み: userId=${userId}`);
-	}
+	// 常にファイルから最新のデータを読み込む（ファイルが更新されている可能性があるため）
+	// グローバル変数は更新処理中に使用されるが、取得時は常にファイルから読み込む
+	const data = loadRomecoinData();
+	console.log(`[Romecoin] getRomecoin: ファイルから読み込み: userId=${userId}, エントリ数=${Object.keys(data).length}`);
+	
 	await migrateData(userId, data);
 	const balance = await getData(userId, data, 0);
+	
 	// 負の値や無効な値を0に正規化
 	const normalizedBalance = Math.max(0, Math.min(MAX_SAFE_VALUE, Number(balance) || 0));
 	console.log(`[Romecoin] getRomecoin: userId=${userId}, balance=${balance}, normalized=${normalizedBalance}`);
+	
+	// デバッグ用：データが見つからない場合の詳細ログ
+	if (balance === 0 || balance === null || balance === undefined) {
+		const key = await findDataKey(userId, data);
+		console.log(`[Romecoin] getRomecoin: データキー検索結果: key=${key}, data[key]=${key ? data[key] : 'undefined'}`);
+	}
+	
 	return normalizedBalance;
 }
 
