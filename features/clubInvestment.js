@@ -43,33 +43,53 @@ function saveClubInvestmentData(data) {
 	}
 }
 
-// ヒサメbotからアクティブポイントを取得
-async function getClubActivityPoint(channelId) {
-	try {
-		const url = `${HISAME_BOT_API_URL}/api/club/activity/${channelId}`;
-		const response = await axios.get(url, {
-			headers: {
-				'x-api-token': HISAME_BOT_API_TOKEN,
-			},
-			timeout: 5000,
-		});
+// ヒサメbotからアクティブポイントを取得（リトライ機能付き）
+async function getClubActivityPoint(channelId, retries = 3) {
+	const url = `${HISAME_BOT_API_URL}/api/club/activity/${channelId}`;
+	
+	for (let attempt = 1; attempt <= retries; attempt++) {
+		try {
+			const response = await axios.get(url, {
+				headers: {
+					'x-api-token': HISAME_BOT_API_TOKEN,
+				},
+				timeout: 15000, // タイムアウトを15秒に延長
+			});
 
-		const data = response.data;
-		return {
-			activityPoint: data.activityPoint || 0,
-			rank: data.rank || null,
-			activeMemberCount: data.activeMemberCount || 0,
-			weeklyMessageCount: data.weeklyMessageCount || 0,
-			lastUpdated: data.lastUpdated || Date.now(),
-		};
-	} catch (error) {
-		if (error.response?.status === 404) {
-			console.log(`[ClubInvestment] 部活が見つかりません: ${channelId}`);
+			const data = response.data;
+			return {
+				activityPoint: data.activityPoint || 0,
+				rank: data.rank || null,
+				activeMemberCount: data.activeMemberCount || 0,
+				weeklyMessageCount: data.weeklyMessageCount || 0,
+				lastUpdated: data.lastUpdated || Date.now(),
+			};
+		} catch (error) {
+			if (error.response?.status === 404) {
+				console.log(`[ClubInvestment] 部活が見つかりません: ${channelId}`);
+				return null;
+			}
+			
+			// タイムアウトエラーの場合
+			if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+				if (attempt < retries) {
+					const delay = attempt * 1000; // 1秒、2秒、3秒と段階的に遅延
+					console.warn(`[ClubInvestment] アクティブポイント取得タイムアウト (channelId: ${channelId}, 試行 ${attempt}/${retries}), ${delay}ms後にリトライ...`);
+					await new Promise(resolve => setTimeout(resolve, delay));
+					continue;
+				} else {
+					console.error(`[ClubInvestment] アクティブポイント取得タイムアウト (channelId: ${channelId}): 最大リトライ回数に達しました`);
+					return null;
+				}
+			}
+			
+			// その他のエラー
+			console.error(`[ClubInvestment] アクティブポイント取得エラー (channelId: ${channelId}):`, error.message);
 			return null;
 		}
-		console.error(`[ClubInvestment] アクティブポイント取得エラー (channelId: ${channelId}):`, error.message);
-		return null;
 	}
+	
+	return null;
 }
 
 // 全部活のアクティブポイントを取得して基準値を計算（平均値または中央値）
@@ -91,6 +111,7 @@ async function calculateBaseActivityPoint(client) {
 		}
 
 		const activityPoints = [];
+		const allChannels = [];
 		
 		// 各カテゴリから部活チャンネルを取得
 		for (const categoryId of CLUB_CATEGORY_IDS) {
@@ -100,19 +121,38 @@ async function calculateBaseActivityPoint(client) {
 				
 				// カテゴリ内の全チャンネルを取得
 				const channels = category.children.cache.filter(ch => ch.type === 0); // テキストチャンネルのみ
-				
-				for (const channel of channels.values()) {
-					try {
-						const activityData = await getClubActivityPoint(channel.id);
-						if (activityData && activityData.activityPoint > 0) {
-							activityPoints.push(activityData.activityPoint);
-						}
-					} catch (error) {
-						console.error(`[ClubInvestment] チャンネル ${channel.id} のアクティブポイント取得エラー:`, error.message);
-					}
-				}
+				allChannels.push(...channels.values());
 			} catch (error) {
 				console.error(`[ClubInvestment] カテゴリ ${categoryId} の取得エラー:`, error.message);
+			}
+		}
+
+		// 並行処理を制限（同時に3つまで）
+		const CONCURRENT_LIMIT = 3;
+		for (let i = 0; i < allChannels.length; i += CONCURRENT_LIMIT) {
+			const batch = allChannels.slice(i, i + CONCURRENT_LIMIT);
+			const promises = batch.map(async (channel) => {
+				try {
+					const activityData = await getClubActivityPoint(channel.id);
+					if (activityData && activityData.activityPoint > 0) {
+						return activityData.activityPoint;
+					}
+				} catch (error) {
+					console.error(`[ClubInvestment] チャンネル ${channel.id} のアクティブポイント取得エラー:`, error.message);
+				}
+				return null;
+			});
+			
+			const results = await Promise.allSettled(promises);
+			for (const result of results) {
+				if (result.status === 'fulfilled' && result.value !== null) {
+					activityPoints.push(result.value);
+				}
+			}
+			
+			// バッチ間で少し待機（API負荷を軽減）
+			if (i + CONCURRENT_LIMIT < allChannels.length) {
+				await new Promise(resolve => setTimeout(resolve, 200));
 			}
 		}
 

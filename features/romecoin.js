@@ -3,6 +3,7 @@ const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 const { getData, updateData, migrateData } = require('./dataAccess');
 const { ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
+const persistence = require('./persistence');
 
 const ROMECOIN_DATA_FILE = path.join(__dirname, '..', 'romecoin_data.json');
 const ROMECOIN_DATA_BACKUP_FILE = path.join(__dirname, '..', 'romecoin_data.json.backup');
@@ -14,8 +15,15 @@ const MAX_SAFE_VALUE = Number.MAX_SAFE_INTEGER; // 2^53 - 1 = 9007199254740991
 // グローバル変数としてromecoin_dataを初期化
 let romecoin_data = null;
 
+// Discordクライアントの参照（Discordへの送信用）
+let discordClient = null;
+
 // 同時実行制御用のロック（ユーザーIDごと）
 const updateLocks = new Map();
+
+// データ保存用のロック（同時書き込みを防ぐ）
+let saveLock = false;
+let saveQueue = [];
 
 // ランキングコマンドのクールダウン
 let romecoin_ranking_cooldowns = new Map();
@@ -97,7 +105,9 @@ function loadRomecoinData() {
 					console.log(`[Romecoin] バックアップからデータを復元しました: エントリ数=${Object.keys(fileData).length}`);
 					// 復元したデータをメインファイルに保存
 					romecoin_data = fileData;
-					saveRomecoinData();
+					saveRomecoinData().catch(err => {
+						console.error('[Romecoin] 復元データ保存エラー:', err);
+					});
 					console.log('[Romecoin] 復元したデータをメインファイルに保存しました');
 				}
 			} catch (e) {
@@ -123,17 +133,34 @@ function loadRomecoinData() {
 	return romecoin_data;
 }
 
-// データ保存
-function saveRomecoinData() {
+// データ保存（アトミック書き込みとロック機能付き）
+async function saveRomecoinData() {
 	if (romecoin_data === null) {
 		console.warn('[Romecoin] saveRomecoinData: romecoin_dataがnullです。保存をスキップします。');
 		return;
 	}
+
+	// ロックがかかっている場合はキューに追加
+	if (saveLock) {
+		return new Promise((resolve) => {
+			saveQueue.push(resolve);
+		});
+	}
+
+	// ロックを取得
+	saveLock = true;
+
 	try {
 		const dataCount = Object.keys(romecoin_data).length;
 		console.log(`[Romecoin] saveRomecoinData: エントリ数=${dataCount}`);
 		
-		// バックアップを作成（既存のファイルがある場合）
+		// データの整合性を確認
+		if (dataCount === 0) {
+			console.warn('[Romecoin] データが空です。保存をスキップします。');
+			return;
+		}
+
+		// バックアップを作成（既存のファイルがある場合、書き込み前に作成）
 		if (fs.existsSync(ROMECOIN_DATA_FILE)) {
 			try {
 				fs.copyFileSync(ROMECOIN_DATA_FILE, ROMECOIN_DATA_BACKUP_FILE);
@@ -142,20 +169,129 @@ function saveRomecoinData() {
 				console.warn('[Romecoin] バックアップ作成エラー（無視）:', e);
 			}
 		}
-		// メインファイルに保存
+
+		// JSONデータを生成
 		const jsonData = JSON.stringify(romecoin_data, null, 2);
-		fs.writeFileSync(ROMECOIN_DATA_FILE, jsonData);
-		console.log(`[Romecoin] データ保存完了: ${ROMECOIN_DATA_FILE} (${jsonData.length} bytes)`);
+		const dataSize = Buffer.byteLength(jsonData, 'utf8');
+		console.log(`[Romecoin] データサイズ: ${dataSize} bytes`);
+
+		// アトミック書き込み：一時ファイルに書き込んでからリネーム
+		const tempFile = `${ROMECOIN_DATA_FILE}.tmp`;
+		
+		try {
+			// 一時ファイルに書き込み
+			fs.writeFileSync(tempFile, jsonData, { encoding: 'utf8', flag: 'w' });
+			
+			// 一時ファイルの整合性を確認（読み込んで検証）
+			const verifyData = fs.readFileSync(tempFile, 'utf8');
+			const verifyParsed = JSON.parse(verifyData);
+			if (Object.keys(verifyParsed).length !== dataCount) {
+				throw new Error('一時ファイルの検証に失敗しました（エントリ数が一致しません）');
+			}
+			
+			// リネーム（アトミック操作）
+			fs.renameSync(tempFile, ROMECOIN_DATA_FILE);
+			
+			console.log(`[Romecoin] データ保存完了: ${ROMECOIN_DATA_FILE} (${dataSize} bytes)`);
+			
+			// Discordに即座に送信（再起動を前提とした動作）
+			if (discordClient && discordClient.isReady()) {
+				try {
+					await persistence.save(discordClient);
+					console.log('[Romecoin] Discordへの送信完了');
+				} catch (discordError) {
+					console.error('[Romecoin] Discordへの送信エラー（無視）:', discordError.message);
+					// Discord送信エラーは無視（定期送信でリトライされる）
+				}
+			}
+		} catch (writeError) {
+			// 書き込みエラー時は一時ファイルを削除
+			try {
+				if (fs.existsSync(tempFile)) {
+					fs.unlinkSync(tempFile);
+				}
+			} catch (unlinkError) {
+				console.error('[Romecoin] 一時ファイル削除エラー:', unlinkError);
+			}
+			
+			// バックアップから復元を試みる
+			if (fs.existsSync(ROMECOIN_DATA_BACKUP_FILE)) {
+				try {
+					fs.copyFileSync(ROMECOIN_DATA_BACKUP_FILE, ROMECOIN_DATA_FILE);
+					console.warn('[Romecoin] 書き込みエラーによりバックアップから復元しました');
+				} catch (restoreError) {
+					console.error('[Romecoin] バックアップからの復元エラー:', restoreError);
+				}
+			}
+			
+			throw writeError;
+		}
 	} catch (e) {
 		console.error('[Romecoin] データ保存エラー:', e);
 		console.error('[Romecoin] エラースタック:', e.stack);
+	} finally {
+		// ロックを解放
+		saveLock = false;
+		
+		// キューに待機している処理があれば実行
+		if (saveQueue.length > 0) {
+			const nextResolve = saveQueue.shift();
+			nextResolve();
+			// 次の保存を実行（再帰的だが、ロックにより同時実行は防がれる）
+			setImmediate(() => saveRomecoinData());
+		}
 	}
 }
 
 // 定期的にデータを保存（1分ごと）
 setInterval(() => {
-	saveRomecoinData();
+	saveRomecoinData().catch(err => {
+		console.error('[Romecoin] 定期保存エラー:', err);
+	});
 }, 60 * 1000);
+
+// 追加の安全策：定期的にバックアップを作成（5分ごと、タイムスタンプ付き）
+const ROMECOIN_DATA_BACKUP_DIR = path.join(__dirname, '..', 'romecoin_backups');
+if (!fs.existsSync(ROMECOIN_DATA_BACKUP_DIR)) {
+	fs.mkdirSync(ROMECOIN_DATA_BACKUP_DIR, { recursive: true });
+}
+
+setInterval(() => {
+	if (romecoin_data === null) return;
+	
+	try {
+		const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+		const backupFile = path.join(ROMECOIN_DATA_BACKUP_DIR, `romecoin_data_${timestamp}.json`);
+		const jsonData = JSON.stringify(romecoin_data, null, 2);
+		fs.writeFileSync(backupFile, jsonData);
+		
+		// 古いバックアップを削除（最新10個を保持）
+		const backups = fs.readdirSync(ROMECOIN_DATA_BACKUP_DIR)
+			.filter(f => f.startsWith('romecoin_data_') && f.endsWith('.json'))
+			.map(f => ({
+				name: f,
+				path: path.join(ROMECOIN_DATA_BACKUP_DIR, f),
+				time: fs.statSync(path.join(ROMECOIN_DATA_BACKUP_DIR, f)).mtime.getTime()
+			}))
+			.sort((a, b) => b.time - a.time);
+		
+		// 10個を超える場合は古いものを削除
+		if (backups.length > 10) {
+			for (let i = 10; i < backups.length; i++) {
+				try {
+					fs.unlinkSync(backups[i].path);
+					console.log(`[Romecoin] 古いバックアップを削除: ${backups[i].name}`);
+				} catch (e) {
+					console.error(`[Romecoin] バックアップ削除エラー: ${backups[i].name}`, e);
+				}
+			}
+		}
+		
+		console.log(`[Romecoin] タイムスタンプ付きバックアップ作成: ${backupFile}`);
+	} catch (e) {
+		console.error('[Romecoin] タイムスタンプ付きバックアップ作成エラー:', e);
+	}
+}, 5 * 60 * 1000); // 5分ごと
 
 // ロメコインデータを取得
 function getRomecoinData() {
@@ -468,7 +604,7 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 			
 			// データを保存
 			console.log(`[Romecoin] データ保存を実行: userId=${userId}`);
-			saveRomecoinData();
+			await saveRomecoinData();
 			console.log(`[Romecoin] データ保存完了: userId=${userId}`);
 			
 			// 変更後の残高を取得（正規化済み）
@@ -513,6 +649,9 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 
 // クライアント準備完了時の処理
 async function clientReady(client) {
+	// Discordクライアントの参照を保存（Discordへの送信用）
+	discordClient = client;
+	
 	// データを読み込む
 	const data = loadRomecoinData();
 	const dataCount = Object.keys(data).length;
