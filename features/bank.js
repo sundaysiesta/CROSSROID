@@ -1253,6 +1253,7 @@ module.exports = {
 	handleLoanAgreement,
 	handleLoanCancel,
 	loadBankData,
+	saveBankData,
 	loadLoanData,
 	checkOverdueLoans,
 	migrateLoanData,
