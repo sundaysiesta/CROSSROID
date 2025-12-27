@@ -101,6 +101,18 @@ function initializeClubData(channelId) {
 // 部活情報を表示
 async function handleClubInvestInfo(interaction, client) {
 	try {
+		// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+		try {
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply();
+			}
+		} catch (deferErr) {
+			if (deferErr.code === 10062 || deferErr.code === 40060) {
+				return; // インタラクションがタイムアウト
+			}
+			throw deferErr;
+		}
+
 		// 世代ロールチェック
 		const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
 		const member = interaction.member;
@@ -113,7 +125,7 @@ async function handleClubInvestInfo(interaction, client) {
 				.setTitle('❌ エラー')
 				.setDescription('部活投資機能を利用するには世代ロールが必要です。')
 				.setColor(0xff0000);
-			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+			return interaction.editReply({ embeds: [errorEmbed] }).catch(() => {});
 		}
 
 		const channel = interaction.options.getChannel('channel') || interaction.channel;
@@ -130,9 +142,8 @@ async function handleClubInvestInfo(interaction, client) {
 		
 		if (!parentId || !parentIdInList) {
 			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId} (type: ${typeof parentId}), CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS.map(id => String(id)))}`);
-			return interaction.reply({
+			return interaction.editReply({
 				content: '部活チャンネルで実行してください。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -187,14 +198,22 @@ async function handleClubInvestInfo(interaction, client) {
 			)
 			.setTimestamp();
 
-		await interaction.reply({ embeds: [embed] });
+		await interaction.editReply({ embeds: [embed] });
 	} catch (error) {
 		console.error('[ClubInvestment] 情報取得エラー:', error);
-		if (!interaction.replied && !interaction.deferred) {
+		if (interaction.deferred || interaction.replied) {
+			try {
+				await interaction.editReply({
+					content: `❌ エラー: ${error.message}`,
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		} else {
 			try {
 				await interaction.reply({
-					content: 'エラーが発生しました。',
-					flags: [MessageFlags.Ephemeral],
+					content: `❌ エラー: ${error.message}`,
+					flags: MessageFlags.Ephemeral,
 				});
 			} catch (e) {
 				// エラーを無視
