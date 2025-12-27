@@ -1,4 +1,4 @@
-const { EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const { updateRomecoin, getRomecoin } = require('./romecoin');
@@ -97,7 +97,7 @@ async function findLoanKey(lenderId, borrowerId, loanData) {
 }
 
 // 進行中の借金リクエスト管理
-const pendingLoanRequests = new Map(); // requestId -> { lenderId, borrowerId, amount, days, createdAt, messageId }
+const pendingLoanRequests = new Map(); // requestId -> { lenderId, borrowerId, amount, days, interestRatePerHour, createdAt, messageId, requestType }
 
 // 借金データの移行処理（Notion連携対応）
 async function migrateLoanData(userId, loanData) {
@@ -453,35 +453,37 @@ async function handleLoanRequest(interaction, client) {
 			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
 		}
 
-		const lenderId = interaction.user.id;
-		const borrower = interaction.options.getUser('borrower');
+		const requestType = interaction.options.getString('type'); // 'lend' or 'borrow'
+		const targetUser = interaction.options.getUser('user');
 		const amount = interaction.options.getInteger('amount');
+		const interestRatePercent = interaction.options.getNumber('interest_rate'); // パーセント/時間
+		const interestRatePerHour = interestRatePercent !== null ? interestRatePercent / 100 : LOAN_INTEREST_RATE_PER_HOUR;
 
-		if (!borrower) {
+		if (!targetUser) {
 			return interaction.reply({
-				content: '借金を貸す相手を指定してください。',
+				content: '相手を指定してください。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
-		if (borrower.id === lenderId) {
+		if (targetUser.id === interaction.user.id) {
 			return interaction.reply({
-				content: '自分自身に借金を貸すことはできません。',
+				content: '自分自身と借金のやり取りをすることはできません。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
-		if (borrower.bot) {
+		if (targetUser.bot) {
 			return interaction.reply({
-				content: 'Botに借金を貸すことはできません。',
+				content: 'Botと借金のやり取りをすることはできません。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		// クロスロイド（このBot自身）への借金を防ぐ
-		if (borrower.id === client.user.id) {
+		if (targetUser.id === client.user.id) {
 			return interaction.reply({
-				content: 'クロスロイドに借金を貸すことはできません。',
+				content: 'クロスロイドと借金のやり取りをすることはできません。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
@@ -493,20 +495,42 @@ async function handleLoanRequest(interaction, client) {
 			});
 		}
 
-		const lenderBalance = await getRomecoin(lenderId);
-		if (lenderBalance < amount) {
-			return interaction.reply({
-				content: `ロメコインが不足しています。\n現在の所持: ${ROMECOIN_EMOJI}${lenderBalance.toLocaleString()}\n必要な額: ${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
-				flags: [MessageFlags.Ephemeral],
-			});
+		// リクエストタイプに応じて貸し手と借り手を決定
+		let lenderId, borrowerId;
+		if (requestType === 'lend') {
+			// 貸す場合：リクエスト送信者が貸し手、指定されたユーザーが借り手
+			lenderId = interaction.user.id;
+			borrowerId = targetUser.id;
+			
+			// 貸し手の残高をチェック
+			const lenderBalance = await getRomecoin(lenderId);
+			if (lenderBalance < amount) {
+				return interaction.reply({
+					content: `ロメコインが不足しています。\n現在の所持: ${ROMECOIN_EMOJI}${lenderBalance.toLocaleString()}\n必要な額: ${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
+		} else {
+			// 借りる場合：リクエスト送信者が借り手、指定されたユーザーが貸し手
+			borrowerId = interaction.user.id;
+			lenderId = targetUser.id;
+			
+			// 貸し手の残高をチェック
+			const lenderBalance = await getRomecoin(lenderId);
+			if (lenderBalance < amount) {
+				return interaction.reply({
+					content: `貸し手のロメコインが不足しています。\n現在の所持: ${ROMECOIN_EMOJI}${lenderBalance.toLocaleString()}\n必要な額: ${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// 借金データを読み込み（Notion連携対応）
 		const loanData = loadLoanData();
-		const loanKey = await generateLoanKey(lenderId, borrower.id);
+		const loanKey = await generateLoanKey(lenderId, borrowerId);
 		
 		// 既存の借金を検索（移行用）
-		const existingKey = await findLoanKey(lenderId, borrower.id, loanData);
+		const existingKey = await findLoanKey(lenderId, borrowerId, loanData);
 		if (existingKey) {
 			// 既存のキーと新しいキーが異なる場合は移行
 			if (existingKey !== loanKey) {
@@ -522,20 +546,25 @@ async function handleLoanRequest(interaction, client) {
 
 		// 返済期限を取得（日数、デフォルトは7日）
 		const days = interaction.options.getInteger('days') || 7;
-		if (days < 1 || days > 365) {
+		if (days < 1 || days > 14) {
 			return interaction.reply({
-				content: '返済期限は1日以上365日以下で指定してください。',
+				content: '返済期限は1日以上14日以下で指定してください。',
 				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		// 借金リクエストIDを生成
-		const requestId = `loan_${lenderId}_${borrower.id}_${Date.now()}`;
+		const requestId = `loan_${lenderId}_${borrowerId}_${Date.now()}`;
 
 		// 同意ボタンを作成
+		const lenderUser = await client.users.fetch(lenderId).catch(() => null);
+		const borrowerUser = await client.users.fetch(borrowerId).catch(() => null);
+		const lenderDisplay = lenderUser ? lenderUser.toString() : `<@${lenderId}>`;
+		const borrowerDisplay = borrowerUser ? borrowerUser.toString() : `<@${borrowerId}>`;
+
 		const agreeButton = new ButtonBuilder()
 			.setCustomId(`loan_agree_${requestId}`)
-			.setLabel('借金を受ける')
+			.setLabel(requestType === 'lend' ? '借金を受ける' : '借金を貸す')
 			.setStyle(ButtonStyle.Success)
 			.setEmoji('✅');
 
@@ -547,17 +576,20 @@ async function handleLoanRequest(interaction, client) {
 
 		const row = new ActionRowBuilder().addComponents([agreeButton, cancelButton]);
 
+		const requestTypeText = requestType === 'lend' ? '貸す' : '借りる';
+		const waitingForText = requestType === 'lend' ? borrowerDisplay : lenderDisplay;
+
 		const embed = new EmbedBuilder()
 			.setTitle('💳 借金リクエスト')
 			.setDescription(
-				`**貸し手:** ${interaction.user}\n**借り手:** ${borrower}\n**金額:** ${ROMECOIN_EMOJI}${amount.toLocaleString()}\n**返済期限:** ${days}日\n**利子率:** ${(LOAN_INTEREST_RATE_PER_HOUR * 100).toFixed(3)}%/時間\n\n${borrower} の同意を待っています。`
+				`**リクエストタイプ:** ${requestTypeText}\n**貸し手:** ${lenderDisplay}\n**借り手:** ${borrowerDisplay}\n**金額:** ${ROMECOIN_EMOJI}${amount.toLocaleString()}\n**返済期限:** ${days}日\n**利子率:** ${(interestRatePerHour * 100).toFixed(3)}%/時間\n\n${waitingForText} の同意を待っています。`
 			)
 			.setColor(0xffff00)
 			.setTimestamp();
 
-		// 借り手をメンション
+		// 同意待ちのユーザーをメンション
 		const reply = await interaction.reply({
-			content: `${borrower} 借金のリクエストがあります。同意してください。`,
+			content: `${waitingForText} 借金のリクエストがあります。同意してください。`,
 			embeds: [embed],
 			components: [row],
 		});
@@ -565,9 +597,11 @@ async function handleLoanRequest(interaction, client) {
 		// リクエストを保存
 		pendingLoanRequests.set(requestId, {
 			lenderId: lenderId,
-			borrowerId: borrower.id,
+			borrowerId: borrowerId,
 			amount: amount,
 			days: days,
+			interestRatePerHour: interestRatePerHour,
+			requestType: requestType,
 			createdAt: Date.now(),
 			messageId: reply.id,
 		});
@@ -654,7 +688,8 @@ async function handleLoanRepay(interaction, client) {
 		const now = Date.now();
 		const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
 		if (hoursPassed > 0) {
-			const interest = calculateInterest(loan.principal, hoursPassed, LOAN_INTEREST_RATE_PER_HOUR);
+			const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+			const interest = calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
 			loan.interest += interest;
 			loan.lastInterestTime = now;
 		}
@@ -680,6 +715,33 @@ async function handleLoanRepay(interaction, client) {
 					{
 						name: '返済後の残高',
 						value: `${ROMECOIN_EMOJI}${(borrowerBalance - totalAmount).toLocaleString()}`,
+						inline: true,
+					}
+				)
+				.setColor(0xff0000)
+				.setTimestamp();
+			
+			return interaction.reply({ embeds: [embed] });
+		}
+
+		// 返済後の残高が-50000以下になる場合、強制返済
+		const balanceAfterRepay = borrowerBalance - totalAmount;
+		if (balanceAfterRepay <= -50000) {
+			// 強制返済を実行
+			await forceRepayLoan(loanKey, loan, client);
+			
+			const embed = new EmbedBuilder()
+				.setTitle('⚠️ 強制返済完了')
+				.setDescription(`返済後の残高が-50,000以下になるため、強制返済が実行されました。`)
+				.addFields(
+					{
+						name: '返済額',
+						value: `${ROMECOIN_EMOJI}${totalAmount.toLocaleString()}`,
+						inline: true,
+					},
+					{
+						name: '返済後の残高',
+						value: `${ROMECOIN_EMOJI}${balanceAfterRepay.toLocaleString()}`,
 						inline: true,
 					}
 				)
@@ -791,7 +853,8 @@ async function handleLoanInfo(interaction, client) {
 				const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
 				let interest = loan.interest;
 				if (hoursPassed > 0) {
-					interest += calculateInterest(loan.principal, hoursPassed, LOAN_INTEREST_RATE_PER_HOUR);
+					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+					interest += calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
 				}
 				return { ...loan, currentInterest: interest, lenderId: loan.lenderId };
 			});
@@ -804,7 +867,8 @@ async function handleLoanInfo(interaction, client) {
 				const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
 				let interest = loan.interest;
 				if (hoursPassed > 0) {
-					interest += calculateInterest(loan.principal, hoursPassed, LOAN_INTEREST_RATE_PER_HOUR);
+					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+					interest += calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
 				}
 				return { ...loan, currentInterest: interest, borrowerId: loan.borrowerId };
 			});
@@ -832,7 +896,8 @@ async function handleLoanInfo(interaction, client) {
 					const dueDateText = dueDate 
 						? `${dueDate.toLocaleString('ja-JP')} ${isOverdue ? '⚠️ **期限切れ**' : ''}`
 						: '未設定';
-					return `**${lenderName}** への借金\n元金: ${ROMECOIN_EMOJI}${loan.principal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${loan.currentInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${total.toLocaleString()}\n返済期限: ${dueDateText}`;
+					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+					return `**${lenderName}** への借金\n元金: ${ROMECOIN_EMOJI}${loan.principal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${loan.currentInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${total.toLocaleString()}\n利子率: ${(interestRatePerHour * 100).toFixed(3)}%/時間\n返済期限: ${dueDateText}`;
 				})
 				.join('\n\n');
 			embed.addFields({ name: '📥 借りている借金', value: borrowerText, inline: false });
@@ -849,7 +914,8 @@ async function handleLoanInfo(interaction, client) {
 					const dueDateText = dueDate 
 						? `${dueDate.toLocaleString('ja-JP')} ${isOverdue ? '⚠️ **期限切れ**' : ''}`
 						: '未設定';
-					return `**${borrowerName}** への貸付\n元金: ${ROMECOIN_EMOJI}${loan.principal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${loan.currentInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${total.toLocaleString()}\n返済期限: ${dueDateText}`;
+					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+					return `**${borrowerName}** への貸付\n元金: ${ROMECOIN_EMOJI}${loan.principal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${loan.currentInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${total.toLocaleString()}\n利子率: ${(interestRatePerHour * 100).toFixed(3)}%/時間\n返済期限: ${dueDateText}`;
 				})
 				.join('\n\n');
 			embed.addFields({ name: '📤 貸している借金', value: lenderText, inline: false });
@@ -880,7 +946,8 @@ async function forceRepayLoan(loanKey, loan, client) {
 		const now = Date.now();
 		const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
 		if (hoursPassed > 0) {
-			const interest = calculateInterest(loan.principal, hoursPassed, LOAN_INTEREST_RATE_PER_HOUR);
+			const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+			const interest = calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
 			loan.interest += interest;
 			loan.lastInterestTime = now;
 		}
@@ -1000,16 +1067,78 @@ async function handleLoanAgreement(interaction, client) {
 		if (!request) {
 			return interaction.reply({
 				content: 'この借金リクエストは既に処理済みまたは期限切れです。',
-				flags: [MessageFlags.Ephemeral],
+				flags: MessageFlags.Ephemeral,
 			});
 		}
 
-		if (interaction.user.id !== request.borrowerId) {
+		// リクエストタイプに応じて同意するユーザーをチェック
+		const expectedAgreeUserId = request.requestType === 'lend' ? request.borrowerId : request.lenderId;
+		if (interaction.user.id !== expectedAgreeUserId) {
+			const roleText = request.requestType === 'lend' ? '借り手' : '貸し手';
 			return interaction.reply({
-				content: 'あなたはこの借金リクエストの借り手ではありません。',
-				flags: [MessageFlags.Ephemeral],
+				content: `あなたはこの借金リクエストの${roleText}ではありません。`,
+				flags: MessageFlags.Ephemeral,
 			});
 		}
+
+		// 貸し手が同意する場合（borrowタイプ）、返済期限を決定できるモーダルを表示
+		if (request.requestType === 'borrow' && interaction.user.id === request.lenderId) {
+			const modal = new ModalBuilder()
+				.setCustomId(`loan_agree_modal_${requestId}`)
+				.setTitle('借金の返済期限を決定');
+
+			const daysInput = new TextInputBuilder()
+				.setCustomId('days')
+				.setLabel('返済期限（日数）')
+				.setStyle(TextInputStyle.Short)
+				.setPlaceholder(`提案: ${request.days}日（1-365）`)
+				.setValue(String(request.days))
+				.setRequired(true)
+				.setMinLength(1)
+				.setMaxLength(3);
+
+			const actionRow = new ActionRowBuilder().addComponents(daysInput);
+			modal.addComponents(actionRow);
+
+			return interaction.showModal(modal);
+		}
+
+		// lendタイプの場合、貸し手が既に返済期限を決定しているので、借り手が同意するだけ
+		// ただし、貸し手が最終決定権を持つため、借り手が同意する際は提案された返済期限で処理
+		await processLoanAgreement(interaction, client, requestId, request, request.days);
+	} catch (error) {
+		console.error('[Loan] 同意処理エラー:', error);
+		if (!interaction.replied && !interaction.deferred) {
+			try {
+				await interaction.reply({
+					content: 'エラーが発生しました。',
+					flags: MessageFlags.Ephemeral,
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		}
+	}
+}
+
+// 借金の同意処理を実行する関数
+async function processLoanAgreement(interaction, client, requestId, request, days) {
+	// 早期にdeferReplyを実行してタイムアウトを防ぐ
+	try {
+		if (interaction.isModalSubmit()) {
+			await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+		} else {
+			await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+		}
+	} catch (deferError) {
+		// 既にdeferredまたはrepliedの場合は無視
+		if (!interaction.deferred && !interaction.replied) {
+			console.error('[Loan] deferReplyエラー:', deferError);
+			return;
+		}
+	}
+
+	try {
 
 		// 借金データを読み込み（Notion連携対応）
 		const loanData = loadLoanData();
@@ -1019,33 +1148,44 @@ async function handleLoanAgreement(interaction, client) {
 		const existingKey = await findLoanKey(request.lenderId, request.borrowerId, loanData);
 		if (existingKey) {
 			pendingLoanRequests.delete(requestId);
-			return interaction.reply({
+			return interaction.editReply({
 				content: 'このユーザーには既に借金があります。返済後に新しい借金を作成できます。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		const lenderBalance = await getRomecoin(request.lenderId);
 		if (lenderBalance < request.amount) {
 			pendingLoanRequests.delete(requestId);
-			return interaction.reply({
+			return interaction.editReply({
 				content: `貸し手のロメコインが不足しています。\n現在の所持: ${ROMECOIN_EMOJI}${lenderBalance.toLocaleString()}\n必要な額: ${ROMECOIN_EMOJI}${request.amount.toLocaleString()}`,
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
-		const dueDate = Date.now() + (request.days * 24 * 60 * 60 * 1000);
+		// 返済期限の検証
+		if (days < 1 || days > 14) {
+			pendingLoanRequests.delete(requestId);
+			return interaction.editReply({
+				content: '返済期限は1日以上14日以下で指定してください。',
+			});
+		}
+
+		const dueDate = Date.now() + (days * 24 * 60 * 60 * 1000);
+		const interestRatePerHour = request.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
+
+		// 借りた時点で利息を計算（1時間分の利息を初期値として設定）
+		const initialInterest = calculateInterest(request.amount, 1, interestRatePerHour);
 
 		// 借金を作成
 		loanData[loanKey] = {
 			lenderId: request.lenderId,
 			borrowerId: request.borrowerId,
 			principal: request.amount,
-			interest: 0,
+			interest: initialInterest, // 借りた時点で利息を発生させる
 			createdAt: Date.now(),
 			lastInterestTime: Date.now(),
 			dueDate: dueDate,
-			days: request.days,
+			days: days, // 貸し手が決定した返済期限
+			interestRatePerHour: interestRatePerHour, // 利子率を保存
 		};
 		saveLoanData(loanData);
 
@@ -1104,26 +1244,39 @@ async function handleLoanAgreement(interaction, client) {
 				},
 				{
 					name: '返済期限',
-					value: `${request.days}日`,
+					value: `${days}日`,
 					inline: true,
 				},
 				{
 					name: '利子率',
-					value: `${(LOAN_INTEREST_RATE_PER_HOUR * 100).toFixed(3)}%/時間`,
+					value: `${(interestRatePerHour * 100).toFixed(3)}%/時間`,
+					inline: true,
+				},
+				{
+					name: '初期利息',
+					value: `${ROMECOIN_EMOJI}${initialInterest.toLocaleString()}`,
 					inline: true,
 				}
 			)
 			.setColor(0x00ff00)
 			.setTimestamp();
 
-		await interaction.update({ embeds: [embed], components: [] });
+		await interaction.editReply({ embeds: [embed], components: [] });
 	} catch (error) {
 		console.error('[Loan] 同意処理エラー:', error);
-		if (!interaction.replied && !interaction.deferred) {
+		if (interaction.deferred || interaction.replied) {
+			try {
+				await interaction.editReply({
+					content: 'エラーが発生しました。',
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		} else {
 			try {
 				await interaction.reply({
 					content: 'エラーが発生しました。',
-					flags: [MessageFlags.Ephemeral],
+					flags: MessageFlags.Ephemeral,
 				});
 			} catch (e) {
 				// エラーを無視
@@ -1133,22 +1286,31 @@ async function handleLoanAgreement(interaction, client) {
 }
 
 async function handleLoanCancel(interaction, client) {
+	// 早期にdeferReplyを実行してタイムアウトを防ぐ
+	try {
+		await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+	} catch (deferError) {
+		// 既にdeferredまたはrepliedの場合は無視
+		if (!interaction.deferred && !interaction.replied) {
+			console.error('[Loan] deferReplyエラー:', deferError);
+			return;
+		}
+	}
+
 	try {
 		const requestId = interaction.customId.replace('loan_cancel_', '');
 		const request = pendingLoanRequests.get(requestId);
 
 		if (!request) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: 'この借金リクエストは既に処理済みまたは期限切れです。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		// 貸し手または借り手のみがキャンセル可能
 		if (interaction.user.id !== request.lenderId && interaction.user.id !== request.borrowerId) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: 'あなたはこの借金リクエストの当事者ではありません。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -1161,17 +1323,23 @@ async function handleLoanCancel(interaction, client) {
 			.setColor(0xff0000)
 			.setTimestamp();
 
-		await interaction.update({ embeds: [embed], components: [] });
+		await interaction.editReply({ embeds: [embed], components: [] });
 	} catch (error) {
 		console.error('[Loan] キャンセル処理エラー:', error);
-		if (error.code !== 10062 && error.code !== 40060) {
+		if (interaction.deferred || interaction.replied) {
 			try {
-				if (!interaction.replied && !interaction.deferred) {
-					await interaction.reply({
-						content: 'エラーが発生しました。',
-						flags: [MessageFlags.Ephemeral],
-					});
-				}
+				await interaction.editReply({
+					content: 'エラーが発生しました。',
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		} else {
+			try {
+				await interaction.reply({
+					content: 'エラーが発生しました。',
+					flags: MessageFlags.Ephemeral,
+				});
 			} catch (e) {
 				// エラーを無視
 			}
@@ -1243,6 +1411,55 @@ async function migrateBotBalanceToBank(client, specificBotId = null) {
 	}
 }
 
+// 借金同意モーダル送信の処理
+async function handleLoanAgreementModal(interaction, client) {
+	try {
+		const requestId = interaction.customId.replace('loan_agree_modal_', '');
+		const request = pendingLoanRequests.get(requestId);
+
+		if (!request) {
+			return interaction.reply({
+				content: 'この借金リクエストは既に処理済みまたは期限切れです。',
+				flags: MessageFlags.Ephemeral,
+			});
+		}
+
+		// 貸し手のみがモーダルを送信できる
+		if (interaction.user.id !== request.lenderId) {
+			return interaction.reply({
+				content: 'あなたはこの借金リクエストの貸し手ではありません。',
+				flags: MessageFlags.Ephemeral,
+			});
+		}
+
+		// 返済期限を取得
+		const daysInput = interaction.fields.getTextInputValue('days');
+		const days = parseInt(daysInput, 10);
+
+		if (isNaN(days) || days < 1 || days > 14) {
+			return interaction.reply({
+				content: '返済期限は1日以上14日以下の整数で指定してください。',
+				flags: MessageFlags.Ephemeral,
+			});
+		}
+
+		// 借金の同意処理を実行
+		await processLoanAgreement(interaction, client, requestId, request, days);
+	} catch (error) {
+		console.error('[Loan] モーダル送信エラー:', error);
+		if (!interaction.replied && !interaction.deferred) {
+			try {
+				await interaction.reply({
+					content: 'エラーが発生しました。',
+					flags: MessageFlags.Ephemeral,
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		}
+	}
+}
+
 module.exports = {
 	handleBankDeposit,
 	handleBankWithdraw,
@@ -1251,6 +1468,7 @@ module.exports = {
 	handleLoanRepay,
 	handleLoanInfo,
 	handleLoanAgreement,
+	handleLoanAgreementModal,
 	handleLoanCancel,
 	loadBankData,
 	saveBankData,

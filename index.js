@@ -885,15 +885,36 @@ client.once('clientReady', async (client) => {
 			.addSubcommand((subcommand) =>
 				subcommand
 					.setName('request')
-					.setDescription('借金を貸します')
+					.setDescription('借金のリクエストを送信します')
+					.addStringOption((option) =>
+						option
+							.setName('type')
+							.setDescription('リクエストの種類')
+							.setRequired(true)
+							.addChoices(
+								{ name: '貸す', value: 'lend' },
+								{ name: '借りる', value: 'borrow' }
+							)
+					)
 					.addUserOption((option) =>
-						option.setName('borrower').setDescription('借り手').setRequired(true)
+						option
+							.setName('user')
+							.setDescription('相手（貸す場合は借り手、借りる場合は貸し手）')
+							.setRequired(true)
 					)
 					.addIntegerOption((option) =>
-						option.setName('amount').setDescription('貸付額').setRequired(true)
+						option.setName('amount').setDescription('金額').setRequired(true)
 					)
 					.addIntegerOption((option) =>
 						option.setName('days').setDescription('返済期限（日数、デフォルト: 7日）').setRequired(false)
+					)
+					.addNumberOption((option) =>
+						option
+							.setName('interest_rate')
+							.setDescription('利子率（%/時間、デフォルト: 1.5%/時間）')
+							.setRequired(false)
+							.setMinValue(0)
+							.setMaxValue(100)
 					)
 			)
 			.addSubcommand((subcommand) =>
@@ -985,6 +1006,15 @@ client.once('clientReady', async (client) => {
 	legacyMigration.setup(client);
 	// データ復元を先に実行（保存処理の前に）
 	await persistence.restore(client);
+	// データ復元後に即座にDiscordに送信して最新状態を確保（Koyebでの再起動対策）
+	// これにより、復元したデータがDiscordに確実に保存される
+	try {
+		await persistence.save(client);
+		console.log('[Persistence] データ復元後のDiscord送信完了');
+	} catch (e) {
+		console.error('[Persistence] データ復元後のDiscord送信エラー:', e);
+		// エラーが発生しても処理は続行（定期送信でリトライされる）
+	}
 	// データ復元後に同期を開始
 	persistence.startSync(client);
 	activityTracker.start(client);
@@ -1044,6 +1074,10 @@ client.on('interactionCreate', async (interaction) => {
 		}
 		if (interaction.isButton() && interaction.customId.startsWith('loan_cancel_')) {
 			await bank.handleLoanCancel(interaction, client);
+		}
+		// 借金モーダル送信（返済期限決定）
+		if (interaction.isModalSubmit() && interaction.customId.startsWith('loan_agree_modal_')) {
+			await bank.handleLoanAgreementModal(interaction, client);
 		}
 	} catch (error) {
 		// Unknown interactionエラー（コード10062, 40060）は無視

@@ -154,11 +154,8 @@ async function saveRomecoinData() {
 		const dataCount = Object.keys(romecoin_data).length;
 		console.log(`[Romecoin] saveRomecoinData: エントリ数=${dataCount}`);
 		
-		// データの整合性を確認
-		if (dataCount === 0) {
-			console.warn('[Romecoin] データが空です。保存をスキップします。');
-			return;
-		}
+		// データが空の場合は、空のオブジェクトとして保存する（初期状態を保持）
+		// 空のデータでも保存することで、Koyebでの再起動時に空の状態が維持される
 
 		// バックアップを作成（既存のファイルがある場合、書き込み前に作成）
 		if (fs.existsSync(ROMECOIN_DATA_FILE)) {
@@ -194,15 +191,37 @@ async function saveRomecoinData() {
 			
 			console.log(`[Romecoin] データ保存完了: ${ROMECOIN_DATA_FILE} (${dataSize} bytes)`);
 			
-			// Discordに即座に送信（再起動を前提とした動作）
+			// Discordに即座に送信（再起動を前提とした動作、Koyebでは必須）
+			// Discordへの送信は必須で、失敗時はリトライする
 			if (discordClient && discordClient.isReady()) {
-				try {
-					await persistence.save(discordClient);
-					console.log('[Romecoin] Discordへの送信完了');
-				} catch (discordError) {
-					console.error('[Romecoin] Discordへの送信エラー（無視）:', discordError.message);
-					// Discord送信エラーは無視（定期送信でリトライされる）
+				let discordSaveSuccess = false;
+				let retryCount = 0;
+				const maxRetries = 5;
+				const retryDelay = 2000; // 2秒
+				
+				while (!discordSaveSuccess && retryCount < maxRetries) {
+					try {
+						await persistence.save(discordClient);
+						discordSaveSuccess = true;
+						console.log(`[Romecoin] Discordへの送信完了（試行回数: ${retryCount + 1}）`);
+					} catch (discordError) {
+						retryCount++;
+						console.error(`[Romecoin] Discordへの送信エラー（試行 ${retryCount}/${maxRetries}）:`, discordError.message);
+						
+						if (retryCount < maxRetries) {
+							// リトライ前に少し待機
+							await new Promise(resolve => setTimeout(resolve, retryDelay));
+						} else {
+							// 最大リトライ回数に達した場合、エラーをログに記録
+							console.error('[Romecoin] ⚠️ Discordへの送信に失敗しました。データが失われる可能性があります。');
+							// エラーを再スローして、呼び出し側で処理できるようにする
+							// ただし、ファイル自体は保存されているので、次回起動時に復元される可能性がある
+							// ここではエラーを無視せず、ログに記録するだけにする
+						}
+					}
 				}
+			} else {
+				console.warn('[Romecoin] ⚠️ Discordクライアントが準備できていません。データが失われる可能性があります。');
 			}
 		} catch (writeError) {
 			// 書き込みエラー時は一時ファイルを削除

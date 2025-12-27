@@ -520,6 +520,185 @@ async function handleCommands(interaction, client) {
 			return;
 		}
 
+		if (interaction.commandName === 'janken') {
+			// 早期にdeferReplyを実行してタイムアウトを防ぐ
+			try {
+				await interaction.deferReply();
+			} catch (deferError) {
+				// 既にdeferredまたはrepliedの場合は無視
+				if (!interaction.deferred && !interaction.replied) {
+					console.error('[Janken] deferReplyエラー:', deferError);
+					return;
+				}
+			}
+
+			try {
+				const userId = interaction.user.id;
+				const opponentUser = interaction.options.getUser('opponent');
+				const bet = interaction.options.getInteger('bet') || 100;
+
+				// 重複実行チェック
+				if (isUserInGame(userId)) {
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription(
+							'あなたは現在他のゲーム（duel/duel_russian/janken）を実行中です。同時に実行できるのは1つだけです。'
+						)
+						.setColor(0xff0000);
+					return interaction.editReply({ embeds: [errorEmbed] });
+				}
+
+				// 即座にロックをかける
+				const tempProgressId = `temp_janken_${userId}_${Date.now()}`;
+				setUserGame(userId, 'janken', tempProgressId);
+
+				// 被爆ロールチェック
+				if (interaction.member.roles.cache.has(RADIATION_ROLE_ID)) {
+					clearUserGame(userId);
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription('被爆ロールがついているため、対戦コマンドを実行できません。')
+						.setColor(0xff0000);
+					return interaction.editReply({ embeds: [errorEmbed] });
+				}
+
+				// betの検証
+				if (!Number.isInteger(bet) || bet <= 0 || bet > Number.MAX_SAFE_INTEGER) {
+					clearUserGame(userId);
+					return interaction.editReply({
+						content: `❌ 有効な賭け金（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`,
+					});
+				}
+
+				// ロメコインチェック
+				const { getTotalBalance } = require('../features/romecoin');
+				const userTotalBalance = await getTotalBalance(userId);
+				if (userTotalBalance < bet) {
+					clearUserGame(userId);
+					const userRomecoin = await getRomecoin(userId);
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription('ロメコインが不足しています（所持金 + 預金）')
+						.addFields(
+							{ name: '現在の所持ロメコイン', value: `${ROMECOIN_EMOJI}${userRomecoin.toLocaleString()}`, inline: true },
+							{ name: '合計残高（所持金 + 預金）', value: `${ROMECOIN_EMOJI}${userTotalBalance.toLocaleString()}`, inline: true },
+							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
+						)
+						.setColor(0xff0000);
+					return interaction.editReply({ embeds: [errorEmbed] });
+				}
+
+				// ボット対戦の場合
+				if (opponentUser && opponentUser.id === client.user.id) {
+					// ボット対戦の処理（簡易実装）
+					const choices = ['✂️', '📄', '🪨'];
+					const botChoice = choices[Math.floor(Math.random() * choices.length)];
+					
+					const row = new ActionRowBuilder().addComponents(
+						new ButtonBuilder().setCustomId('janken_rock').setLabel('グー').setStyle(ButtonStyle.Primary).setEmoji('🪨'),
+						new ButtonBuilder().setCustomId('janken_paper').setLabel('パー').setStyle(ButtonStyle.Primary).setEmoji('📄'),
+						new ButtonBuilder().setCustomId('janken_scissors').setLabel('チョキ').setStyle(ButtonStyle.Primary).setEmoji('✂️')
+					);
+
+					const embed = new EmbedBuilder()
+						.setTitle('✂️ じゃんけん')
+						.setDescription(`${interaction.user} vs ${opponentUser}\n\n${interaction.user} の選択を待っています...`)
+						.setColor(0x0099ff)
+						.setTimestamp();
+
+					await interaction.editReply({ embeds: [embed], components: [row] });
+					clearUserGame(userId);
+					return;
+				}
+
+				// 対戦募集の場合
+				if (!opponentUser) {
+					const buttonCustomId = `janken_accept_${userId}`;
+					const row = new ActionRowBuilder().addComponents(
+						new ButtonBuilder()
+							.setCustomId(buttonCustomId)
+							.setLabel('受けて立つ')
+							.setStyle(ButtonStyle.Success)
+							.setEmoji('✂️')
+					);
+
+					const embed = new EmbedBuilder()
+						.setTitle('✂️ じゃんけん対戦募集')
+						.setDescription(`${interaction.user} がじゃんけん対戦を募集しています！\n\n**賭け金: ${ROMECOIN_EMOJI}${bet.toLocaleString()}**\n\n「受けて立つ」ボタンを押して挑戦してください！`)
+						.setColor(0x0099ff)
+						.setTimestamp();
+
+					await interaction.editReply({ embeds: [embed], components: [row] });
+					return;
+				}
+
+				// 特定の相手への挑戦
+				if (opponentUser.id === userId) {
+					clearUserGame(userId);
+					return interaction.editReply({ content: '自分自身とじゃんけんすることはできません。' });
+				}
+
+				if (opponentUser.bot) {
+					clearUserGame(userId);
+					return interaction.editReply({ content: 'Botとじゃんけんすることはできません。' });
+				}
+
+				const opponentTotalBalance = await getTotalBalance(opponentUser.id);
+				if (opponentTotalBalance < bet) {
+					clearUserGame(userId);
+					const opponentRomecoin = await getRomecoin(opponentUser.id);
+					const errorEmbed = new EmbedBuilder()
+						.setTitle('❌ エラー')
+						.setDescription('対戦相手のロメコインが不足しています（所持金 + 預金）')
+						.addFields(
+							{
+								name: `${opponentUser}の現在の所持ロメコイン`,
+								value: `${ROMECOIN_EMOJI}${opponentRomecoin.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: `${opponentUser}の合計残高（所持金 + 預金）`,
+								value: `${ROMECOIN_EMOJI}${opponentTotalBalance.toLocaleString()}`,
+								inline: true,
+							},
+							{ name: '必要なロメコイン', value: `${ROMECOIN_EMOJI}${bet.toLocaleString()}`, inline: true }
+						)
+						.setColor(0xff0000);
+					return interaction.editReply({ embeds: [errorEmbed] });
+				}
+
+				const buttonCustomId = `janken_accept_${userId}_${opponentUser.id}`;
+				const row = new ActionRowBuilder().addComponents(
+					new ButtonBuilder()
+						.setCustomId(buttonCustomId)
+						.setLabel('受けて立つ')
+						.setStyle(ButtonStyle.Success)
+						.setEmoji('✂️')
+				);
+
+				const embed = new EmbedBuilder()
+					.setTitle('✂️ じゃんけん挑戦')
+					.setDescription(`${opponentUser}\n${interaction.user} からじゃんけん対戦への招待です。\n\n**賭け金: ${ROMECOIN_EMOJI}${bet.toLocaleString()}**`)
+					.setColor(0x0099ff)
+					.setTimestamp();
+
+				await interaction.editReply({
+					content: `${opponentUser}`,
+					embeds: [embed],
+					components: [row],
+				});
+			} catch (error) {
+				console.error('[Janken] エラー:', error);
+				clearUserGame(interaction.user.id);
+				if (interaction.deferred || interaction.replied) {
+					await interaction.editReply({ content: `❌ エラー: ${error.message}` }).catch(() => {});
+				} else {
+					await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+				}
+			}
+			return;
+		}
+
 		if (interaction.commandName === 'duel_russian') {
 			const userId = interaction.user.id;
 
