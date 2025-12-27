@@ -661,6 +661,9 @@ client.once('clientReady', async (client) => {
 			)
 			.addIntegerOption((option) =>
 				option.setName('amount').setDescription('増額するロメコインの量').setRequired(true)
+			)
+			.addBooleanOption((option) =>
+				option.setName('deposit').setDescription('預金を変更する（falseの場合は所持金を変更）').setRequired(false)
 			),
 		new SlashCommandBuilder()
 			.setName('admin_romecoin_deduct')
@@ -670,6 +673,9 @@ client.once('clientReady', async (client) => {
 			)
 			.addIntegerOption((option) =>
 				option.setName('amount').setDescription('減額するロメコインの量').setRequired(true)
+			)
+			.addBooleanOption((option) =>
+				option.setName('deposit').setDescription('預金を変更する（falseの場合は所持金を変更）').setRequired(false)
 			),
 		new SlashCommandBuilder()
 			.setName('admin_romecoin_set')
@@ -679,6 +685,9 @@ client.once('clientReady', async (client) => {
 			)
 			.addIntegerOption((option) =>
 				option.setName('amount').setDescription('設定するロメコインの量').setRequired(true)
+			)
+			.addBooleanOption((option) =>
+				option.setName('deposit').setDescription('預金を変更する（falseの場合は所持金を変更）').setRequired(false)
 			),
 		new SlashCommandBuilder()
 			.setName('admin_restore_file')

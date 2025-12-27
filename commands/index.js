@@ -1690,6 +1690,7 @@ async function handleCommands(interaction, client) {
 
 				const targetUser = interaction.options.getUser('user');
 				const amount = interaction.options.getInteger('amount');
+				const isDeposit = interaction.options.getBoolean('deposit') || false;
 
 				if (!targetUser) {
 					return interaction.editReply({
@@ -1709,6 +1710,69 @@ async function handleCommands(interaction, client) {
 								.setDescription(`❌ 有効な金額（1以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`),
 						],
 					});
+				}
+
+				if (isDeposit) {
+					// 預金を変更
+					const bank = require('../features/bank');
+					const bankData = bank.loadBankData();
+					const { getData: getBankData, updateData: updateBankData } = require('../features/dataAccess');
+					const INTEREST_RATE_PER_HOUR = 0.00000228;
+					const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+					const now = Date.now();
+					
+					const userBankData = await getBankData(targetUser.id, bankData, {
+						deposit: 0,
+						lastInterestTime: Date.now(),
+					});
+					
+					const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+					let currentDeposit = userBankData.deposit || 0;
+					if (hoursPassed > 0 && currentDeposit > 0) {
+						const interest = Math.round(currentDeposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+						if (interest > 0) {
+							currentDeposit += interest;
+						}
+					}
+					
+					const previousDeposit = currentDeposit;
+					const newDeposit = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, previousDeposit + amount));
+					
+					userBankData.deposit = newDeposit;
+					userBankData.lastInterestTime = now;
+					await updateBankData(targetUser.id, bankData, () => userBankData);
+					bank.saveBankData(bankData);
+					
+					const successEmbed = new EmbedBuilder()
+						.setTitle('✅ 預金増額成功')
+						.setDescription(`${targetUser} の預金を ${ROMECOIN_EMOJI}${amount.toLocaleString()} 増額しました`)
+						.addFields(
+							{
+								name: '増額前の預金',
+								value: `${ROMECOIN_EMOJI}${previousDeposit.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: '増額後の預金',
+								value: `${ROMECOIN_EMOJI}${newDeposit.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: '増額額',
+								value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+								inline: true,
+							}
+						)
+						.setColor(0x00ff00)
+						.setTimestamp()
+						.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+					if (interaction.deferred || interaction.replied) {
+						await interaction.editReply({ embeds: [successEmbed] }).catch(() => {});
+					} else {
+						await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch(() => {});
+					}
+					return;
 				}
 
 				// 現在の残高を取得
@@ -1824,6 +1888,7 @@ async function handleCommands(interaction, client) {
 
 				const targetUser = interaction.options.getUser('user');
 				const amount = interaction.options.getInteger('amount');
+				const isDeposit = interaction.options.getBoolean('deposit') || false;
 
 				if (!targetUser) {
 					return interaction.editReply({
@@ -1845,10 +1910,73 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
+				if (isDeposit) {
+					// 預金を変更
+					const bank = require('../features/bank');
+					const bankData = bank.loadBankData();
+					const { getData: getBankData, updateData: updateBankData } = require('../features/dataAccess');
+					const INTEREST_RATE_PER_HOUR = 0.00000228;
+					const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+					const now = Date.now();
+					
+					const userBankData = await getBankData(targetUser.id, bankData, {
+						deposit: 0,
+						lastInterestTime: Date.now(),
+					});
+					
+					const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+					let currentDeposit = userBankData.deposit || 0;
+					if (hoursPassed > 0 && currentDeposit > 0) {
+						const interest = Math.round(currentDeposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+						if (interest > 0) {
+							currentDeposit += interest;
+						}
+					}
+					
+					const previousDeposit = currentDeposit;
+					const newDeposit = Math.max(0, previousDeposit - amount);
+					
+					userBankData.deposit = newDeposit;
+					userBankData.lastInterestTime = now;
+					await updateBankData(targetUser.id, bankData, () => userBankData);
+					bank.saveBankData(bankData);
+					
+					const successEmbed = new EmbedBuilder()
+						.setTitle('✅ 預金減額成功')
+						.setDescription(`${targetUser} の預金を ${ROMECOIN_EMOJI}${amount.toLocaleString()} 減額しました`)
+						.addFields(
+							{
+								name: '減額前の預金',
+								value: `${ROMECOIN_EMOJI}${previousDeposit.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: '減額後の預金',
+								value: `${ROMECOIN_EMOJI}${newDeposit.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: '減額額',
+								value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+								inline: true,
+							}
+						)
+						.setColor(0xffa500)
+						.setTimestamp()
+						.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+					if (interaction.deferred || interaction.replied) {
+						await interaction.editReply({ embeds: [successEmbed] }).catch(() => {});
+					} else {
+						await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch(() => {});
+					}
+					return;
+				}
+
 				// 現在の残高を取得
 				const previousBalance = await getRomecoin(targetUser.id);
 
-				// ロメコインを減額（ログ付き、マイナスも許可）
+				// ロメコインを減額（ログ付き、マイナスも許可、預金から自動引き出し）
 				await updateRomecoin(
 					targetUser.id,
 					(current) => Math.round((current || 0) - amount),
@@ -1860,6 +1988,7 @@ async function handleCommands(interaction, client) {
 							executorId: interaction.user.id,
 							commandName: 'admin_romecoin_deduct',
 						},
+						useDeposit: true, // 管理者コマンドでは負の値も許可するため、預金から自動引き出しを有効化
 					}
 				);
 				const newBalance = await getRomecoin(targetUser.id);
@@ -1937,6 +2066,7 @@ async function handleCommands(interaction, client) {
 
 				const targetUser = interaction.options.getUser('user');
 				const amount = interaction.options.getInteger('amount');
+				const isDeposit = interaction.options.getBoolean('deposit') || false;
 
 				if (!targetUser) {
 					return interaction.editReply({
@@ -1956,6 +2086,69 @@ async function handleCommands(interaction, client) {
 								.setDescription(`❌ 有効な金額（0以上、${Number.MAX_SAFE_INTEGER.toLocaleString()}以下）を指定してください。`),
 						],
 					});
+				}
+
+				if (isDeposit) {
+					// 預金を設定
+					const bank = require('../features/bank');
+					const bankData = bank.loadBankData();
+					const { getData: getBankData, updateData: updateBankData } = require('../features/dataAccess');
+					const INTEREST_RATE_PER_HOUR = 0.00000228;
+					const INTEREST_INTERVAL_MS = 60 * 60 * 1000;
+					const now = Date.now();
+					
+					const userBankData = await getBankData(targetUser.id, bankData, {
+						deposit: 0,
+						lastInterestTime: Date.now(),
+					});
+					
+					const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
+					let currentDeposit = userBankData.deposit || 0;
+					if (hoursPassed > 0 && currentDeposit > 0) {
+						const interest = Math.round(currentDeposit * (Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1));
+						if (interest > 0) {
+							currentDeposit += interest;
+						}
+					}
+					
+					const previousDeposit = currentDeposit;
+					const newDeposit = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, amount));
+					
+					userBankData.deposit = newDeposit;
+					userBankData.lastInterestTime = now;
+					await updateBankData(targetUser.id, bankData, () => userBankData);
+					bank.saveBankData(bankData);
+					
+					const successEmbed = new EmbedBuilder()
+						.setTitle('✅ 預金設定成功')
+						.setDescription(`${targetUser} の預金を ${ROMECOIN_EMOJI}${amount.toLocaleString()} に設定しました`)
+						.addFields(
+							{
+								name: '設定前の預金',
+								value: `${ROMECOIN_EMOJI}${previousDeposit.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: '設定後の預金',
+								value: `${ROMECOIN_EMOJI}${newDeposit.toLocaleString()}`,
+								inline: true,
+							},
+							{
+								name: '設定額',
+								value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
+								inline: true,
+							}
+						)
+						.setColor(0x00ff00)
+						.setTimestamp()
+						.setFooter({ text: `実行者: ${interaction.user.tag}` });
+
+					if (interaction.deferred || interaction.replied) {
+						await interaction.editReply({ embeds: [successEmbed] }).catch(() => {});
+					} else {
+						await interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral }).catch(() => {});
+					}
+					return;
 				}
 
 				// 現在の残高を取得

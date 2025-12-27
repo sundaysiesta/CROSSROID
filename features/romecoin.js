@@ -610,9 +610,10 @@ async function interactionCreate(interaction) {
 				.map((item, index) => {
 					const rank = startIndex + index + 1;
 					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
-					const displayName = item.displayName || `<@${item.discordId}>`;
-					const notionDisplay = item.notionName ? ` (${item.notionName})` : '';
-					return `${medal} ${displayName}${notionDisplay}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
+					const displayName = item.notionName 
+						? `${item.notionName} (<@${item.discordId}>)` 
+						: (item.displayName || `<@${item.discordId}>`);
+					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
 				})
 				.join('\n');
 			
@@ -697,9 +698,10 @@ async function interactionCreate(interaction) {
 				.map((item, index) => {
 					const rank = startIndex + index + 1;
 					const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
-					const displayName = item.displayName || `<@${item.discordId}>`;
-					const notionDisplay = item.notionName ? ` (${item.notionName})` : '';
-					return `${medal} ${displayName}${notionDisplay}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
+					const displayName = item.notionName 
+						? `${item.notionName} (<@${item.discordId}>)` 
+						: (item.displayName || `<@${item.discordId}>`);
+					return `${medal} ${displayName}: ${ROMECOIN_EMOJI}${item.value.toLocaleString()}`;
 				})
 				.join('\n');
 			
