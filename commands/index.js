@@ -4178,7 +4178,6 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		// 各賭けの種類ごとのプール合計
 		const pools = {
-			sanrenpuku: 0,
 			sanrentan: 0,
 		};
 		for (const betKey in bets) {
@@ -4190,20 +4189,6 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		let oddsText = '';
 		if (Object.keys(odds).length > 0) {
-			// 三連複オッズ（主要な組み合わせのみ）
-			if (pools.sanrenpuku > 0) {
-				oddsText += '**三連複** (主要な組み合わせ)\n';
-				let comboCount = 0;
-				for (const betKey in odds) {
-					if (betKey.startsWith('sanrenpuku_') && comboCount < 10) {
-						const selections = betKey.replace('sanrenpuku_', '').split('_');
-						oddsText += `  ${selections.join(' - ')}: ${odds[betKey].display}\n`;
-						comboCount++;
-					}
-				}
-				oddsText += '\n';
-			}
-
 			// 三連単オッズ（主要な組み合わせのみ）
 			if (pools.sanrentan > 0) {
 				oddsText += '**三連単** (主要な組み合わせ)\n';
@@ -4237,7 +4222,6 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		// 各プールの合計を表示
 		const poolInfo = [];
-		if (pools.sanrenpuku > 0) poolInfo.push(`三連複: ${ROMECOIN_EMOJI}${pools.sanrenpuku.toLocaleString()}`);
 		if (pools.sanrentan > 0) poolInfo.push(`三連単: ${ROMECOIN_EMOJI}${pools.sanrentan.toLocaleString()}`);
 		
 		if (poolInfo.length > 0) {
@@ -4313,13 +4297,10 @@ async function handleRaceBet(interaction, client, parimutuel) {
 		const bet = await parimutuel.placeBet(interaction.user.id, raceId, betType, selections, amount, client);
 
 		const betTypeNames = {
-			sanrenpuku: '三連複',
 			sanrentan: '三連単',
 		};
 
-		const selectionsDisplay = betType === 'sanrentan' 
-			? selections.join(' → ')
-			: selections.join(' - ');
+		const selectionsDisplay = selections.join(' → ');
 
 		const embed = new EmbedBuilder()
 			.setTitle('✅ 賭け完了')
@@ -4458,7 +4439,6 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 		}
 
 		const betTypeNames = {
-			sanrenpuku: '三連複',
 			sanrentan: '三連単',
 		};
 
@@ -4466,9 +4446,7 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 		for (const bet of userBets) {
 			const race = parimutuel.getRace(bet.raceId);
 			const raceName = race ? race.name : bet.raceId;
-			const selectionsDisplay = bet.betType === 'sanrentan' 
-				? bet.selections.join(' → ')
-				: bet.selections.join(' - ');
+			const selectionsDisplay = bet.selections.join(' → ');
 			description += `**${raceName}**\n`;
 			description += `賭けID: \`${bet.betId}\`\n`;
 			description += `種類: ${betTypeNames[bet.betType]}\n`;
