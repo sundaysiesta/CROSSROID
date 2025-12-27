@@ -4150,7 +4150,7 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		await interaction.deferReply();
 
-		// 現在開催中のレースで、無効なベット（ワイド、複勝、三連複）を自動返金
+		// 現在開催中のレースで、無効なベット（単勝、ワイド、複勝）を自動返金
 		try {
 			const refundResult = await parimutuel.refundInvalidBets(client);
 			if (refundResult.totalRefunded > 0) {
@@ -4178,7 +4178,7 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		// 各賭けの種類ごとのプール合計
 		const pools = {
-			tansho: 0,
+			sanrenpuku: 0,
 			sanrentan: 0,
 		};
 		for (const betKey in bets) {
@@ -4190,15 +4190,19 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		let oddsText = '';
 		if (Object.keys(odds).length > 0) {
-			// 単勝オッズ
-			oddsText += '**単勝**\n';
-			for (const candidate of race.candidates) {
-				const key = `tansho_${candidate}`;
-				if (odds[key]) {
-					oddsText += `  ${candidate}: ${odds[key].display}\n`;
+			// 三連複オッズ（主要な組み合わせのみ）
+			if (pools.sanrenpuku > 0) {
+				oddsText += '**三連複** (主要な組み合わせ)\n';
+				let comboCount = 0;
+				for (const betKey in odds) {
+					if (betKey.startsWith('sanrenpuku_') && comboCount < 10) {
+						const selections = betKey.replace('sanrenpuku_', '').split('_');
+						oddsText += `  ${selections.join(' - ')}: ${odds[betKey].display}\n`;
+						comboCount++;
+					}
 				}
+				oddsText += '\n';
 			}
-			oddsText += '\n';
 
 			// 三連単オッズ（主要な組み合わせのみ）
 			if (pools.sanrentan > 0) {
@@ -4233,7 +4237,7 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		// 各プールの合計を表示
 		const poolInfo = [];
-		if (pools.tansho > 0) poolInfo.push(`単勝: ${ROMECOIN_EMOJI}${pools.tansho.toLocaleString()}`);
+		if (pools.sanrenpuku > 0) poolInfo.push(`三連複: ${ROMECOIN_EMOJI}${pools.sanrenpuku.toLocaleString()}`);
 		if (pools.sanrentan > 0) poolInfo.push(`三連単: ${ROMECOIN_EMOJI}${pools.sanrentan.toLocaleString()}`);
 		
 		if (poolInfo.length > 0) {
@@ -4275,7 +4279,7 @@ async function handleRaceBet(interaction, client, parimutuel) {
 			throw deferErr;
 		}
 
-		// 現在開催中のレースで、無効なベット（ワイド、複勝、三連複）を自動返金
+		// 現在開催中のレースで、無効なベット（単勝、ワイド、複勝）を自動返金
 		try {
 			const refundResult = await parimutuel.refundInvalidBets(client);
 			if (refundResult.totalRefunded > 0) {
@@ -4296,13 +4300,7 @@ async function handleRaceBet(interaction, client, parimutuel) {
 		}
 
 		let selections = [];
-		if (betType === 'tansho') {
-			const selection = interaction.options.getString('selection1');
-			if (!selection) {
-				return interaction.editReply({ content: '❌ 選択を指定してください' });
-			}
-			selections = [selection];
-		} else if (betType === 'sanrentan') {
+		if (betType === 'sanrenpuku' || betType === 'sanrentan') {
 			const sel1 = interaction.options.getString('selection1');
 			const sel2 = interaction.options.getString('selection2');
 			const sel3 = interaction.options.getString('selection3');
@@ -4315,16 +4313,20 @@ async function handleRaceBet(interaction, client, parimutuel) {
 		const bet = await parimutuel.placeBet(interaction.user.id, raceId, betType, selections, amount, client);
 
 		const betTypeNames = {
-			tansho: '単勝',
+			sanrenpuku: '三連複',
 			sanrentan: '三連単',
 		};
+
+		const selectionsDisplay = betType === 'sanrentan' 
+			? selections.join(' → ')
+			: selections.join(' - ');
 
 		const embed = new EmbedBuilder()
 			.setTitle('✅ 賭け完了')
 			.setDescription(`**${race.name}** への賭けが完了しました`)
 			.addFields(
 				{ name: '種類', value: betTypeNames[betType], inline: true },
-				{ name: '選択', value: selections.join(', '), inline: true },
+				{ name: '選択', value: selectionsDisplay, inline: true },
 				{ name: '金額', value: `${ROMECOIN_EMOJI}${amount.toLocaleString()}`, inline: true }
 			)
 			.setColor(0x00ff00)
@@ -4456,7 +4458,7 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 		}
 
 		const betTypeNames = {
-			tansho: '単勝',
+			sanrenpuku: '三連複',
 			sanrentan: '三連単',
 		};
 
@@ -4466,7 +4468,7 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 			const raceName = race ? race.name : bet.raceId;
 			const selectionsDisplay = bet.betType === 'sanrentan' 
 				? bet.selections.join(' → ')
-				: bet.selections.join(', ');
+				: bet.selections.join(' - ');
 			description += `**${raceName}**\n`;
 			description += `賭けID: \`${bet.betId}\`\n`;
 			description += `種類: ${betTypeNames[bet.betType]}\n`;

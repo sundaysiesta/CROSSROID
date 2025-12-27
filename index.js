@@ -799,7 +799,7 @@ client.once('clientReady', async (client) => {
 							.setDescription('賭けの種類')
 							.setRequired(true)
 							.addChoices(
-								{ name: '単勝', value: 'tansho' },
+								{ name: '三連複', value: 'sanrenpuku' },
 								{ name: '三連単', value: 'sanrentan' }
 							)
 					)
@@ -807,16 +807,16 @@ client.once('clientReady', async (client) => {
 						option.setName('amount').setDescription('賭け金（最低100ロメコイン）').setRequired(true).setMinValue(100)
 					)
 					.addStringOption((option) =>
-						option.setName('selection1').setDescription('選択1（単勝: 1名、三連単: 1着）').setRequired(true)
+						option.setName('selection1').setDescription('選択1（三連複・三連単: 1着）').setRequired(true)
 					)
 					.addStringOption((option) =>
 						option
 							.setName('selection2')
-							.setDescription('選択2（三連単: 2着）')
-							.setRequired(false)
+							.setDescription('選択2（三連複・三連単: 2着）')
+							.setRequired(true)
 					)
 					.addStringOption((option) =>
-						option.setName('selection3').setDescription('選択3（三連単: 3着）').setRequired(false)
+						option.setName('selection3').setDescription('選択3（三連複・三連単: 3着）').setRequired(true)
 					)
 			)
 			.addSubcommand((subcommand) =>

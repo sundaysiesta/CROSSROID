@@ -117,10 +117,10 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 		throw new Error('このレースは既に締め切られています');
 	}
 	
-	// 賭けの種類の検証（単勝と三連単のみ）
-	const validBetTypes = ['tansho', 'sanrentan'];
+	// 賭けの種類の検証（三連複と三連単のみ）
+	const validBetTypes = ['sanrenpuku', 'sanrentan'];
 	if (!validBetTypes.includes(betType)) {
-		throw new Error('無効な賭けの種類です。単勝と三連単のみ利用可能です');
+		throw new Error('無効な賭けの種類です。三連複と三連単のみ利用可能です');
 	}
 	
 	// 選択の検証
@@ -129,8 +129,8 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 	}
 	
 	// 賭けの種類に応じた選択数の検証
-	if (betType === 'tansho' && selections.length !== 1) {
-		throw new Error('単勝は1名を選択してください');
+	if (betType === 'sanrenpuku' && selections.length !== 3) {
+		throw new Error('三連複は3名を選択してください');
 	}
 	if (betType === 'sanrentan' && selections.length !== 3) {
 		throw new Error('三連単は3名を選択してください');
@@ -143,8 +143,8 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 		}
 	}
 	
-	// 三連単の重複チェック
-	if (betType === 'sanrentan') {
+	// 三連複と三連単の重複チェック
+	if (betType === 'sanrenpuku' || betType === 'sanrentan') {
 		const uniqueSelections = [...new Set(selections)];
 		if (uniqueSelections.length !== selections.length) {
 			throw new Error('選択に重複があります');
@@ -177,7 +177,7 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 	
 	// 賭けを記録
 	const betId = `${raceId}_${userId}_${Date.now()}`;
-	// 三連単の場合は順番を保持、単勝の場合はsort
+	// 三連単の場合は順番を保持、三連複の場合はsort（順不同）
 	const betKey = betType === 'sanrentan' 
 		? `${betType}_${selections.join('_')}`
 		: `${betType}_${selections.sort().join('_')}`;
@@ -228,9 +228,9 @@ function calculateOdds(raceId) {
 	
 	const odds = {};
 	
-	// 各賭けの種類ごとに独立したプールを計算（単勝と三連単のみ）
+	// 各賭けの種類ごとに独立したプールを計算（三連複と三連単のみ）
 	const pools = {
-		tansho: { total: 0, bets: {} },
+		sanrenpuku: { total: 0, bets: {} },
 		sanrentan: { total: 0, bets: {} },
 	};
 	
@@ -335,31 +335,6 @@ async function setRaceResult(raceId, result, client) {
 		const winners = new Set();
 		
 		// 各賭けの種類ごとに独立したプールで配当を計算
-		
-		// 単勝の配当
-		if (result.length >= 1) {
-			const tanshoKey = `tansho_${result[0]}`;
-			if (data.bets[raceId][tanshoKey] && odds[tanshoKey]) {
-				const betData = data.bets[raceId][tanshoKey];
-				const payoutPerBet = odds[tanshoKey].payoutPool / betData.totalAmount;
-				for (const bet of betData.bets) {
-					const payout = Math.floor(bet.amount * payoutPerBet);
-					if (payout > 0) {
-						await updateRomecoin(bet.userId, (current) => Math.round((current || 0) + payout), {
-							log: true,
-							client: client,
-							reason: `パリミュチュエル配当: ${race.name} (単勝)`,
-							metadata: {
-								commandName: 'parimutuel_payout',
-								raceId,
-								betType: 'tansho',
-							},
-						});
-						winners.add(bet.userId);
-					}
-				}
-			}
-		}
 		
 		// 複勝の配当（3着まで、各着順ごとに独立したプール）
 		const fukushoPositions = result.slice(0, 3);
@@ -593,10 +568,10 @@ async function cancelBet(userId, raceId, betId, client) {
 	};
 }
 
-// 現在開催中のレースで、無効なベット（ワイド、複勝、三連複）を自動返金
+// 現在開催中のレースで、無効なベット（単勝、ワイド、複勝）を自動返金
 async function refundInvalidBets(client) {
 	const data = loadParimutuelData();
-	const invalidBetTypes = ['fukusho', 'wide', 'sanrenpuku'];
+	const invalidBetTypes = ['tansho', 'fukusho', 'wide'];
 	let totalRefunded = 0;
 	let totalUsers = 0;
 	

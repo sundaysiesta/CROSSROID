@@ -13,8 +13,13 @@ const CLUB_INVESTMENT_DATA_FILE = path.join(__dirname, '..', 'club_investment_da
 const HISAME_BOT_API_URL = process.env.HISAME_BOT_API_URL || 'http://localhost:3000';
 const HISAME_BOT_API_TOKEN = process.env.CLUB_INVESTMENT_API_TOKEN || process.env.CROSSROID_API_TOKEN || process.env.API_TOKEN;
 
-// 基準アクティブポイント
-const BASE_ACTIVITY_POINT = 10000;
+// 基準アクティブポイント（動的に計算される）
+let BASE_ACTIVITY_POINT = 10000; // デフォルト値（計算失敗時のフォールバック）
+let BASE_ACTIVITY_POINT_CACHE = {
+	value: 10000,
+	lastUpdated: 0,
+};
+const BASE_ACTIVITY_POINT_CACHE_DURATION = 60 * 60 * 1000; // 1時間キャッシュ
 
 // データ読み込み
 function loadClubInvestmentData() {
@@ -67,10 +72,112 @@ async function getClubActivityPoint(channelId) {
 	}
 }
 
+// 全部活のアクティブポイントを取得して基準値を計算（平均値または中央値）
+async function calculateBaseActivityPoint(client) {
+	try {
+		// キャッシュをチェック
+		const now = Date.now();
+		if (BASE_ACTIVITY_POINT_CACHE.lastUpdated > 0 && 
+			(now - BASE_ACTIVITY_POINT_CACHE.lastUpdated) < BASE_ACTIVITY_POINT_CACHE_DURATION) {
+			BASE_ACTIVITY_POINT = BASE_ACTIVITY_POINT_CACHE.value;
+			return BASE_ACTIVITY_POINT;
+		}
+
+		// 全部活チャンネルを取得
+		const guild = client.guilds.cache.first();
+		if (!guild) {
+			console.warn('[ClubInvestment] ギルドが見つかりません。デフォルト値を使用します。');
+			return BASE_ACTIVITY_POINT;
+		}
+
+		const activityPoints = [];
+		
+		// 各カテゴリから部活チャンネルを取得
+		for (const categoryId of CLUB_CATEGORY_IDS) {
+			try {
+				const category = await guild.channels.fetch(categoryId);
+				if (!category || category.type !== 4) continue; // カテゴリでない場合はスキップ
+				
+				// カテゴリ内の全チャンネルを取得
+				const channels = category.children.cache.filter(ch => ch.type === 0); // テキストチャンネルのみ
+				
+				for (const channel of channels.values()) {
+					try {
+						const activityData = await getClubActivityPoint(channel.id);
+						if (activityData && activityData.activityPoint > 0) {
+							activityPoints.push(activityData.activityPoint);
+						}
+					} catch (error) {
+						console.error(`[ClubInvestment] チャンネル ${channel.id} のアクティブポイント取得エラー:`, error.message);
+					}
+				}
+			} catch (error) {
+				console.error(`[ClubInvestment] カテゴリ ${categoryId} の取得エラー:`, error.message);
+			}
+		}
+
+		if (activityPoints.length === 0) {
+			console.warn('[ClubInvestment] アクティブポイントを取得できませんでした。デフォルト値を使用します。');
+			return BASE_ACTIVITY_POINT;
+		}
+
+		// 平均値と中央値を計算
+		const sum = activityPoints.reduce((a, b) => a + b, 0);
+		const average = sum / activityPoints.length;
+		
+		// 中央値を計算
+		const sorted = [...activityPoints].sort((a, b) => a - b);
+		const median = sorted.length % 2 === 0
+			? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+			: sorted[Math.floor(sorted.length / 2)];
+
+		// 中央値を使用（より安定した値）
+		const baseValue = Math.round(median);
+		
+		BASE_ACTIVITY_POINT = baseValue;
+		BASE_ACTIVITY_POINT_CACHE = {
+			value: baseValue,
+			lastUpdated: now,
+		};
+
+		console.log(`[ClubInvestment] 基準アクティブポイントを更新: ${baseValue} (平均: ${Math.round(average)}, 中央値: ${baseValue}, 部活数: ${activityPoints.length})`);
+		
+		return BASE_ACTIVITY_POINT;
+	} catch (error) {
+		console.error('[ClubInvestment] 基準アクティブポイント計算エラー:', error);
+		return BASE_ACTIVITY_POINT; // エラー時は既存の値を使用
+	}
+}
+
+// 基準アクティブポイントを取得（キャッシュ付き）
+async function getBaseActivityPoint(client) {
+	// キャッシュが有効な場合はそれを使用
+	const now = Date.now();
+	if (BASE_ACTIVITY_POINT_CACHE.lastUpdated > 0 && 
+		(now - BASE_ACTIVITY_POINT_CACHE.lastUpdated) < BASE_ACTIVITY_POINT_CACHE_DURATION) {
+		return BASE_ACTIVITY_POINT_CACHE.value;
+	}
+	
+	// キャッシュが無効な場合は再計算
+	return await calculateBaseActivityPoint(client);
+}
+
 // 株価を計算
-function calculateStockPrice(clubData, activityPoint) {
+async function calculateStockPrice(clubData, activityPoint, client = null) {
 	const totalCapital = clubData.initialCapital + clubData.totalInvestment;
-	const activityRatio = activityPoint / BASE_ACTIVITY_POINT;
+	
+	// 基準アクティブポイントを取得（clientが提供されている場合）
+	let baseActivityPoint = clubData.baseActivityPoint || BASE_ACTIVITY_POINT;
+	if (client) {
+		try {
+			baseActivityPoint = await getBaseActivityPoint(client);
+		} catch (error) {
+			console.error('[ClubInvestment] 基準アクティブポイント取得エラー:', error);
+			// エラー時は既存の値を使用
+		}
+	}
+	
+	const activityRatio = activityPoint / baseActivityPoint;
 	
 	if (clubData.totalShares === 0) {
 		return 1.0; // 初期株価
@@ -81,14 +188,24 @@ function calculateStockPrice(clubData, activityPoint) {
 }
 
 // 部活投資データを初期化
-function initializeClubData(channelId) {
+async function initializeClubData(channelId, client = null) {
 	const data = loadClubInvestmentData();
 	if (!data[channelId]) {
+		// 基準アクティブポイントを取得（clientが提供されている場合）
+		let baseActivityPoint = BASE_ACTIVITY_POINT;
+		if (client) {
+			try {
+				baseActivityPoint = await getBaseActivityPoint(client);
+			} catch (error) {
+				console.error('[ClubInvestment] 基準アクティブポイント取得エラー:', error);
+			}
+		}
+		
 		data[channelId] = {
 			initialCapital: 10000, // 部活作成時の10,000ロメコイン
 			totalInvestment: 0,
 			totalShares: 10000, // 初期株式数
-			baseActivityPoint: BASE_ACTIVITY_POINT,
+			baseActivityPoint: baseActivityPoint,
 			investors: {},
 			createdAt: Date.now(),
 			lastUpdated: Date.now(),
@@ -148,17 +265,20 @@ async function handleClubInvestInfo(interaction, client) {
 		}
 
 		// 部活データを初期化
-		const clubData = initializeClubData(channel.id);
+		const clubData = await initializeClubData(channel.id, client);
+
+		// 基準アクティブポイントを計算（初回のみ、またはキャッシュが無効な場合）
+		const baseActivityPoint = await getBaseActivityPoint(client);
 
 		// アクティブポイントを取得
 		const activityData = await getClubActivityPoint(channel.id);
 		const activityPoint = activityData ? activityData.activityPoint : 0;
 
 		// 株価を計算
-		const stockPrice = calculateStockPrice(clubData, activityPoint);
+		const stockPrice = await calculateStockPrice(clubData, activityPoint, client);
 
-		// 株価変動率を計算
-		const basePrice = calculateStockPrice(clubData, BASE_ACTIVITY_POINT);
+		// 株価変動率を計算（基準アクティブポイントでの株価）
+		const basePrice = await calculateStockPrice(clubData, baseActivityPoint, client);
 		const priceChangeRate = ((stockPrice - basePrice) / basePrice) * 100;
 
 		const embed = new EmbedBuilder()
@@ -289,14 +409,15 @@ async function handleClubInvestBuy(interaction, client) {
 
 		// データを読み込み
 		const data = loadClubInvestmentData();
-		const clubData = initializeClubData(channel.id);
+		const clubData = await initializeClubData(channel.id, client);
 
 		// アクティブポイントを取得
 		const activityData = await getClubActivityPoint(channel.id);
-		const activityPoint = activityData ? activityData.activityPoint : BASE_ACTIVITY_POINT;
+		const baseActivityPoint = await getBaseActivityPoint(client);
+		const activityPoint = activityData ? activityData.activityPoint : baseActivityPoint;
 
 		// 現在の株価を計算
-		const stockPrice = calculateStockPrice(clubData, activityPoint);
+		const stockPrice = await calculateStockPrice(clubData, activityPoint, client);
 
 		// 購入可能な株式数を計算
 		const sharesToBuy = Math.floor(amount / stockPrice);
@@ -465,7 +586,7 @@ async function handleClubInvestSell(interaction, client) {
 
 		// データを読み込み
 		const data = loadClubInvestmentData();
-		const clubData = initializeClubData(channel.id);
+		const clubData = await initializeClubData(channel.id, client);
 
 		// 投資者データを取得
 		const investorKey = await getData(userId, clubData.investors, {
@@ -482,10 +603,11 @@ async function handleClubInvestSell(interaction, client) {
 
 		// アクティブポイントを取得
 		const activityData = await getClubActivityPoint(channel.id);
-		const activityPoint = activityData ? activityData.activityPoint : BASE_ACTIVITY_POINT;
+		const baseActivityPoint = await getBaseActivityPoint(client);
+		const activityPoint = activityData ? activityData.activityPoint : baseActivityPoint;
 
 		// 現在の株価を計算
-		const stockPrice = calculateStockPrice(clubData, activityPoint);
+		const stockPrice = await calculateStockPrice(clubData, activityPoint, client);
 
 		// 売却金額を計算
 		const sellAmount = Math.floor(shares * stockPrice);
@@ -619,10 +741,11 @@ async function handleClubInvestPortfolio(interaction, client) {
 			if (investorKey.shares > 0) {
 				// アクティブポイントを取得
 				const activityData = await getClubActivityPoint(channelId);
-				const activityPoint = activityData ? activityData.activityPoint : BASE_ACTIVITY_POINT;
+				const baseActivityPoint = await getBaseActivityPoint(client);
+				const activityPoint = activityData ? activityData.activityPoint : baseActivityPoint;
 
 				// 現在の株価を計算
-				const stockPrice = calculateStockPrice(clubData, activityPoint);
+				const stockPrice = await calculateStockPrice(clubData, activityPoint, client);
 
 				// 評価額と損益を計算
 				const currentValue = investorKey.shares * stockPrice;
@@ -720,5 +843,7 @@ module.exports = {
 	saveClubInvestmentData,
 	getClubActivityPoint,
 	calculateStockPrice,
+	calculateBaseActivityPoint,
+	getBaseActivityPoint,
 };
 
