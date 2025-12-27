@@ -3999,6 +3999,8 @@ async function handleCommands(interaction, client) {
 				await handleRaceResult(interaction, client, parimutuel);
 			} else if (subcommand === 'mybets') {
 				await handleRaceMyBets(interaction, client, parimutuel);
+			} else if (subcommand === 'cancel_bet') {
+				await handleRaceCancelBet(interaction, client, parimutuel);
 			}
 			return;
 		}
@@ -4148,6 +4150,16 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 
 		await interaction.deferReply();
 
+		// 現在開催中のレースで、無効なベット（ワイド、複勝、三連複）を自動返金
+		try {
+			const refundResult = await parimutuel.refundInvalidBets(client);
+			if (refundResult.totalRefunded > 0) {
+				console.log(`[Race] 無効なベットを返金: ${refundResult.totalRefunded}ロメコイン、${refundResult.totalUsers}ユーザー`);
+			}
+		} catch (refundError) {
+			console.error('[Race] 無効なベット返金エラー:', refundError);
+		}
+
 		const race = parimutuel.getRace(raceId);
 		
 		if (!race) {
@@ -4167,9 +4179,6 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 		// 各賭けの種類ごとのプール合計
 		const pools = {
 			tansho: 0,
-			fukusho: 0,
-			wide: 0,
-			sanrenpuku: 0,
 			sanrentan: 0,
 		};
 		for (const betKey in bets) {
@@ -4191,41 +4200,14 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 			}
 			oddsText += '\n';
 
-			// 複勝オッズ
-			if (pools.fukusho > 0) {
-				oddsText += '**複勝**\n';
-				for (const candidate of race.candidates) {
-					const key = `fukusho_${candidate}`;
-					if (odds[key]) {
-						oddsText += `  ${candidate}: ${odds[key].display}\n`;
-					}
-				}
-				oddsText += '\n';
-			}
-
-			// ワイドオッズ（主要な組み合わせのみ）
-			if (pools.wide > 0) {
-				oddsText += '**ワイド** (主要な組み合わせ)\n';
-				let wideCount = 0;
-				for (const betKey in odds) {
-					if (betKey.startsWith('wide_') && wideCount < 5) {
-						const selections = betKey.replace('wide_', '').split('_');
-						oddsText += `  ${selections.join(' - ')}: ${odds[betKey].display}\n`;
-						wideCount++;
-					}
-				}
-				oddsText += '\n';
-			}
-
-			// 三連複・三連単オッズ（主要な組み合わせのみ）
-			if (pools.sanrenpuku > 0 || pools.sanrentan > 0) {
-				oddsText += '**三連複・三連単** (主要な組み合わせ)\n';
+			// 三連単オッズ（主要な組み合わせのみ）
+			if (pools.sanrentan > 0) {
+				oddsText += '**三連単** (主要な組み合わせ)\n';
 				let comboCount = 0;
 				for (const betKey in odds) {
-					if ((betKey.startsWith('sanrenpuku_') || betKey.startsWith('sanrentan_')) && comboCount < 5) {
-						const type = betKey.startsWith('sanrenpuku_') ? '三連複' : '三連単';
-						const selections = betKey.replace(/^(sanrenpuku|sanrentan)_/, '').split('_');
-						oddsText += `  ${type} ${selections.join(' → ')}: ${odds[betKey].display}\n`;
+					if (betKey.startsWith('sanrentan_') && comboCount < 10) {
+						const selections = betKey.replace('sanrentan_', '').split('_');
+						oddsText += `  ${selections.join(' → ')}: ${odds[betKey].display}\n`;
 						comboCount++;
 					}
 				}
@@ -4252,9 +4234,6 @@ async function handleRaceInfo(interaction, client, parimutuel) {
 		// 各プールの合計を表示
 		const poolInfo = [];
 		if (pools.tansho > 0) poolInfo.push(`単勝: ${ROMECOIN_EMOJI}${pools.tansho.toLocaleString()}`);
-		if (pools.fukusho > 0) poolInfo.push(`複勝: ${ROMECOIN_EMOJI}${pools.fukusho.toLocaleString()}`);
-		if (pools.wide > 0) poolInfo.push(`ワイド: ${ROMECOIN_EMOJI}${pools.wide.toLocaleString()}`);
-		if (pools.sanrenpuku > 0) poolInfo.push(`三連複: ${ROMECOIN_EMOJI}${pools.sanrenpuku.toLocaleString()}`);
 		if (pools.sanrentan > 0) poolInfo.push(`三連単: ${ROMECOIN_EMOJI}${pools.sanrentan.toLocaleString()}`);
 		
 		if (poolInfo.length > 0) {
@@ -4296,6 +4275,16 @@ async function handleRaceBet(interaction, client, parimutuel) {
 			throw deferErr;
 		}
 
+		// 現在開催中のレースで、無効なベット（ワイド、複勝、三連複）を自動返金
+		try {
+			const refundResult = await parimutuel.refundInvalidBets(client);
+			if (refundResult.totalRefunded > 0) {
+				console.log(`[Race] 無効なベットを返金: ${refundResult.totalRefunded}ロメコイン、${refundResult.totalUsers}ユーザー`);
+			}
+		} catch (refundError) {
+			console.error('[Race] 無効なベット返金エラー:', refundError);
+		}
+
 		const race = parimutuel.getRace(raceId);
 		
 		if (!race) {
@@ -4307,20 +4296,13 @@ async function handleRaceBet(interaction, client, parimutuel) {
 		}
 
 		let selections = [];
-		if (betType === 'tansho' || betType === 'fukusho') {
+		if (betType === 'tansho') {
 			const selection = interaction.options.getString('selection1');
 			if (!selection) {
 				return interaction.editReply({ content: '❌ 選択を指定してください' });
 			}
 			selections = [selection];
-		} else if (betType === 'wide') {
-			const sel1 = interaction.options.getString('selection1');
-			const sel2 = interaction.options.getString('selection2');
-			if (!sel1 || !sel2) {
-				return interaction.editReply({ content: '❌ 3着以内の2名を選択してください' });
-			}
-			selections = [sel1, sel2];
-		} else if (betType === 'sanrenpuku' || betType === 'sanrentan') {
+		} else if (betType === 'sanrentan') {
 			const sel1 = interaction.options.getString('selection1');
 			const sel2 = interaction.options.getString('selection2');
 			const sel3 = interaction.options.getString('selection3');
@@ -4334,9 +4316,6 @@ async function handleRaceBet(interaction, client, parimutuel) {
 
 		const betTypeNames = {
 			tansho: '単勝',
-			fukusho: '複勝',
-			wide: 'ワイド',
-			sanrenpuku: '三連複',
 			sanrentan: '三連単',
 		};
 
@@ -4478,9 +4457,6 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 
 		const betTypeNames = {
 			tansho: '単勝',
-			fukusho: '複勝',
-			wide: 'ワイド',
-			sanrenpuku: '三連複',
 			sanrentan: '三連単',
 		};
 
@@ -4488,9 +4464,13 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 		for (const bet of userBets) {
 			const race = parimutuel.getRace(bet.raceId);
 			const raceName = race ? race.name : bet.raceId;
+			const selectionsDisplay = bet.betType === 'sanrentan' 
+				? bet.selections.join(' → ')
+				: bet.selections.join(', ');
 			description += `**${raceName}**\n`;
+			description += `賭けID: \`${bet.betId}\`\n`;
 			description += `種類: ${betTypeNames[bet.betType]}\n`;
-			description += `選択: ${bet.selections.join(', ')}\n`;
+			description += `選択: ${selectionsDisplay}\n`;
 			description += `金額: ${ROMECOIN_EMOJI}${bet.amount.toLocaleString()}\n\n`;
 		}
 
@@ -4503,6 +4483,47 @@ async function handleRaceMyBets(interaction, client, parimutuel) {
 		await interaction.editReply({ embeds: [embed] });
 	} catch (error) {
 		console.error('[Race MyBets] エラー:', error);
+		if (interaction.deferred || interaction.replied) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
+		} else {
+			await interaction.reply({ content: `❌ エラー: ${error.message}`, flags: MessageFlags.Ephemeral });
+		}
+	}
+}
+
+async function handleRaceCancelBet(interaction, client, parimutuel) {
+	try {
+		const raceId = interaction.options.getString('race_id');
+		const betId = interaction.options.getString('bet_id');
+		
+		// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+		try {
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+			}
+		} catch (deferErr) {
+			if (deferErr.code === 10062 || deferErr.code === 40060) {
+				return; // インタラクションがタイムアウト
+			}
+			throw deferErr;
+		}
+
+		const result = await parimutuel.cancelBet(interaction.user.id, raceId, betId, client);
+		const race = parimutuel.getRace(raceId);
+
+		const embed = new EmbedBuilder()
+			.setTitle('✅ 賭け取り消し完了')
+			.setDescription(`**${race ? race.name : raceId}** の賭けを取り消しました`)
+			.addFields(
+				{ name: '返金額', value: `${ROMECOIN_EMOJI}${result.amount.toLocaleString()}`, inline: true },
+				{ name: '賭けID', value: betId, inline: false }
+			)
+			.setColor(0x00ff00)
+			.setTimestamp();
+
+		await interaction.editReply({ embeds: [embed] });
+	} catch (error) {
+		console.error('[Race CancelBet] エラー:', error);
 		if (interaction.deferred || interaction.replied) {
 			await interaction.editReply({ content: `❌ エラー: ${error.message}` });
 		} else {

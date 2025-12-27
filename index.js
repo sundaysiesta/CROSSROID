@@ -800,9 +800,6 @@ client.once('clientReady', async (client) => {
 							.setRequired(true)
 							.addChoices(
 								{ name: '単勝', value: 'tansho' },
-								{ name: '複勝', value: 'fukusho' },
-								{ name: 'ワイド', value: 'wide' },
-								{ name: '三連複', value: 'sanrenpuku' },
 								{ name: '三連単', value: 'sanrentan' }
 							)
 					)
@@ -810,16 +807,16 @@ client.once('clientReady', async (client) => {
 						option.setName('amount').setDescription('賭け金（最低100ロメコイン）').setRequired(true).setMinValue(100)
 					)
 					.addStringOption((option) =>
-						option.setName('selection1').setDescription('選択1（単勝・複勝: 1名、ワイド: 1名目、三連複・三連単: 1着）').setRequired(true)
+						option.setName('selection1').setDescription('選択1（単勝: 1名、三連単: 1着）').setRequired(true)
 					)
 					.addStringOption((option) =>
 						option
 							.setName('selection2')
-							.setDescription('選択2（ワイド: 3着以内の2名目、三連複・三連単: 2着）')
+							.setDescription('選択2（三連単: 2着）')
 							.setRequired(false)
 					)
 					.addStringOption((option) =>
-						option.setName('selection3').setDescription('選択3（三連複・三連単: 3着）').setRequired(false)
+						option.setName('selection3').setDescription('選択3（三連単: 3着）').setRequired(false)
 					)
 			)
 			.addSubcommand((subcommand) =>
@@ -850,6 +847,17 @@ client.once('clientReady', async (client) => {
 					.setDescription('自分の賭け一覧を表示します')
 					.addStringOption((option) =>
 						option.setName('race_id').setDescription('レースID（未指定時は全レース）').setRequired(false)
+					)
+			)
+			.addSubcommand((subcommand) =>
+				subcommand
+					.setName('cancel_bet')
+					.setDescription('賭けを取り消します（開催中のみ）')
+					.addStringOption((option) =>
+						option.setName('race_id').setDescription('レースID').setRequired(true)
+					)
+					.addStringOption((option) =>
+						option.setName('bet_id').setDescription('賭けID（/race mybetsで確認できます）').setRequired(true)
 					)
 			),
 		new SlashCommandBuilder()

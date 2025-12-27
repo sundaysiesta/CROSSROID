@@ -117,10 +117,10 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 		throw new Error('このレースは既に締め切られています');
 	}
 	
-	// 賭けの種類の検証
-	const validBetTypes = ['tansho', 'fukusho', 'wide', 'sanrenpuku', 'sanrentan'];
+	// 賭けの種類の検証（単勝と三連単のみ）
+	const validBetTypes = ['tansho', 'sanrentan'];
 	if (!validBetTypes.includes(betType)) {
-		throw new Error('無効な賭けの種類です');
+		throw new Error('無効な賭けの種類です。単勝と三連単のみ利用可能です');
 	}
 	
 	// 選択の検証
@@ -131,15 +131,6 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 	// 賭けの種類に応じた選択数の検証
 	if (betType === 'tansho' && selections.length !== 1) {
 		throw new Error('単勝は1名を選択してください');
-	}
-	if (betType === 'fukusho' && selections.length !== 1) {
-		throw new Error('複勝は1名を選択してください');
-	}
-	if (betType === 'wide' && selections.length !== 2) {
-		throw new Error('ワイドは2名を選択してください');
-	}
-	if (betType === 'sanrenpuku' && selections.length !== 3) {
-		throw new Error('三連複は3名を選択してください');
 	}
 	if (betType === 'sanrentan' && selections.length !== 3) {
 		throw new Error('三連単は3名を選択してください');
@@ -152,8 +143,8 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 		}
 	}
 	
-	// ワイド、三連複、三連単の重複チェック
-	if (betType === 'wide' || betType === 'sanrenpuku' || betType === 'sanrentan') {
+	// 三連単の重複チェック
+	if (betType === 'sanrentan') {
 		const uniqueSelections = [...new Set(selections)];
 		if (uniqueSelections.length !== selections.length) {
 			throw new Error('選択に重複があります');
@@ -186,7 +177,10 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 	
 	// 賭けを記録
 	const betId = `${raceId}_${userId}_${Date.now()}`;
-	const betKey = `${betType}_${selections.sort().join('_')}`;
+	// 三連単の場合は順番を保持、単勝の場合はsort
+	const betKey = betType === 'sanrentan' 
+		? `${betType}_${selections.join('_')}`
+		: `${betType}_${selections.sort().join('_')}`;
 	
 	if (!data.bets[raceId]) {
 		data.bets[raceId] = {};
@@ -194,7 +188,7 @@ async function placeBet(userId, raceId, betType, selections, amount, client) {
 	if (!data.bets[raceId][betKey]) {
 		data.bets[raceId][betKey] = {
 			betType,
-			selections: selections.sort(),
+			selections: betType === 'sanrentan' ? selections : selections.sort(),
 			totalAmount: 0,
 			bets: [],
 		};
@@ -234,12 +228,9 @@ function calculateOdds(raceId) {
 	
 	const odds = {};
 	
-	// 各賭けの種類ごとに独立したプールを計算
+	// 各賭けの種類ごとに独立したプールを計算（単勝と三連単のみ）
 	const pools = {
 		tansho: { total: 0, bets: {} },
-		fukusho: { total: 0, bets: {} },
-		wide: { total: 0, bets: {} },
-		sanrenpuku: { total: 0, bets: {} },
 		sanrentan: { total: 0, bets: {} },
 	};
 	
@@ -248,6 +239,7 @@ function calculateOdds(raceId) {
 		const betData = data.bets[raceId][betKey];
 		const betType = betData.betType;
 		
+		// 単勝と三連単のみを処理
 		if (pools[betType]) {
 			pools[betType].total += betData.totalAmount;
 			pools[betType].bets[betKey] = betData;
@@ -497,6 +489,7 @@ function getUserBets(userId, raceId = null) {
 			for (const bet of betData.bets) {
 				if (bet.userId === userId) {
 					userBets.push({
+						betId: bet.betId,
 						raceId,
 						betType: betData.betType,
 						selections: betData.selections,
@@ -513,6 +506,7 @@ function getUserBets(userId, raceId = null) {
 				for (const bet of betData.bets) {
 					if (bet.userId === userId) {
 						userBets.push({
+							betId: bet.betId,
 							raceId: rId,
 							betType: betData.betType,
 							selections: betData.selections,
@@ -528,6 +522,142 @@ function getUserBets(userId, raceId = null) {
 	return userBets;
 }
 
+// ベットを取り消す
+async function cancelBet(userId, raceId, betId, client) {
+	const data = loadParimutuelData();
+	const race = data.races[raceId];
+	
+	if (!race) {
+		throw new Error('レースが見つかりません');
+	}
+	
+	if (race.status !== 'open') {
+		throw new Error('このレースは既に締め切られているため、賭けを取り消せません');
+	}
+	
+	if (!data.bets[raceId]) {
+		throw new Error('賭けが見つかりません');
+	}
+	
+	// 該当するベットを探す
+	let foundBet = null;
+	let foundBetKey = null;
+	
+	for (const betKey in data.bets[raceId]) {
+		const betData = data.bets[raceId][betKey];
+		const betIndex = betData.bets.findIndex(b => b.betId === betId && b.userId === userId);
+		if (betIndex !== -1) {
+			foundBet = betData.bets[betIndex];
+			foundBetKey = betKey;
+			break;
+		}
+	}
+	
+	if (!foundBet) {
+		throw new Error('賭けが見つかりません');
+	}
+	
+	// ロメコインを返金
+	await updateRomecoin(userId, (current) => Math.round((current || 0) + foundBet.amount), {
+		log: true,
+		client: client,
+		reason: `パリミュチュエル賭け取り消し: ${race.name}`,
+		metadata: {
+			commandName: 'parimutuel_cancel',
+			raceId,
+			betId,
+		},
+	});
+	
+	// ベットを削除
+	const betData = data.bets[raceId][foundBetKey];
+	betData.totalAmount -= foundBet.amount;
+	betData.bets = betData.bets.filter(b => b.betId !== betId);
+	
+	// ベットが空になったら削除
+	if (betData.bets.length === 0) {
+		delete data.bets[raceId][foundBetKey];
+	}
+	
+	// レースのベットが空になったら削除
+	if (Object.keys(data.bets[raceId]).length === 0) {
+		delete data.bets[raceId];
+	}
+	
+	saveParimutuelData();
+	
+	return {
+		betId,
+		raceId,
+		amount: foundBet.amount,
+	};
+}
+
+// 現在開催中のレースで、無効なベット（ワイド、複勝、三連複）を自動返金
+async function refundInvalidBets(client) {
+	const data = loadParimutuelData();
+	const invalidBetTypes = ['fukusho', 'wide', 'sanrenpuku'];
+	let totalRefunded = 0;
+	let totalUsers = 0;
+	
+	for (const raceId in data.races) {
+		const race = data.races[raceId];
+		if (race.status !== 'open') {
+			continue; // 開催中でないレースはスキップ
+		}
+		
+		if (!data.bets[raceId]) {
+			continue;
+		}
+		
+		const refundedUsers = new Set();
+		
+		for (const betKey in data.bets[raceId]) {
+			const betData = data.bets[raceId][betKey];
+			
+			// 無効なベットタイプをチェック
+			if (invalidBetTypes.includes(betData.betType)) {
+				// すべてのベットを返金
+				for (const bet of betData.bets) {
+					try {
+						await updateRomecoin(bet.userId, (current) => Math.round((current || 0) + bet.amount), {
+							log: true,
+							client: client,
+							reason: `パリミュチュエル無効ベット返金: ${race.name} (${betData.betType})`,
+							metadata: {
+								commandName: 'parimutuel_refund',
+								raceId,
+								betType: betData.betType,
+							},
+						});
+						totalRefunded += bet.amount;
+						refundedUsers.add(bet.userId);
+					} catch (error) {
+						console.error(`[Parimutuel] 返金エラー (userId: ${bet.userId}, amount: ${bet.amount}):`, error);
+					}
+				}
+				
+				// ベットデータを削除
+				delete data.bets[raceId][betKey];
+			}
+		}
+		
+		// レースのベットが空になったら削除
+		if (data.bets[raceId] && Object.keys(data.bets[raceId]).length === 0) {
+			delete data.bets[raceId];
+		}
+		
+		totalUsers += refundedUsers.size;
+	}
+	
+	saveParimutuelData();
+	
+	return {
+		totalRefunded,
+		totalUsers,
+	};
+}
+
 module.exports = {
 	loadParimutuelData,
 	saveParimutuelData,
@@ -539,6 +669,8 @@ module.exports = {
 	closeRace,
 	setRaceResult,
 	getUserBets,
+	cancelBet,
+	refundInvalidBets,
 	COMMISSION_RATE,
 };
 
