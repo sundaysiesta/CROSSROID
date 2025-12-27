@@ -361,36 +361,45 @@ async function handleBankInfo(interaction, client) {
 			lastInterestTime: Date.now(),
 		});
 
+		// 預金額を正規化（NaNやundefinedを0に変換）
+		let deposit = Number(userBankData.deposit) || 0;
+		if (isNaN(deposit) || !isFinite(deposit)) {
+			deposit = 0;
+		}
+		userBankData.deposit = deposit;
+
 		// 利子を計算して追加
 		const now = Date.now();
 		const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
 		let interest = 0;
-		if (hoursPassed > 0) {
-			interest = calculateInterest(userBankData.deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
-			if (interest > 0) {
+		if (hoursPassed > 0 && deposit > 0) {
+			interest = calculateInterest(deposit, hoursPassed, INTEREST_RATE_PER_HOUR);
+			if (interest > 0 && isFinite(interest)) {
 				userBankData.deposit += interest;
 				userBankData.lastInterestTime = now;
 				await updateData(userId, bankData, () => userBankData);
 				saveBankData(bankData);
+				deposit = userBankData.deposit; // 更新後の預金額を取得
 			}
 		}
 
 		// 銀行の合計額を計算（全ユーザーのデータを集計）
 		const totalDeposit = Object.values(bankData).reduce((sum, data) => {
 			if (data && typeof data === 'object' && 'deposit' in data) {
-				return sum + (data.deposit || 0);
+				const depositValue = Number(data.deposit) || 0;
+				return sum + (isNaN(depositValue) || !isFinite(depositValue) ? 0 : depositValue);
 			}
 			return sum;
 		}, 0);
 
 		// 利子の見積もりを計算（24時間後、1週間後、1ヶ月後）
-		const dailyInterest = calculateInterest(userBankData.deposit, 24, INTEREST_RATE_PER_HOUR);
-		const weeklyInterest = calculateInterest(userBankData.deposit, 24 * 7, INTEREST_RATE_PER_HOUR);
-		const monthlyInterest = calculateInterest(userBankData.deposit, 24 * 30, INTEREST_RATE_PER_HOUR);
+		const dailyInterest = calculateInterest(deposit, 24, INTEREST_RATE_PER_HOUR);
+		const weeklyInterest = calculateInterest(deposit, 24 * 7, INTEREST_RATE_PER_HOUR);
+		const monthlyInterest = calculateInterest(deposit, 24 * 30, INTEREST_RATE_PER_HOUR);
 		
 		// 所持金も取得
 		const currentBalance = await getRomecoin(userId);
-		const totalBalance = currentBalance + userBankData.deposit;
+		const totalBalance = (Number(currentBalance) || 0) + deposit;
 		
 		const embed = new EmbedBuilder()
 			.setTitle('🏦 黒須銀行')
@@ -398,17 +407,17 @@ async function handleBankInfo(interaction, client) {
 			.addFields(
 				{
 					name: '💰 あなたの預金額',
-					value: `${ROMECOIN_EMOJI}${userBankData.deposit.toLocaleString()}`,
+					value: `${ROMECOIN_EMOJI}${deposit.toLocaleString()}`,
 					inline: true,
 				},
 				{
 					name: '💵 現在の所持金',
-					value: `${ROMECOIN_EMOJI}${currentBalance.toLocaleString()}`,
+					value: `${ROMECOIN_EMOJI}${(Number(currentBalance) || 0).toLocaleString()}`,
 					inline: true,
 				},
 				{
 					name: '📊 合計資産',
-					value: `${ROMECOIN_EMOJI}${totalBalance.toLocaleString()}`,
+					value: `${ROMECOIN_EMOJI}${(isNaN(totalBalance) || !isFinite(totalBalance) ? 0 : totalBalance).toLocaleString()}`,
 					inline: true,
 				},
 				{
@@ -850,13 +859,23 @@ async function handleLoanInfo(interaction, client) {
 			.filter(([key, loan]) => loan.borrowerId === userId)
 			.map(([key, loan]) => {
 				const now = Date.now();
-				const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
-				let interest = loan.interest;
-				if (hoursPassed > 0) {
+				// 数値を正規化（NaNやundefinedを0に変換）
+				const principal = Number(loan.principal) || 0;
+				let interest = Number(loan.interest) || 0;
+				const lastInterestTime = Number(loan.lastInterestTime) || now;
+				
+				if (isNaN(principal)) loan.principal = 0;
+				if (isNaN(interest)) interest = 0;
+				
+				const hoursPassed = (now - lastInterestTime) / INTEREST_INTERVAL_MS;
+				if (hoursPassed > 0 && principal > 0) {
 					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
-					interest += calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
+					const additionalInterest = calculateInterest(principal, hoursPassed, interestRatePerHour);
+					if (isFinite(additionalInterest)) {
+						interest += additionalInterest;
+					}
 				}
-				return { ...loan, currentInterest: interest, lenderId: loan.lenderId };
+				return { ...loan, principal: isNaN(principal) ? 0 : principal, currentInterest: isNaN(interest) ? 0 : interest, lenderId: loan.lenderId };
 			});
 
 		// 貸し手としての借金
@@ -864,13 +883,23 @@ async function handleLoanInfo(interaction, client) {
 			.filter(([key, loan]) => loan.lenderId === userId)
 			.map(([key, loan]) => {
 				const now = Date.now();
-				const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
-				let interest = loan.interest;
-				if (hoursPassed > 0) {
+				// 数値を正規化（NaNやundefinedを0に変換）
+				const principal = Number(loan.principal) || 0;
+				let interest = Number(loan.interest) || 0;
+				const lastInterestTime = Number(loan.lastInterestTime) || now;
+				
+				if (isNaN(principal)) loan.principal = 0;
+				if (isNaN(interest)) interest = 0;
+				
+				const hoursPassed = (now - lastInterestTime) / INTEREST_INTERVAL_MS;
+				if (hoursPassed > 0 && principal > 0) {
 					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
-					interest += calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
+					const additionalInterest = calculateInterest(principal, hoursPassed, interestRatePerHour);
+					if (isFinite(additionalInterest)) {
+						interest += additionalInterest;
+					}
 				}
-				return { ...loan, currentInterest: interest, borrowerId: loan.borrowerId };
+				return { ...loan, principal: isNaN(principal) ? 0 : principal, currentInterest: isNaN(interest) ? 0 : interest, borrowerId: loan.borrowerId };
 			});
 
 		if (loansAsBorrower.length === 0 && loansAsLender.length === 0) {
@@ -890,14 +919,19 @@ async function handleLoanInfo(interaction, client) {
 				.map((loan) => {
 					const lender = client.users.cache.get(loan.lenderId);
 					const lenderName = lender ? lender.tag : `<@${loan.lenderId}>`;
-					const total = loan.principal + loan.currentInterest;
+					// 数値を正規化（NaNやundefinedを0に変換）
+					const principal = Number(loan.principal) || 0;
+					const currentInterest = Number(loan.currentInterest) || 0;
+					const safePrincipal = isNaN(principal) ? 0 : principal;
+					const safeInterest = isNaN(currentInterest) ? 0 : currentInterest;
+					const total = safePrincipal + safeInterest;
 					const dueDate = loan.dueDate ? new Date(loan.dueDate) : null;
 					const isOverdue = dueDate && Date.now() > dueDate;
 					const dueDateText = dueDate 
 						? `${dueDate.toLocaleString('ja-JP')} ${isOverdue ? '⚠️ **期限切れ**' : ''}`
 						: '未設定';
 					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
-					return `**${lenderName}** への借金\n元金: ${ROMECOIN_EMOJI}${loan.principal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${loan.currentInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${total.toLocaleString()}\n利子率: ${(interestRatePerHour * 100).toFixed(3)}%/時間\n返済期限: ${dueDateText}`;
+					return `**${lenderName}** への借金\n元金: ${ROMECOIN_EMOJI}${safePrincipal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${safeInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${(isNaN(total) ? 0 : total).toLocaleString()}\n利子率: ${(interestRatePerHour * 100).toFixed(3)}%/時間\n返済期限: ${dueDateText}`;
 				})
 				.join('\n\n');
 			embed.addFields({ name: '📥 借りている借金', value: borrowerText, inline: false });
@@ -908,14 +942,19 @@ async function handleLoanInfo(interaction, client) {
 				.map((loan) => {
 					const borrower = client.users.cache.get(loan.borrowerId);
 					const borrowerName = borrower ? borrower.tag : `<@${loan.borrowerId}>`;
-					const total = loan.principal + loan.currentInterest;
+					// 数値を正規化（NaNやundefinedを0に変換）
+					const principal = Number(loan.principal) || 0;
+					const currentInterest = Number(loan.currentInterest) || 0;
+					const safePrincipal = isNaN(principal) ? 0 : principal;
+					const safeInterest = isNaN(currentInterest) ? 0 : currentInterest;
+					const total = safePrincipal + safeInterest;
 					const dueDate = loan.dueDate ? new Date(loan.dueDate) : null;
 					const isOverdue = dueDate && Date.now() > dueDate;
 					const dueDateText = dueDate 
 						? `${dueDate.toLocaleString('ja-JP')} ${isOverdue ? '⚠️ **期限切れ**' : ''}`
 						: '未設定';
 					const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
-					return `**${borrowerName}** への貸付\n元金: ${ROMECOIN_EMOJI}${loan.principal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${loan.currentInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${total.toLocaleString()}\n利子率: ${(interestRatePerHour * 100).toFixed(3)}%/時間\n返済期限: ${dueDateText}`;
+					return `**${borrowerName}** への貸付\n元金: ${ROMECOIN_EMOJI}${safePrincipal.toLocaleString()}\n利子: ${ROMECOIN_EMOJI}${safeInterest.toLocaleString()}\n合計: ${ROMECOIN_EMOJI}${(isNaN(total) ? 0 : total).toLocaleString()}\n利子率: ${(interestRatePerHour * 100).toFixed(3)}%/時間\n返済期限: ${dueDateText}`;
 				})
 				.join('\n\n');
 			embed.addFields({ name: '📤 貸している借金', value: lenderText, inline: false });

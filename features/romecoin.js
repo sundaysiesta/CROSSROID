@@ -355,22 +355,29 @@ async function getTotalBalance(userId) {
 		deposit: 0,
 		lastInterestTime: Date.now(),
 	});
+	
+	// 預金額を正規化（NaNやundefinedを0に変換）
+	let deposit = Number(userBankData.deposit) || 0;
+	if (isNaN(deposit) || !isFinite(deposit)) {
+		deposit = 0;
+	}
+	
 	const hoursPassed = (now - userBankData.lastInterestTime) / INTEREST_INTERVAL_MS;
-	let deposit = userBankData.deposit || 0;
 	if (hoursPassed > 0 && deposit > 0) {
 		// 利子計算の精度を確保
 		const interestRate = Math.pow(1 + INTEREST_RATE_PER_HOUR, hoursPassed) - 1;
 		const interest = Math.round(deposit * interestRate);
-		if (interest > 0 && deposit + interest <= MAX_SAFE_VALUE) {
+		if (interest > 0 && isFinite(interest) && deposit + interest <= MAX_SAFE_VALUE) {
 			deposit += interest;
 		} else if (deposit + interest > MAX_SAFE_VALUE) {
 			deposit = MAX_SAFE_VALUE;
 		}
 	}
 	
-	const total = romecoinBalance + deposit;
-	// 合計値も最大値を超えないようにする
-	return Math.min(MAX_SAFE_VALUE, total);
+	const romecoinBalanceNum = Number(romecoinBalance) || 0;
+	const total = (isNaN(romecoinBalanceNum) ? 0 : romecoinBalanceNum) + (isNaN(deposit) ? 0 : deposit);
+	// 合計値も最大値を超えないようにする（NaNチェック付き）
+	return isNaN(total) || !isFinite(total) ? 0 : Math.min(MAX_SAFE_VALUE, total);
 }
 
 // ロメコイン変更をログに記録
