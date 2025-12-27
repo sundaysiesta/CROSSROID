@@ -206,6 +206,18 @@ async function handleClubInvestInfo(interaction, client) {
 // 部活に投資（株式購入）
 async function handleClubInvestBuy(interaction, client) {
 	try {
+		// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+		try {
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+			}
+		} catch (deferErr) {
+			if (deferErr.code === 10062 || deferErr.code === 40060) {
+				return; // インタラクションがタイムアウト
+			}
+			throw deferErr;
+		}
+
 		// 世代ロールチェック
 		const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
 		const member = interaction.member;
@@ -218,7 +230,7 @@ async function handleClubInvestBuy(interaction, client) {
 				.setTitle('❌ エラー')
 				.setDescription('部活投資機能を利用するには世代ロールが必要です。')
 				.setColor(0xff0000);
-			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+			return interaction.editReply({ embeds: [errorEmbed] }).catch(() => {});
 		}
 
 		const channel = interaction.options.getChannel('channel') || interaction.channel;
@@ -236,16 +248,14 @@ async function handleClubInvestBuy(interaction, client) {
 		
 		if (!parentId || !parentIdInList) {
 			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId} (type: ${typeof parentId}), CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS.map(id => String(id)))}`);
-			return interaction.reply({
+			return interaction.editReply({
 				content: '部活チャンネルで実行してください。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		if (!amount || amount <= 0) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: '有効な投資額（1以上）を指定してください。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -253,9 +263,8 @@ async function handleClubInvestBuy(interaction, client) {
 		const currentBalance = await getRomecoin(userId);
 		
 		if (currentBalance < amount) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: `ロメコインが不足しています。\n現在の所持: ${ROMECOIN_EMOJI}${currentBalance.toLocaleString()}\n必要な額: ${ROMECOIN_EMOJI}${amount.toLocaleString()}`,
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -274,9 +283,8 @@ async function handleClubInvestBuy(interaction, client) {
 		const sharesToBuy = Math.floor(amount / stockPrice);
 		
 		if (sharesToBuy <= 0) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: `投資額が少なすぎます。最低でも${ROMECOIN_EMOJI}${Math.ceil(stockPrice)}が必要です。`,
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -354,14 +362,22 @@ async function handleClubInvestBuy(interaction, client) {
 			.setColor(0x00ff00)
 			.setTimestamp();
 
-		await interaction.reply({ embeds: [embed] });
+		await interaction.editReply({ embeds: [embed] });
 	} catch (error) {
 		console.error('[ClubInvestment] 投資エラー:', error);
-		if (!interaction.replied && !interaction.deferred) {
+		if (interaction.deferred || interaction.replied) {
+			try {
+				await interaction.editReply({
+					content: `❌ エラー: ${error.message}`,
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		} else {
 			try {
 				await interaction.reply({
-					content: 'エラーが発生しました。',
-					flags: [MessageFlags.Ephemeral],
+					content: `❌ エラー: ${error.message}`,
+					flags: MessageFlags.Ephemeral,
 				});
 			} catch (e) {
 				// エラーを無視
@@ -373,6 +389,18 @@ async function handleClubInvestBuy(interaction, client) {
 // 株式を売却
 async function handleClubInvestSell(interaction, client) {
 	try {
+		// 早期にdeferReplyを実行（タイムアウトを防ぐ）
+		try {
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+			}
+		} catch (deferErr) {
+			if (deferErr.code === 10062 || deferErr.code === 40060) {
+				return; // インタラクションがタイムアウト
+			}
+			throw deferErr;
+		}
+
 		// 世代ロールチェック
 		const romanRegex = /^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$/i;
 		const member = interaction.member;
@@ -385,7 +413,7 @@ async function handleClubInvestSell(interaction, client) {
 				.setTitle('❌ エラー')
 				.setDescription('部活投資機能を利用するには世代ロールが必要です。')
 				.setColor(0xff0000);
-			return interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }).catch(() => {});
+			return interaction.editReply({ embeds: [errorEmbed] }).catch(() => {});
 		}
 
 		const channel = interaction.options.getChannel('channel') || interaction.channel;
@@ -403,16 +431,14 @@ async function handleClubInvestSell(interaction, client) {
 		
 		if (!parentId || !parentIdInList) {
 			console.log(`[ClubInvestment] 部活チャンネルチェック失敗: channelId=${channel.id}, channelName=${channel.name}, parentId=${parentId} (type: ${typeof parentId}), CLUB_CATEGORY_IDS=${JSON.stringify(CLUB_CATEGORY_IDS.map(id => String(id)))}`);
-			return interaction.reply({
+			return interaction.editReply({
 				content: '部活チャンネルで実行してください。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
 		if (!shares || shares <= 0) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: '有効な株式数（1以上）を指定してください。',
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -430,9 +456,8 @@ async function handleClubInvestSell(interaction, client) {
 		});
 
 		if (investorKey.shares < shares) {
-			return interaction.reply({
+			return interaction.editReply({
 				content: `保有株式数が不足しています。\n保有株式数: ${investorKey.shares.toLocaleString()}株\n売却株式数: ${shares.toLocaleString()}株`,
-				flags: [MessageFlags.Ephemeral],
 			});
 		}
 
@@ -518,14 +543,22 @@ async function handleClubInvestSell(interaction, client) {
 			.setColor(profit >= 0 ? 0x00ff00 : 0xff0000)
 			.setTimestamp();
 
-		await interaction.reply({ embeds: [embed] });
+		await interaction.editReply({ embeds: [embed] });
 	} catch (error) {
 		console.error('[ClubInvestment] 売却エラー:', error);
-		if (!interaction.replied && !interaction.deferred) {
+		if (interaction.deferred || interaction.replied) {
+			try {
+				await interaction.editReply({
+					content: `❌ エラー: ${error.message}`,
+				});
+			} catch (e) {
+				// エラーを無視
+			}
+		} else {
 			try {
 				await interaction.reply({
-					content: 'エラーが発生しました。',
-					flags: [MessageFlags.Ephemeral],
+					content: `❌ エラー: ${error.message}`,
+					flags: MessageFlags.Ephemeral,
 				});
 			} catch (e) {
 				// エラーを無視
