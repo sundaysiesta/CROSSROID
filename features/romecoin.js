@@ -510,9 +510,18 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 			const targetBalance = updateFn(previousBalance);
 			console.log(`[Romecoin] 目標残高: ${targetBalance} (userId=${userId})`);
 			
-			// 目標残高を最大値以内に制限（負の値は0に制限）
-			const safeTargetBalance = Math.min(MAX_SAFE_VALUE, Math.max(0, Math.round(targetBalance)));
-			console.log(`[Romecoin] 安全な目標残高: ${safeTargetBalance} (userId=${userId})`);
+			// 目標残高を最大値以内に制限
+			// useDepositが有効な場合、負の値を許可（預金から引き出せるため）
+			// useDepositが無効な場合、負の値は0に制限
+			let safeTargetBalance;
+			if (options.useDeposit) {
+				// useDepositが有効な場合、負の値を許可（ただし最大値は制限）
+				safeTargetBalance = Math.min(MAX_SAFE_VALUE, Math.round(targetBalance));
+			} else {
+				// useDepositが無効な場合、負の値は0に制限
+				safeTargetBalance = Math.min(MAX_SAFE_VALUE, Math.max(0, Math.round(targetBalance)));
+			}
+			console.log(`[Romecoin] 安全な目標残高: ${safeTargetBalance} (userId=${userId}), useDeposit=${options.useDeposit}`);
 			
 			// 預金から自動的に引き出す機能（useDeposit オプションが true の場合）
 			if (options.useDeposit) {
@@ -564,7 +573,9 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 						bank.saveBankData(bankData);
 						
 						// 預金から引き出した分を所持金に追加してから、updateFnを適用
-						const updatedKey = await updateData(userId, data, () => safeTargetBalance);
+						// 最終的な残高は0以上に制限（預金から引き出しても負の値は許可しない）
+						const finalBalance = Math.max(0, safeTargetBalance);
+						const updatedKey = await updateData(userId, data, () => finalBalance);
 						
 						if (options.log && options.client) {
 							await logRomecoinChange(

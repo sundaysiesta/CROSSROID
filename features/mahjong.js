@@ -915,6 +915,7 @@ async function handleEdit(interaction, client) {
 							log: true,
 							client: client,
 							reason: `賭け麻雀記録修正（元に戻す）: ${table.scores[i]}点`,
+							useDeposit: oldRomecoinChange > 0, // 元に戻す際に減額する場合（oldRomecoinChangeが正の値の場合、元に戻すと減額）は預金から自動引き出し
 							metadata: {
 								commandName: 'mahjong_edit',
 								targetUserId: playerId,
@@ -948,6 +949,7 @@ async function handleEdit(interaction, client) {
 						log: true,
 						client: client,
 						reason: `賭け麻雀記録修正: ${scores[i]}点`,
+						useDeposit: romecoinChange < 0, // 減額の場合のみ預金から自動引き出し
 						metadata: {
 							commandName: 'mahjong_edit',
 							targetUserId: playerId,
