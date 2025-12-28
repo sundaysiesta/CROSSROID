@@ -1054,6 +1054,7 @@ async function forceRepayLoan(loanKey, loan, client) {
 		const borrowerBalance = await getRomecoin(loan.borrowerId);
 		
 		// 借り手のロメコインを減額（マイナスになっても強制返済）
+		// useDepositを有効にして、所持金が足りない場合は預金から自動引き出し
 		await updateRomecoin(
 			loan.borrowerId,
 			(current) => Math.round((current || 0) - totalAmount),
@@ -1061,6 +1062,7 @@ async function forceRepayLoan(loanKey, loan, client) {
 				log: true,
 				client: client,
 				reason: `借金の強制返済: ${loan.lenderId} へ`,
+				useDeposit: true, // 預金から自動引き出しを許可
 				metadata: {
 					commandName: 'loan_force_repay',
 					targetUserId: loan.lenderId,
