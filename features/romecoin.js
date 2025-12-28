@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const { EmbedBuilder } = require('discord.js');
 const { getData, updateData, migrateData, findDataKey } = require('./dataAccess');
-const { ROMECOIN_LOG_CHANNEL_ID } = require('../constants');
+const { ROMECOIN_LOG_CHANNEL_ID, DATABASE_CHANNEL_ID } = require('../constants');
 const persistence = require('./persistence');
 
 const ROMECOIN_DATA_FILE = path.join(__dirname, '..', 'romecoin_data.json');
@@ -12,8 +13,7 @@ const ROMECOIN_EMOJI = '<:romecoin2:1452874868415791236>';
 // 数値の最大値（JavaScriptの安全な整数範囲内）
 const MAX_SAFE_VALUE = Number.MAX_SAFE_INTEGER; // 2^53 - 1 = 9007199254740991
 
-// グローバル変数としてromecoin_dataを初期化
-let romecoin_data = null;
+// グローバル変数は使わない（常にデータベースチャンネルから読み込む）
 
 // Discordクライアントの参照（Discordへの送信用）
 let discordClient = null;
@@ -68,82 +68,104 @@ function validateAmount(amount) {
 	return { valid: true };
 }
 
-// データ読み込み
-function loadRomecoinData() {
-	console.log(`[Romecoin] loadRomecoinData: データ読み込み開始`);
+// データベースチャンネルからファイルをダウンロードするヘルパー関数
+function downloadFileFromUrl(url) {
+	return new Promise((resolve, reject) => {
+		https.get(url, (response) => {
+			if (response.statusCode !== 200) {
+				reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+				return;
+			}
+			let data = '';
+			response.on('data', (chunk) => {
+				data += chunk;
+			});
+			response.on('end', () => {
+				resolve(data);
+			});
+		}).on('error', (err) => {
+			reject(err);
+		});
+	});
+}
+
+// データ読み込み（データベースチャンネルから直接読み込む）
+async function loadRomecoinData() {
+	console.log(`[Romecoin] loadRomecoinData: データベースチャンネルから読み込み開始`);
 	
-	// ファイルから常に最新のデータを読み込む
 	let fileData = null;
 	
-	// まず通常のファイルを読み込む
-	if (fs.existsSync(ROMECOIN_DATA_FILE)) {
+	// Discordクライアントが利用可能な場合、データベースチャンネルから直接読み込む
+	if (discordClient && discordClient.isReady()) {
 		try {
-			const content = fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8');
-			console.log(`[Romecoin] メインファイル読み込み: ${ROMECOIN_DATA_FILE} (${content.length} bytes)`);
-			if (content.trim() !== '') {
-				fileData = JSON.parse(content);
-				console.log(`[Romecoin] メインファイル解析完了: エントリ数=${Object.keys(fileData).length}`);
+			const db_channel = await discordClient.channels.fetch(DATABASE_CHANNEL_ID);
+			const messages = await db_channel.messages.fetch({ limit: 100, cache: false });
+			
+			// romecoin_data.jsonの最新のメッセージを探す
+			let latestMessage = null;
+			let latestAttachment = null;
+			let latestTimestamp = 0;
+			
+			for (const [msgId, message] of messages) {
+				for (const [attachmentId, attachment] of message.attachments) {
+					if (attachment.name === 'romecoin_data.json') {
+						if (message.createdTimestamp > latestTimestamp) {
+							latestTimestamp = message.createdTimestamp;
+							latestMessage = message;
+							latestAttachment = attachment;
+						}
+					}
+				}
+			}
+			
+			if (latestAttachment) {
+				console.log(`[Romecoin] データベースチャンネルから最新のromecoin_data.jsonを発見: メッセージID=${latestMessage.id}, タイムスタンプ=${latestTimestamp}`);
+				const fileContent = await downloadFileFromUrl(latestAttachment.url);
+				if (fileContent.trim() !== '') {
+					fileData = JSON.parse(fileContent);
+					console.log(`[Romecoin] データベースチャンネルからデータを読み込みました: エントリ数=${Object.keys(fileData).length}`);
+				} else {
+					console.warn(`[Romecoin] データベースチャンネルのファイルが空です`);
+				}
 			} else {
-				console.warn(`[Romecoin] メインファイルが空です: ${ROMECOIN_DATA_FILE}`);
+				console.warn(`[Romecoin] データベースチャンネルにromecoin_data.jsonが見つかりませんでした`);
 			}
 		} catch (e) {
-			console.error('[Romecoin] データ読み込みエラー:', e);
+			console.error('[Romecoin] データベースチャンネルからの読み込みエラー:', e);
 			console.error('[Romecoin] エラースタック:', e.stack);
 		}
 	} else {
-		console.warn(`[Romecoin] メインファイルが存在しません: ${ROMECOIN_DATA_FILE}`);
+		console.warn(`[Romecoin] Discordクライアントが利用できません。データベースチャンネルからの読み込みをスキップします。`);
 	}
 	
-	// ファイルが空または存在しない場合、バックアップから復元を試みる
-	if (!fileData || Object.keys(fileData).length === 0) {
-		console.warn('[Romecoin] メインファイルが空または存在しません。バックアップから復元を試みます...');
-		if (fs.existsSync(ROMECOIN_DATA_BACKUP_FILE)) {
-			try {
-				const backupContent = fs.readFileSync(ROMECOIN_DATA_BACKUP_FILE, 'utf8');
-				if (backupContent.trim() !== '') {
-					fileData = JSON.parse(backupContent);
-					console.log(`[Romecoin] バックアップからデータを復元しました: エントリ数=${Object.keys(fileData).length}`);
-					// 復元したデータをメインファイルに保存
-					romecoin_data = fileData;
-					saveRomecoinData().catch(err => {
-						console.error('[Romecoin] 復元データ保存エラー:', err);
-					});
-					console.log('[Romecoin] 復元したデータをメインファイルに保存しました');
-				}
-			} catch (e) {
-				console.error('[Romecoin] バックアップからの復元エラー:', e);
-				console.error('[Romecoin] エラースタック:', e.stack);
-			}
-		} else {
-			console.warn('[Romecoin] バックアップファイルも見つかりませんでした');
-		}
+	// データベースチャンネルから読み込めなかった場合、空のオブジェクトを返す（ファイルは使わない）
+	if (!fileData) {
+		console.warn(`[Romecoin] データベースチャンネルからデータを読み込めませんでした。空のデータを使用します。`);
+		fileData = {};
 	}
 	
-	// データを設定
-	if (romecoin_data === null) {
-		romecoin_data = fileData || {};
-		console.log(`[Romecoin] グローバル変数を初期化: エントリ数=${Object.keys(romecoin_data).length}`);
-	} else if (fileData) {
-		// ファイルのデータで上書き（ファイルを優先）
-		romecoin_data = fileData;
-		console.log(`[Romecoin] グローバル変数を更新: エントリ数=${Object.keys(romecoin_data).length}`);
-	}
-	
-	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${Object.keys(romecoin_data).length}`);
-	return romecoin_data;
+	// データを設定（グローバル変数は使わない）
+	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${Object.keys(fileData).length}`);
+	return fileData;
 }
 
 // データ保存（アトミック書き込みとロック機能付き）
-async function saveRomecoinData() {
-	if (romecoin_data === null) {
-		console.warn('[Romecoin] saveRomecoinData: romecoin_dataがnullです。保存をスキップします。');
+// データを引数として受け取り、ファイルに保存する（persistence.jsがDiscordに送信する）
+async function saveRomecoinData(data) {
+	if (!data) {
+		console.warn('[Romecoin] saveRomecoinData: データがnullです。保存をスキップします。');
 		return;
 	}
 
 	// ロックがかかっている場合はキューに追加
 	if (saveLock) {
 		return new Promise((resolve) => {
-			saveQueue.push(resolve);
+			saveQueue.push(() => {
+				saveRomecoinData(data).then(resolve).catch(err => {
+					console.error('[Romecoin] キューからの保存エラー:', err);
+					resolve(); // エラーでもresolveして次の処理を続行
+				});
+			});
 		});
 	}
 
@@ -151,7 +173,7 @@ async function saveRomecoinData() {
 	saveLock = true;
 
 	try {
-		const dataCount = Object.keys(romecoin_data).length;
+		const dataCount = Object.keys(data).length;
 		console.log(`[Romecoin] saveRomecoinData: エントリ数=${dataCount}`);
 		
 		// データが空の場合は、空のオブジェクトとして保存する（初期状態を保持）
@@ -168,7 +190,7 @@ async function saveRomecoinData() {
 		}
 
 		// JSONデータを生成
-		const jsonData = JSON.stringify(romecoin_data, null, 2);
+		const jsonData = JSON.stringify(data, null, 2);
 		const dataSize = Buffer.byteLength(jsonData, 'utf8');
 		console.log(`[Romecoin] データサイズ: ${dataSize} bytes`);
 
@@ -254,20 +276,22 @@ async function saveRomecoinData() {
 		
 		// キューに待機している処理があれば実行
 		if (saveQueue.length > 0) {
-			const nextResolve = saveQueue.shift();
-			nextResolve();
+			const nextSave = saveQueue.shift();
 			// 次の保存を実行（再帰的だが、ロックにより同時実行は防がれる）
-			setImmediate(() => saveRomecoinData());
+			setImmediate(() => nextSave());
 		}
 	}
 }
 
 // 定期的にデータを保存（1分ごと）
-setInterval(() => {
-	saveRomecoinData().catch(err => {
-		console.error('[Romecoin] 定期保存エラー:', err);
-	});
-}, 60 * 1000);
+// 注意: 定期保存はpersistence.jsのsave関数が行うため、ここでは削除
+// setInterval(() => {
+// 	loadRomecoinData().then(data => {
+// 		saveRomecoinData(data).catch(err => {
+// 			console.error('[Romecoin] 定期保存エラー:', err);
+// 		});
+// 	});
+// }, 60 * 1000);
 
 // 追加の安全策：定期的にバックアップを作成（5分ごと、タイムスタンプ付き）
 const ROMECOIN_DATA_BACKUP_DIR = path.join(__dirname, '..', 'romecoin_backups');
@@ -275,13 +299,16 @@ if (!fs.existsSync(ROMECOIN_DATA_BACKUP_DIR)) {
 	fs.mkdirSync(ROMECOIN_DATA_BACKUP_DIR, { recursive: true });
 }
 
-setInterval(() => {
-	if (romecoin_data === null) return;
-	
+setInterval(async () => {
+	// グローバル変数は使わない（常にデータベースチャンネルから読み込む）
 	try {
+		// データベースチャンネルから最新のデータを読み込む
+		const data = await loadRomecoinData();
+		if (!data || Object.keys(data).length === 0) return;
+		
 		const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 		const backupFile = path.join(ROMECOIN_DATA_BACKUP_DIR, `romecoin_data_${timestamp}.json`);
-		const jsonData = JSON.stringify(romecoin_data, null, 2);
+		const jsonData = JSON.stringify(data, null, 2);
 		fs.writeFileSync(backupFile, jsonData);
 		
 		// 古いバックアップを削除（最新10個を保持）
@@ -313,16 +340,15 @@ setInterval(() => {
 }, 5 * 60 * 1000); // 5分ごと
 
 // ロメコインデータを取得
-function getRomecoinData() {
-	return loadRomecoinData();
+async function getRomecoinData() {
+	return await loadRomecoinData();
 }
 
 // ロメコイン残高を取得
 async function getRomecoin(userId) {
-	// 常にファイルから最新のデータを読み込む（ファイルが更新されている可能性があるため）
-	// グローバル変数は更新処理中に使用されるが、取得時は常にファイルから読み込む
-	const data = loadRomecoinData();
-	console.log(`[Romecoin] getRomecoin: ファイルから読み込み: userId=${userId}, エントリ数=${Object.keys(data).length}`);
+	// 常にデータベースチャンネルから最新のデータを読み込む
+	const data = await loadRomecoinData();
+	console.log(`[Romecoin] getRomecoin: データベースチャンネルから読み込み: userId=${userId}, エントリ数=${Object.keys(data).length}`);
 	
 	await migrateData(userId, data);
 	const balance = await getData(userId, data, 0);
@@ -469,8 +495,8 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 		try {
 			console.log(`[Romecoin] updateRomecoin処理開始: userId=${userId}`);
 			
-			// romecoin_dataを初期化
-			const data = loadRomecoinData();
+			// データベースチャンネルから最新のデータを読み込む
+			const data = await loadRomecoinData();
 			console.log(`[Romecoin] データ読み込み完了: エントリ数=${Object.keys(data).length}`);
 			
 			await migrateData(userId, data);
@@ -539,7 +565,6 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 						
 						// 預金から引き出した分を所持金に追加してから、updateFnを適用
 						const updatedKey = await updateData(userId, data, () => safeTargetBalance);
-						romecoin_data = data;
 						
 						if (options.log && options.client) {
 							await logRomecoinChange(
@@ -561,7 +586,6 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 							// 合計が足りない場合、0になるように調整
 							const finalBalance = Math.max(0, totalAvailable - requiredDeduction);
 							const updatedKey = await updateData(userId, data, () => finalBalance);
-							romecoin_data = data;
 							
 							// 預金を0にする
 							userBankData.deposit = 0;
@@ -591,7 +615,6 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 							
 							// 預金から引き出した分を所持金に追加してから、updateFnを適用
 							const updatedKey = await updateData(userId, data, () => safeTargetBalance);
-							romecoin_data = data;
 							
 							if (options.log && options.client) {
 								await logRomecoinChange(
@@ -611,7 +634,6 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 				} else {
 					// 減額が不要、または所持金が足りる場合は通常通り更新
 					const updatedKey = await updateData(userId, data, () => safeTargetBalance);
-					romecoin_data = data;
 				}
 			} else {
 				// 預金から自動引き出しを使用しない場合は通常通り更新
@@ -624,15 +646,11 @@ async function updateRomecoin(userId, updateFn, options = {}) {
 				console.log(`[Romecoin] 通常更新を実行: userId=${userId}, safeTargetBalance=${safeTargetBalance}`);
 				const updatedKey = await updateData(userId, data, () => safeTargetBalance);
 				console.log(`[Romecoin] データ更新完了: userId=${userId}, key=${updatedKey}, value=${data[updatedKey]}`);
-				
-				// グローバル変数を更新（dataオブジェクトへの参照を維持）
-				romecoin_data = data;
-				console.log(`[Romecoin] グローバル変数を更新: userId=${userId}, romecoin_data[${updatedKey}]=${romecoin_data[updatedKey]}`);
 			}
 			
 			// データを保存
 			console.log(`[Romecoin] データ保存を実行: userId=${userId}`);
-			await saveRomecoinData();
+			await saveRomecoinData(data);
 			console.log(`[Romecoin] データ保存完了: userId=${userId}`);
 			
 			// 変更後の残高を取得（正規化済み）
@@ -681,7 +699,7 @@ async function clientReady(client) {
 	discordClient = client;
 	
 	// データを読み込む
-	const data = loadRomecoinData();
+	const data = await loadRomecoinData();
 	const dataCount = Object.keys(data).length;
 	console.log(`[Romecoin] ロメコインデータを読み込みました（${dataCount}件のエントリ）`);
 	
@@ -724,7 +742,7 @@ async function interactionCreate(interaction) {
 			await interaction.deferReply();
 			
 			// ロメコインデータを取得（最新のデータを読み込む）
-			const data = loadRomecoinData();
+			const data = await loadRomecoinData();
 			
 			// 全ユーザーのデータを取得（預金込みの合計で計算）
 			const userData = await Promise.all(
@@ -1233,10 +1251,9 @@ async function handleVoiceStateUpdate(oldState, newState) {
 }
 
 // データを再読み込み（API移行後に使用）
-function reloadRomecoinData() {
+async function reloadRomecoinData() {
 	console.log('[Romecoin] データを再読み込みします...');
-	romecoin_data = null; // グローバル変数をリセット
-	loadRomecoinData(); // ファイルから再読み込み
+	await loadRomecoinData(); // データベースチャンネルから再読み込み
 	console.log('[Romecoin] データの再読み込みが完了しました');
 }
 
