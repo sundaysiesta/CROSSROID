@@ -389,6 +389,19 @@ async function handleAgreement(interaction, client) {
 
 async function handleResult(interaction, client) {
 	let lockTimestamp = null; // エラーハンドリングで使用するため、関数スコープで定義
+	let deferred = false;
+	
+	// 早期にdeferReplyを実行してタイムアウトを防ぐ
+	try {
+		await interaction.deferReply();
+		deferred = true;
+	} catch (deferError) {
+		// 既にdeferredまたはrepliedの場合は無視
+		if (deferError.code !== 10062 && deferError.code !== 40060) {
+			console.error('[麻雀] deferReplyエラー:', deferError);
+		}
+	}
+	
 	try {
 		const tableId = interaction.options.getString('table_id');
 		const hostScore = interaction.options.getInteger('player1_score'); // 部屋主の点数
@@ -403,38 +416,62 @@ async function handleResult(interaction, client) {
 			const data = loadMahjongData();
 			const savedTable = data[tableId];
 			if (!savedTable) {
-				return interaction.reply({
-					content: 'テーブルが見つかりませんでした。',
-					flags: [MessageFlags.Ephemeral],
-				});
+				if (deferred) {
+					return interaction.editReply({
+						content: 'テーブルが見つかりませんでした。',
+					});
+				} else {
+					return interaction.reply({
+						content: 'テーブルが見つかりませんでした。',
+						flags: [MessageFlags.Ephemeral],
+					});
+				}
 			}
 			// 保存されたテーブルを使用
 			table = savedTable;
 		}
 
 		if (interaction.user.id !== table.host) {
-			return interaction.reply({
-				content: '部屋主のみが点数を入力できます。',
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: '部屋主のみが点数を入力できます。',
+				});
+			} else {
+				return interaction.reply({
+					content: '部屋主のみが点数を入力できます。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// テーブルの状態チェック
 		if (table.status && table.status !== 'in_progress' && table.status !== 'waiting') {
-			return interaction.reply({
-				content: 'このテーブルは既に終了しています。',
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: 'このテーブルは既に終了しています。',
+				});
+			} else {
+				return interaction.reply({
+					content: 'このテーブルは既に終了しています。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// 既に結果が入力されているかチェック（データベースから最新の状態を確認）
 		const dataCheck = loadMahjongData();
 		const savedTableCheck = dataCheck[tableId];
 		if (savedTableCheck && savedTableCheck.completedAt) {
-			return interaction.reply({
-				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+				});
+			} else {
+				return interaction.reply({
+					content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// allPlayersを構築（部屋主の重複を除去）
@@ -445,28 +482,46 @@ async function handleResult(interaction, client) {
 		const scores = [hostScore, player1Score, player2Score];
 		if (table.gameType === '四麻') {
 			if (player3Score === null || player3Score === undefined) {
-				return interaction.reply({
-					content: '四麻の場合は4人全員の点数を入力してください。',
-					flags: [MessageFlags.Ephemeral],
-				});
+				if (deferred) {
+					return interaction.editReply({
+						content: '四麻の場合は4人全員の点数を入力してください。',
+					});
+				} else {
+					return interaction.reply({
+						content: '四麻の場合は4人全員の点数を入力してください。',
+						flags: [MessageFlags.Ephemeral],
+					});
+				}
 			}
 			scores.push(player3Score);
 		}
 		
 		// allPlayersとscoresの長さが一致するか確認
 		if (allPlayers.length !== scores.length) {
-			return interaction.reply({
-				content: `プレイヤー数と点数数の不一致: プレイヤー${allPlayers.length}人、点数${scores.length}個`,
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: `プレイヤー数と点数数の不一致: プレイヤー${allPlayers.length}人、点数${scores.length}個`,
+				});
+			} else {
+				return interaction.reply({
+					content: `プレイヤー数と点数数の不一致: プレイヤー${allPlayers.length}人、点数${scores.length}個`,
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// 点数バリデーション
 		if (scores.some((s) => s === null || s === undefined)) {
-			return interaction.reply({
-				content: 'すべてのプレイヤーの点数を入力してください。',
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: 'すべてのプレイヤーの点数を入力してください。',
+				});
+			} else {
+				return interaction.reply({
+					content: 'すべてのプレイヤーの点数を入力してください。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// 基準点で計算（三麻: 35000点、四麻: 25000点）
@@ -477,19 +532,31 @@ async function handleResult(interaction, client) {
 		const expectedTotal = table.gameType === '四麻' ? 100000 : 105000;
 		const actualTotal = scores.reduce((sum, score) => sum + score, 0);
 		if (Math.abs(actualTotal - expectedTotal) > 1) {
-			return interaction.reply({
-				content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : '三麻'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : '三麻'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+				});
+			} else {
+				return interaction.reply({
+					content: `点数の合計が正しくありません。${table.gameType === '四麻' ? '四麻' : '三麻'}の合計は${expectedTotal.toLocaleString()}点である必要があります。\n現在の合計: ${actualTotal.toLocaleString()}点`,
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// 重複実行を防ぐため、ロメコイン更新前にcompletedAtを設定して保存
 		const dataLock = loadMahjongData();
 		if (dataLock[tableId] && dataLock[tableId].completedAt) {
-			return interaction.reply({
-				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+				});
+			} else {
+				return interaction.reply({
+					content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 		
 		// 一時的にcompletedAtを設定してロック（ロメコイン更新前に）
@@ -575,10 +642,16 @@ async function handleResult(interaction, client) {
 					console.error(`[麻雀] ロメコイン取り消しエラー: playerId=${playerId}`, rollbackError);
 				}
 			}
-			return interaction.reply({
-				content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
-				flags: [MessageFlags.Ephemeral],
-			});
+			if (deferred) {
+				return interaction.editReply({
+					content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+				});
+			} else {
+				return interaction.reply({
+					content: 'この試合の結果は既に入力されています。修正する場合は`/mahjong_edit`コマンドを使用してください。',
+					flags: [MessageFlags.Ephemeral],
+				});
+			}
 		}
 
 		// 試合記録を保存（completedAtは既に設定済み）
@@ -647,7 +720,11 @@ async function handleResult(interaction, client) {
 			.setColor(0x00ff00)
 			.setTimestamp();
 
-		await interaction.reply({ embeds: [resultEmbed] });
+		if (deferred) {
+			await interaction.editReply({ embeds: [resultEmbed] });
+		} else {
+			await interaction.reply({ embeds: [resultEmbed] });
+		}
 
 		// アクティブテーブルから削除
 		activeTables.delete(tableId);
@@ -674,14 +751,20 @@ async function handleResult(interaction, client) {
 			console.error('[麻雀] ロック解除エラー:', unlockError);
 		}
 		
-		if (!interaction.replied && !interaction.deferred) {
+		// エラーレスポンスを送信
+		if (deferred) {
+			await interaction.editReply({ content: `❌ エラー: ${error.message}` }).catch(() => {});
+		} else if (!interaction.replied && !interaction.deferred) {
 			try {
 				await interaction.reply({
-					content: 'エラーが発生しました。',
+					content: `❌ エラー: ${error.message}`,
 					flags: [MessageFlags.Ephemeral],
 				});
 			} catch (e) {
-				// エラーを無視
+				// エラーを無視（Unknown interactionエラーなど）
+				if (e.code !== 10062 && e.code !== 40060) {
+					console.error('[麻雀] エラーレスポンス送信エラー:', e);
+				}
 			}
 		}
 	}
