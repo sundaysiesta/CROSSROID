@@ -42,6 +42,10 @@ const randomMentionCooldowns = new Map();
 const shopBuyCooldowns = new Map(); // サーバー間クールダウン（30秒）
 const processingCommands = new Set();
 
+// じゃんけんの進行状況管理
+// key: progressId (userId or userId_opponentId), value: { challengerId, opponentId, bet, challengerChoice, opponentChoice, messageId }
+const jankenProgress = new Map();
+
 async function handleCommands(interaction, client) {
 	if (interaction.isChatInputCommand()) {
 		if (interaction.commandName === 'anonymous') {
@@ -628,7 +632,16 @@ async function handleCommands(interaction, client) {
 						.setColor(0x0099ff)
 						.setTimestamp();
 
-					await interaction.editReply({ embeds: [embed], components: [row] });
+					const reply = await interaction.editReply({ embeds: [embed], components: [row] });
+					// 進行状況を保存
+					jankenProgress.set(buttonCustomId, {
+						challengerId: userId,
+						opponentId: null,
+						bet: bet,
+						challengerChoice: null,
+						opponentChoice: null,
+						messageId: reply.id,
+					});
 					return;
 				}
 
@@ -682,10 +695,19 @@ async function handleCommands(interaction, client) {
 					.setColor(0x0099ff)
 					.setTimestamp();
 
-				await interaction.editReply({
+				const reply = await interaction.editReply({
 					content: `${opponentUser}`,
 					embeds: [embed],
 					components: [row],
+				});
+				// 進行状況を保存
+				jankenProgress.set(buttonCustomId, {
+					challengerId: userId,
+					opponentId: opponentUser.id,
+					bet: bet,
+					challengerChoice: null,
+					opponentChoice: null,
+					messageId: reply.id,
 				});
 			} catch (error) {
 				console.error('[Janken] エラー:', error);
@@ -3735,6 +3757,327 @@ async function handleCommands(interaction, client) {
 
 	// ボタンインタラクション処理
 	if (interaction.isButton()) {
+		// じゃんけんボタン処理
+		if (interaction.customId.startsWith('janken_accept_')) {
+			try {
+				const progressId = interaction.customId;
+				const progress = jankenProgress.get(progressId);
+				
+				if (!progress) {
+					return interaction.reply({
+						content: '❌ このじゃんけん対戦は既に終了しているか、無効です。',
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				const challengerId = progress.challengerId;
+				const opponentId = interaction.user.id;
+				
+				// 自分自身と対戦できない
+				if (opponentId === challengerId) {
+					return interaction.reply({
+						content: '❌ 自分自身とじゃんけんすることはできません。',
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				// 特定の相手への挑戦の場合、相手が正しいか確認
+				if (progress.opponentId && progress.opponentId !== opponentId) {
+					return interaction.reply({
+						content: '❌ あなたはこの対戦に参加できません。',
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				// ロメコインチェック
+				const { getTotalBalance } = require('../features/romecoin');
+				const opponentTotalBalance = await getTotalBalance(opponentId);
+				if (opponentTotalBalance < progress.bet) {
+					return interaction.reply({
+						content: `❌ ロメコインが不足しています（所持金 + 預金）。必要: ${ROMECOIN_EMOJI}${progress.bet.toLocaleString()}`,
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				// 重複実行チェック
+				if (isUserInGame(opponentId)) {
+					return interaction.reply({
+						content: '❌ あなたは現在他のゲームを実行中です。',
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				// 進行状況を更新
+				progress.opponentId = opponentId;
+				const gameProgressId = `janken_${challengerId}_${opponentId}_${Date.now()}`;
+				setUserGame(challengerId, 'janken', gameProgressId);
+				setUserGame(opponentId, 'janken', gameProgressId);
+
+				// じゃんけんボタンを作成
+				const row = new ActionRowBuilder().addComponents(
+					new ButtonBuilder()
+						.setCustomId(`janken_rock_${gameProgressId}`)
+						.setLabel('グー')
+						.setStyle(ButtonStyle.Primary)
+						.setEmoji('🪨'),
+					new ButtonBuilder()
+						.setCustomId(`janken_paper_${gameProgressId}`)
+						.setLabel('パー')
+						.setStyle(ButtonStyle.Primary)
+						.setEmoji('📄'),
+					new ButtonBuilder()
+						.setCustomId(`janken_scissors_${gameProgressId}`)
+						.setLabel('チョキ')
+						.setStyle(ButtonStyle.Primary)
+						.setEmoji('✂️')
+				);
+
+				const challengerUser = await client.users.fetch(challengerId);
+				const opponentUser = await client.users.fetch(opponentId);
+
+				const embed = new EmbedBuilder()
+					.setTitle('✂️ じゃんけん')
+					.setDescription(`${challengerUser} vs ${opponentUser}\n\n**賭け金: ${ROMECOIN_EMOJI}${progress.bet.toLocaleString()}**\n\n両方のプレイヤーが選択してください！`)
+					.setColor(0x0099ff)
+					.setTimestamp();
+
+				// 進行状況を更新（gameProgressIdをキーに）
+				jankenProgress.delete(progressId);
+				jankenProgress.set(gameProgressId, {
+					challengerId: challengerId,
+					opponentId: opponentId,
+					bet: progress.bet,
+					challengerChoice: null,
+					opponentChoice: null,
+					messageId: progress.messageId,
+				});
+
+				await interaction.update({ embeds: [embed], components: [row] });
+			} catch (error) {
+				console.error('[Janken] 受諾エラー:', error);
+				if (interaction.deferred || interaction.replied) {
+					return interaction.editReply({ content: `❌ エラー: ${error.message}` }).catch(() => {});
+				}
+				return interaction.reply({
+					content: `❌ エラー: ${error.message}`,
+					flags: MessageFlags.Ephemeral,
+				}).catch(() => {});
+			}
+			return;
+		}
+
+		// じゃんけんの手を選択するボタン
+		if (interaction.customId.startsWith('janken_rock_') || 
+			interaction.customId.startsWith('janken_paper_') || 
+			interaction.customId.startsWith('janken_scissors_')) {
+			try {
+				const parts = interaction.customId.split('_');
+				const choice = parts[1]; // 'rock', 'paper', 'scissors'
+				const gameProgressId = parts.slice(2).join('_');
+				const progress = jankenProgress.get(gameProgressId);
+
+				if (!progress) {
+					return interaction.reply({
+						content: '❌ このじゃんけん対戦は既に終了しているか、無効です。',
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				const userId = interaction.user.id;
+				const isChallenger = userId === progress.challengerId;
+				const isOpponent = userId === progress.opponentId;
+
+				if (!isChallenger && !isOpponent) {
+					return interaction.reply({
+						content: '❌ あなたはこの対戦に参加していません。',
+						flags: MessageFlags.Ephemeral,
+					});
+				}
+
+				// 選択を記録
+				if (isChallenger) {
+					if (progress.challengerChoice !== null) {
+						return interaction.reply({
+							content: '❌ 既に選択済みです。',
+							flags: MessageFlags.Ephemeral,
+						});
+					}
+					progress.challengerChoice = choice;
+				} else {
+					if (progress.opponentChoice !== null) {
+						return interaction.reply({
+							content: '❌ 既に選択済みです。',
+							flags: MessageFlags.Ephemeral,
+						});
+					}
+					progress.opponentChoice = choice;
+				}
+
+				// 両方の選択が揃ったら結果を判定
+				if (progress.challengerChoice !== null && progress.opponentChoice !== null) {
+					const challengerUser = await client.users.fetch(progress.challengerId);
+					const opponentUser = await client.users.fetch(progress.opponentId);
+					
+					const choiceEmoji = {
+						rock: '🪨',
+						paper: '📄',
+						scissors: '✂️',
+					};
+					const choiceName = {
+						rock: 'グー',
+						paper: 'パー',
+						scissors: 'チョキ',
+					};
+
+					const challengerChoiceEmoji = choiceEmoji[progress.challengerChoice];
+					const opponentChoiceEmoji = choiceEmoji[progress.opponentChoice];
+
+					// 勝敗判定
+					let winnerId = null;
+					let resultText = '';
+					if (progress.challengerChoice === progress.opponentChoice) {
+						// あいこ
+						resultText = '**あいこ！**\nもう一度じゃんけんしてください。';
+						// 選択をリセット
+						progress.challengerChoice = null;
+						progress.opponentChoice = null;
+
+						const row = new ActionRowBuilder().addComponents(
+							new ButtonBuilder()
+								.setCustomId(`janken_rock_${gameProgressId}`)
+								.setLabel('グー')
+								.setStyle(ButtonStyle.Primary)
+								.setEmoji('🪨'),
+							new ButtonBuilder()
+								.setCustomId(`janken_paper_${gameProgressId}`)
+								.setLabel('パー')
+								.setStyle(ButtonStyle.Primary)
+								.setEmoji('📄'),
+							new ButtonBuilder()
+								.setCustomId(`janken_scissors_${gameProgressId}`)
+								.setLabel('チョキ')
+								.setStyle(ButtonStyle.Primary)
+								.setEmoji('✂️')
+						);
+
+						const embed = new EmbedBuilder()
+							.setTitle('✂️ じゃんけん')
+							.setDescription(`${challengerUser} ${challengerChoiceEmoji} vs ${opponentChoiceEmoji} ${opponentUser}\n\n${resultText}`)
+							.setColor(0xffff00)
+							.setTimestamp();
+
+						await interaction.update({ embeds: [embed], components: [row] });
+						return;
+					} else if (
+						(progress.challengerChoice === 'rock' && progress.opponentChoice === 'scissors') ||
+						(progress.challengerChoice === 'paper' && progress.opponentChoice === 'rock') ||
+						(progress.challengerChoice === 'scissors' && progress.opponentChoice === 'paper')
+					) {
+						// 挑戦者の勝利
+						winnerId = progress.challengerId;
+						resultText = `**${challengerUser} の勝利！**`;
+					} else {
+						// 相手の勝利
+						winnerId = progress.opponentId;
+						resultText = `**${opponentUser} の勝利！**`;
+					}
+
+					// ロメコインの移動
+					const loserId = winnerId === progress.challengerId ? progress.opponentId : progress.challengerId;
+					
+					await updateRomecoin(
+						loserId,
+						(current) => Math.round((current || 0) - progress.bet),
+						{
+							log: true,
+							client: client,
+							reason: `じゃんけん負け: ${winnerId === progress.challengerId ? challengerUser.tag : opponentUser.tag} へ`,
+							useDeposit: true,
+							metadata: {
+								commandName: 'janken_lose',
+								targetUserId: winnerId,
+							},
+						}
+					);
+
+					await updateRomecoin(
+						winnerId,
+						(current) => Math.round((current || 0) + progress.bet),
+						{
+							log: true,
+							client: client,
+							reason: `じゃんけん勝利: ${loserId === progress.challengerId ? challengerUser.tag : opponentUser.tag} から`,
+							metadata: {
+								commandName: 'janken_win',
+								targetUserId: loserId,
+							},
+						}
+					);
+
+					// 勝敗データを保存
+					const DATA_FILE = path.join(__dirname, '..', 'janken_data.json');
+					let jankenData = {};
+					if (fs.existsSync(DATA_FILE)) {
+						jankenData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+					}
+
+					if (!jankenData[progress.challengerId]) {
+						jankenData[progress.challengerId] = { wins: 0, losses: 0, draws: 0 };
+					}
+					if (!jankenData[progress.opponentId]) {
+						jankenData[progress.opponentId] = { wins: 0, losses: 0, draws: 0 };
+					}
+
+					if (winnerId === progress.challengerId) {
+						jankenData[progress.challengerId].wins++;
+						jankenData[progress.opponentId].losses++;
+					} else {
+						jankenData[progress.opponentId].wins++;
+						jankenData[progress.challengerId].losses++;
+					}
+
+					fs.writeFileSync(DATA_FILE, JSON.stringify(jankenData, null, 2), 'utf8');
+
+					// 結果を表示
+					const resultEmbed = new EmbedBuilder()
+						.setTitle('✂️ じゃんけん結果')
+						.setDescription(
+							`${challengerUser} ${challengerChoiceEmoji} (${choiceName[progress.challengerChoice]}) vs ${opponentChoiceEmoji} (${choiceName[progress.opponentChoice]}) ${opponentUser}\n\n${resultText}\n\n**賭け金: ${ROMECOIN_EMOJI}${progress.bet.toLocaleString()}**`
+						)
+						.setColor(winnerId === progress.challengerId ? 0x00ff00 : 0xff0000)
+						.setTimestamp();
+
+					await interaction.update({ embeds: [resultEmbed], components: [] });
+
+					// ゲーム状態をクリア
+					clearUserGame(progress.challengerId);
+					clearUserGame(progress.opponentId);
+					jankenProgress.delete(gameProgressId);
+				} else {
+					// まだ選択待ち
+					const waitingEmbed = new EmbedBuilder()
+						.setTitle('✂️ じゃんけん')
+						.setDescription(
+							`${challengerUser} vs ${opponentUser}\n\n**賭け金: ${ROMECOIN_EMOJI}${progress.bet.toLocaleString()}**\n\n${isChallenger ? challengerUser : opponentUser} が選択しました。\nもう一人のプレイヤーの選択を待っています...`
+						)
+						.setColor(0x0099ff)
+						.setTimestamp();
+
+					await interaction.update({ embeds: [waitingEmbed], components: [] });
+				}
+			} catch (error) {
+				console.error('[Janken] 選択エラー:', error);
+				if (interaction.deferred || interaction.replied) {
+					return interaction.editReply({ content: `❌ エラー: ${error.message}` }).catch(() => {});
+				}
+				return interaction.reply({
+					content: `❌ エラー: ${error.message}`,
+					flags: MessageFlags.Ephemeral,
+				}).catch(() => {});
+			}
+			return;
+		}
+
 		// 購入確認ボタン（汎用 - shop_confirm_*）
 		if (interaction.customId.startsWith('shop_confirm_')) {
 			try {
