@@ -595,12 +595,15 @@ async function handleResult(interaction, client) {
 					}
 				);
 
+				// 更新後の実際の残高を取得（預金から自動引き出しが行われた場合、残高が変わる可能性がある）
+				const actualBalance = await require('./romecoin').getRomecoin(playerId);
+
 				results.push({
 					player: playerId,
 					score: scores[i],
 					diff: diff,
 					romecoinChange: romecoinChange,
-					newBalance: newBalance,
+					newBalance: actualBalance, // 実際の残高を使用
 				});
 			}
 		} catch (error) {
@@ -957,12 +960,15 @@ async function handleEdit(interaction, client) {
 					}
 				);
 
+				// 更新後の実際の残高を取得（預金から自動引き出しが行われた場合、残高が変わる可能性がある）
+				const actualBalance = await require('./romecoin').getRomecoin(playerId);
+
 				results.push({
 					player: playerId,
 					score: scores[i],
 					diff: diff,
 					romecoinChange: romecoinChange,
-					newBalance: newBalance,
+					newBalance: actualBalance, // 実際の残高を使用
 				});
 			} catch (e) {
 				console.error(`[麻雀] ロメコイン更新エラー (playerId: ${playerId}):`, e);

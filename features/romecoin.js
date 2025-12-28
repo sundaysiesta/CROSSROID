@@ -724,6 +724,19 @@ async function clientReady(client) {
 async function interactionCreate(interaction) {
 	// ロメコインランキングコマンドの処理
 	if (interaction.isChatInputCommand() && interaction.commandName === 'romecoin_ranking') {
+		let deferred = false;
+		
+		// 早期にdeferReplyを実行してタイムアウトを防ぐ
+		try {
+			await interaction.deferReply();
+			deferred = true;
+		} catch (deferError) {
+			// 既にdeferredまたはrepliedの場合は無視
+			if (deferError.code !== 10062 && deferError.code !== 40060) {
+				console.error('[Romecoin] deferReplyエラー:', deferError);
+			}
+		}
+		
 		try {
 			const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 			const notionManager = require('./notion');
@@ -738,10 +751,16 @@ async function interactionCreate(interaction) {
 			
 			if (now - lastUsed < cooldownTime) {
 				const remainSec = Math.ceil((cooldownTime - (now - lastUsed)) / 1000);
-				return interaction.reply({
-					content: `⏰ クールダウン中です（残り${remainSec}秒）`,
-					ephemeral: true,
-				});
+				if (deferred) {
+					return interaction.editReply({
+						content: `⏰ クールダウン中です（残り${remainSec}秒）`,
+					});
+				} else {
+					return interaction.reply({
+						content: `⏰ クールダウン中です（残り${remainSec}秒）`,
+						ephemeral: true,
+					});
+				}
 			}
 			
 			// クールダウンを更新
@@ -749,8 +768,6 @@ async function interactionCreate(interaction) {
 				romecoin_ranking_cooldowns = new Map();
 			}
 			romecoin_ranking_cooldowns.set(cooldownKey, now);
-			
-			await interaction.deferReply();
 			
 			// ロメコインデータを取得（最新のデータを読み込む）
 			const data = await loadRomecoinData();
@@ -838,10 +855,13 @@ async function interactionCreate(interaction) {
 			await interaction.editReply({ embeds: [embed], components: [row] });
 		} catch (error) {
 			console.error('[Romecoin] ランキングエラー:', error);
-			if (!interaction.replied && !interaction.deferred) {
-				await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true }).catch(() => {});
+			console.error('[Romecoin] エラースタック:', error.stack);
+			if (deferred) {
+				await interaction.editReply({ content: `❌ エラーが発生しました: ${error.message}` }).catch(() => {});
+			} else if (!interaction.replied && !interaction.deferred) {
+				await interaction.reply({ content: `❌ エラーが発生しました: ${error.message}`, ephemeral: true }).catch(() => {});
 			} else {
-				await interaction.editReply({ content: 'エラーが発生しました。' }).catch(() => {});
+				await interaction.editReply({ content: `❌ エラーが発生しました: ${error.message}` }).catch(() => {});
 			}
 		}
 	}
