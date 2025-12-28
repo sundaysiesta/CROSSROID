@@ -120,6 +120,11 @@ async function save(client) {
 					// 最新メッセージが読み込んだ時点より新しい場合、競合と判断
 					if (latestInfo.timestamp > loadedInfo.timestamp) {
 						console.warn(`[Persistence] ⚠️ 競合検出: ${file} は他のインスタンスによって更新されています（読み込み時: ${loadedInfo.timestamp}, 最新: ${latestInfo.timestamp}）。保存をスキップします。`);
+						// タイムスタンプを最新のものに更新して、次回の保存時に競合が解消されるようにする
+						fileLoadTimestamps.set(file, {
+							timestamp: latestInfo.timestamp,
+							messageId: latestInfo.messageId
+						});
 						skippedFiles.push(file);
 						continue;
 					}
