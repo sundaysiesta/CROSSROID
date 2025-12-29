@@ -24,6 +24,7 @@ const {
 	RADIATION_ROLE_ID,
 	SHOP_LOG_VIEWER_ROLE_ID,
 	SHOP_EMOJI_CREATOR_ROLE_ID,
+	SHOP_NICKNAME_CHANGE_ROLE_ID,
 } = require('../constants');
 const fs = require('fs');
 const path = require('path');
@@ -3507,6 +3508,7 @@ async function handleCommands(interaction, client) {
 			const userId = interaction.user.id;
 			const hasLogViewerRole = shopData[userId] && shopData[userId]['log_viewer_role'];
 			const hasEmojiCreatorRole = shopData[userId] && shopData[userId]['emoji_creator_role'];
+			// サーバータグ変更権は何回でも買えるので、購入履歴のチェックは不要
 
 			// 商品選択セレクトメニュー
 			// デフォルト値は最大1つまでしか設定できないため、購入済み商品はデフォルトにしない
@@ -3525,6 +3527,12 @@ async function handleCommands(interaction, client) {
 						.setDescription(`${ROMECOIN_EMOJI}30,000 - サーバーで絵文字を作成できるようになります${hasEmojiCreatorRole ? ' (購入済み)' : ''}`)
 						.setValue('emoji_creator_role')
 						.setEmoji('🎨')
+						.setDefault(false), // デフォルトは設定しない
+					new StringSelectMenuOptionBuilder()
+						.setLabel('サーバータグ変更権')
+						.setDescription(`${ROMECOIN_EMOJI}150,000 - サーバー内で自分のニックネームを変更できるようになります`)
+						.setValue('nickname_change_role')
+						.setEmoji('🏷️')
 						.setDefault(false) // デフォルトは設定しない
 				);
 
@@ -3544,9 +3552,14 @@ async function handleCommands(interaction, client) {
 						name: '🎨 絵文字作成権ロール',
 						value: `<@&${SHOP_EMOJI_CREATOR_ROLE_ID}>\n\n**価格:** ${ROMECOIN_EMOJI}30,000\n**説明:** サーバーで絵文字を作成できるようになります。\n**注意:** 一回の買い切りです。${hasEmojiCreatorRole ? '\n\n✅ **購入済み**' : ''}`,
 						inline: false,
+					},
+					{
+						name: '🏷️ サーバータグ変更権',
+						value: `<@&${SHOP_NICKNAME_CHANGE_ROLE_ID}>\n\n**価格:** ${ROMECOIN_EMOJI}150,000\n**説明:** サーバー内で自分のニックネームを変更できるようになります。\n**注意:** 何回でも購入できます。`,
+						inline: false,
 					}
 				)
-				.setFooter({ text: '※ 商品は一度購入すると再度購入できません' })
+				.setFooter({ text: '※ 一部の商品は一度購入すると再度購入できません' })
 				.setTimestamp();
 
 			await interaction.reply({ embeds: [embed], components: [row] });
@@ -3586,6 +3599,10 @@ async function handleCommands(interaction, client) {
 				emoji_creator_role: {
 					name: '絵文字作成権ロール',
 					roleId: SHOP_EMOJI_CREATOR_ROLE_ID,
+				},
+				nickname_change_role: {
+					name: 'サーバータグ変更権',
+					roleId: SHOP_NICKNAME_CHANGE_ROLE_ID,
 				},
 			};
 
@@ -4118,6 +4135,7 @@ async function handleCommands(interaction, client) {
 						price: 25000,
 						roleId: SHOP_LOG_VIEWER_ROLE_ID,
 						description: 'ロメダの管理ログ・廃部ログ・過去ログが読めるようになります。',
+						oneTimePurchase: true, // 一回の買い切り
 					},
 					emoji_creator_role: {
 						id: 'emoji_creator_role',
@@ -4125,6 +4143,15 @@ async function handleCommands(interaction, client) {
 						price: 30000,
 						roleId: SHOP_EMOJI_CREATOR_ROLE_ID,
 						description: 'サーバーで絵文字を作成できるようになります。',
+						oneTimePurchase: true, // 一回の買い切り
+					},
+					nickname_change_role: {
+						id: 'nickname_change_role',
+						name: 'サーバータグ変更権',
+						price: 150000,
+						roleId: SHOP_NICKNAME_CHANGE_ROLE_ID,
+						description: 'サーバー内で自分のニックネームを変更できるようになります。',
+						oneTimePurchase: false, // 何回でも購入可能
 					},
 				};
 
@@ -4136,15 +4163,17 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// 既に購入済みかチェック
-				if (!shopData[userId]) {
-					shopData[userId] = {};
-				}
-				if (shopData[userId][item.id]) {
-					return interaction.reply({
-						content: `❌ この商品は既に購入済みです。`,
-						flags: MessageFlags.Ephemeral,
-					});
+				// 既に購入済みかチェック（一回の買い切りの商品のみ）
+				if (item.oneTimePurchase) {
+					if (!shopData[userId]) {
+						shopData[userId] = {};
+					}
+					if (shopData[userId][item.id]) {
+						return interaction.reply({
+							content: `❌ この商品は既に購入済みです。`,
+							flags: MessageFlags.Ephemeral,
+						});
+					}
 				}
 
 				// ロメコイン残高を確認
@@ -4165,20 +4194,32 @@ async function handleCommands(interaction, client) {
 					});
 				}
 
-				// 既にロールを持っているかチェック
-				if (member.roles.cache.has(item.roleId)) {
-					// 既にロールを持っている場合は購入履歴に記録するだけ
+				// ロールを付与（既に持っている場合でも再度付与）
+				await member.roles.add(item.roleId);
+				
+				// 購入履歴に記録（一回の買い切りの商品のみ）
+				if (item.oneTimePurchase) {
+					if (!shopData[userId]) {
+						shopData[userId] = {};
+					}
+					const alreadyHadRole = member.roles.cache.has(item.roleId);
 					shopData[userId][item.id] = {
 						purchasedAt: Date.now(),
-						alreadyHadRole: true,
+						alreadyHadRole: alreadyHadRole,
 					};
 				} else {
-					// ロールを付与
-					await member.roles.add(item.roleId);
-					shopData[userId][item.id] = {
-						purchasedAt: Date.now(),
-						alreadyHadRole: false,
-					};
+					// 何回でも購入可能な商品は購入履歴に記録しない（または購入回数を記録）
+					if (!shopData[userId]) {
+						shopData[userId] = {};
+					}
+					if (!shopData[userId][item.id]) {
+						shopData[userId][item.id] = {
+							firstPurchasedAt: Date.now(),
+							purchaseCount: 0,
+						};
+					}
+					shopData[userId][item.id].purchaseCount = (shopData[userId][item.id].purchaseCount || 0) + 1;
+					shopData[userId][item.id].lastPurchasedAt = Date.now();
 				}
 
 				// 購入履歴を保存

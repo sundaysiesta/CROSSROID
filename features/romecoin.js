@@ -770,31 +770,46 @@ async function interactionCreate(interaction) {
 			romecoin_ranking_cooldowns.set(cooldownKey, now);
 			
 			// ロメコインデータを取得（最新のデータを読み込む）
-			const data = await loadRomecoinData();
+			let data;
+			try {
+				data = await loadRomecoinData();
+			} catch (error) {
+				console.error('[Romecoin] ランキング: データ読み込みエラー:', error);
+				if (deferred) {
+					return interaction.editReply({ content: '❌ データの読み込みに失敗しました。しばらく待ってから再度お試しください。' });
+				} else {
+					return interaction.reply({ content: '❌ データの読み込みに失敗しました。しばらく待ってから再度お試しください。', ephemeral: true });
+				}
+			}
 			
 			// 全ユーザーのデータを取得（預金込みの合計で計算）
 			const userData = await Promise.all(
 				Object.entries(data)
 					.filter(([key, value]) => typeof value === 'number' && value > 0)
 					.map(async ([key, value]) => {
-						const isNotionName = !/^\d+$/.test(key);
-						let discordId = key;
-						let notionName = null;
+						try {
+							const isNotionName = !/^\d+$/.test(key);
+							let discordId = key;
+							let notionName = null;
 
-						if (isNotionName) {
-							discordId = (await notionManager.getDiscordId(key)) || key;
-							if (discordId === botUserId) return null;
-							notionName = key;
-						} else {
-							// Discord IDからNotion名を取得
-							notionName = await notionManager.getNotionName(discordId).catch(() => null);
-							if (discordId === botUserId) return null;
+							if (isNotionName) {
+								discordId = (await notionManager.getDiscordId(key)) || key;
+								if (discordId === botUserId) return null;
+								notionName = key;
+							} else {
+								// Discord IDからNotion名を取得
+								notionName = await notionManager.getNotionName(discordId).catch(() => null);
+								if (discordId === botUserId) return null;
+							}
+
+							// 預金を含めた合計を計算
+							const totalValue = await getTotalBalance(discordId);
+
+							return { key, discordId, displayName: isNotionName ? key : null, notionName, value: totalValue };
+						} catch (error) {
+							console.error(`[Romecoin] ランキング: ユーザーデータ取得エラー (key: ${key}):`, error);
+							return null; // エラーが発生した場合はnullを返して除外
 						}
-
-						// 預金を含めた合計を計算
-						const totalValue = await getTotalBalance(discordId);
-
-						return { key, discordId, displayName: isNotionName ? key : null, notionName, value: totalValue };
 					})
 			);
 			
