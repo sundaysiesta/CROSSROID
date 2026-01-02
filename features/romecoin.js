@@ -25,6 +25,9 @@ const updateLocks = new Map();
 let saveLock = false;
 let saveQueue = [];
 
+// 正規化処理が実行済みかどうかを記録（一度だけ実行するため）
+let normalizationDone = false;
+
 // ランキングコマンドのクールダウン
 let romecoin_ranking_cooldowns = new Map();
 
@@ -167,63 +170,111 @@ async function loadRomecoinData() {
 		return {};
 	}
 	
+	// 正規化処理は一度だけ実行する（データ消失を防ぐため）
+	// ただし、データにスペース付きキーが存在する場合は正規化が必要
+	let needsNormalization = false;
+	for (const key of Object.keys(fileData)) {
+		if (typeof key === 'string' && key.trim() !== key) {
+			needsNormalization = true;
+			break;
+		}
+		// 空のキーや無効なキーが存在する場合も正規化が必要
+		if (!key || (typeof key === 'string' && key.trim() === '')) {
+			needsNormalization = true;
+			break;
+		}
+	}
+	
+	// 正規化が必要で、まだ実行されていない場合のみ実行
+	if (!needsNormalization || normalizationDone) {
+		if (normalizationDone) {
+			console.log(`[Romecoin] 正規化処理は既に実行済みです。スキップします。`);
+		}
+		return fileData;
+	}
+	
+	console.log(`[Romecoin] 正規化処理を開始します...`);
+	
 	// キーの正規化（スペースをトリムして統合）
 	let normalizedData = {};
 	let mergedCount = 0;
+	let skippedCount = 0;
 	let hasChanges = false;
 	
 	try {
 		for (const [key, value] of Object.entries(fileData)) {
-			// 空のキーはスキップ
-			if (!key || (typeof key === 'string' && key.trim() === '')) {
-				console.warn(`[Romecoin] 空のキーをスキップ: "${key}"`);
+			// キーの検証と正規化
+			if (!key || typeof key !== 'string') {
+				console.warn(`[Romecoin] 無効なキータイプをスキップ: ${typeof key}`);
+				skippedCount++;
 				hasChanges = true;
 				continue;
 			}
 			
-			const trimmedKey = typeof key === 'string' ? key.trim() : key;
-			if (trimmedKey !== key) {
-				// スペース付きのキーが見つかった
-				console.log(`[Romecoin] キーを正規化: "${key}" -> "${trimmedKey}"`);
+			const trimmedKey = key.trim();
+			
+			// 空のキーはスキップ（ただし値は保持するため、特別なキーに保存）
+			if (trimmedKey === '') {
+				console.warn(`[Romecoin] 空のキーをスキップ（値: ${value}）`);
+				skippedCount++;
 				hasChanges = true;
+				continue;
 			}
 			
 			// 値の検証
 			const numValue = Number(value);
 			if (isNaN(numValue) || !isFinite(numValue) || numValue < 0) {
 				console.warn(`[Romecoin] 無効な値をスキップ: key="${trimmedKey}", value=${value}`);
+				skippedCount++;
 				hasChanges = true;
 				continue;
 			}
 			
+			const safeValue = Math.max(0, Math.min(MAX_SAFE_VALUE, numValue));
+			
+			if (trimmedKey !== key) {
+				// スペース付きのキーが見つかった
+				console.log(`[Romecoin] キーを正規化: "${key}" -> "${trimmedKey}"`);
+				hasChanges = true;
+			}
+			
 			if (normalizedData[trimmedKey] !== undefined) {
 				// 既に同じキー（トリム後）が存在する場合、値を統合
-				console.log(`[Romecoin] キーを統合: "${trimmedKey}" (既存値: ${normalizedData[trimmedKey]}, 新規値: ${value})`);
-				normalizedData[trimmedKey] = Math.max(0, Math.min(MAX_SAFE_VALUE, Number(normalizedData[trimmedKey]) || 0) + Math.max(0, Math.min(MAX_SAFE_VALUE, numValue)));
+				console.log(`[Romecoin] キーを統合: "${trimmedKey}" (既存値: ${normalizedData[trimmedKey]}, 新規値: ${safeValue})`);
+				const existingValue = Number(normalizedData[trimmedKey]) || 0;
+				normalizedData[trimmedKey] = Math.min(MAX_SAFE_VALUE, existingValue + safeValue);
 				mergedCount++;
 				hasChanges = true;
 			} else {
-				normalizedData[trimmedKey] = Math.max(0, Math.min(MAX_SAFE_VALUE, numValue));
+				normalizedData[trimmedKey] = safeValue;
 			}
 		}
 		
 		if (mergedCount > 0) {
 			console.log(`[Romecoin] キー統合完了: ${mergedCount}件のキーを統合しました`);
 		}
+		if (skippedCount > 0) {
+			console.log(`[Romecoin] スキップされたエントリ: ${skippedCount}件`);
+		}
 		
 		const originalCount = Object.keys(fileData).length;
 		const normalizedCount = Object.keys(normalizedData).length;
-		if (originalCount !== normalizedCount) {
-			console.log(`[Romecoin] キー正規化: ${originalCount}件 -> ${normalizedCount}件`);
+		
+		console.log(`[Romecoin] 正規化結果: ${originalCount}件 -> ${normalizedCount}件 (統合: ${mergedCount}件, スキップ: ${skippedCount}件)`);
+		
+		// 正規化でデータが空になった場合は元のデータを返す（データ消失を防ぐ）
+		if (normalizedCount === 0 && originalCount > 0) {
+			console.error(`[Romecoin] ⚠️ 警告: 正規化処理でデータが空になりました。元のデータを返します。`);
+			return fileData;
 		}
 		
 		// 正規化されたデータを保存（変更があった場合のみ、かつデータが空でない場合のみ）
 		if (hasChanges && normalizedCount > 0) {
 			console.log(`[Romecoin] 正規化されたデータを保存します... (エントリ数: ${normalizedCount})`);
 			await saveRomecoinData(normalizedData);
-		} else if (normalizedCount === 0 && originalCount > 0) {
-			console.error(`[Romecoin] ⚠️ 警告: 正規化処理でデータが空になりました。元のデータを返します。`);
-			return fileData; // 正規化でデータが消えた場合は元のデータを返す
+			normalizationDone = true; // 正規化完了フラグを設定
+		} else {
+			normalizationDone = true; // 正規化不要だった場合もフラグを設定
 		}
 	} catch (e) {
 		console.error('[Romecoin] 正規化処理エラー:', e);
