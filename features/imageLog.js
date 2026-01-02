@@ -26,7 +26,7 @@ function setup(client) {
 					try {
 						const webhooks = await logChannel.fetchWebhooks();
 						const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Image Log');
-						
+
 						if (matchingWebhooks.length > 0) {
 							webhook = matchingWebhooks[0];
 							// 余分なwebhookを削除（最初の1つ以外）

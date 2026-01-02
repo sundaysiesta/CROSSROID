@@ -1,4 +1,3 @@
-const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const { PROXY_COOLDOWN_MS } = require('../constants');
 const { containsFilteredWords } = require('../utils');
 
@@ -16,7 +15,7 @@ async function clientReady(client) {
 async function messageCreate(message) {
 	if (message.author.bot || message.webhookId || message.system) return;
 
-	// フィルタリングワードが含まれていたら代理投稿処理（画像代行機能は削除）
+	// フィルタリングワードが含まれていたら代理投稿処理（画像代行機能は削除済み）
 	const hasFilteredWords = containsFilteredWords(message.content);
 	if (hasFilteredWords) {
 		// クールダウン中だったら代理投稿しない
@@ -69,14 +68,6 @@ async function messageCreate(message) {
 			return;
 		}
 
-		// 削除ボタンを事前に準備
-		const deleteButton = new ButtonBuilder()
-			.setCustomId(`delete_${messageAuthorId}_${Date.now()}`)
-			.setLabel('削除')
-			.setStyle(ButtonStyle.Danger)
-			.setEmoji('🗑️');
-		const row = new ActionRowBuilder().addComponents(deleteButton);
-
 		// ワードフィルターの場合、元のメッセージを即座に削除（BAN回避のため）
 		try {
 			await message.delete();
@@ -87,7 +78,7 @@ async function messageCreate(message) {
 			return;
 		}
 
-		// 代理投稿を送信（削除後に実行）
+		// 代理投稿を送信（削除後に実行、画像は含めない）
 		let proxiedMessage;
 		try {
 			// Discordのメッセージ長制限（2000文字）をチェック
@@ -106,7 +97,6 @@ async function messageCreate(message) {
 				content: finalContent,
 				username: displayName,
 				avatarURL: avatarURL,
-				components: [row],
 				allowedMentions: { parse: [] },
 			});
 			console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
