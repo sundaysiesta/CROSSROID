@@ -89,13 +89,32 @@ function downloadFileFromUrl(url) {
 	});
 }
 
-// データ読み込み（データベースチャンネルから直接読み込む）
+// データ読み込み（ローカルファイルを優先、データベースチャンネルはフォールバック）
 async function loadRomecoinData() {
-	console.log(`[Romecoin] loadRomecoinData: データベースチャンネルから読み込み開始`);
+	console.log(`[Romecoin] loadRomecoinData: データ読み込み開始`);
 	
 	let fileData = null;
+	let localFileTimestamp = 0;
+	let discordFileTimestamp = 0;
 	
-	// Discordクライアントが利用可能な場合、データベースチャンネルから直接読み込む
+	// まずローカルファイルを確認（復元されたファイルを優先）
+	try {
+		if (fs.existsSync(ROMECOIN_DATA_FILE)) {
+			const stats = fs.statSync(ROMECOIN_DATA_FILE);
+			localFileTimestamp = stats.mtime.getTime();
+			const localFileContent = fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8');
+			if (localFileContent.trim() !== '') {
+				fileData = JSON.parse(localFileContent);
+				console.log(`[Romecoin] ローカルファイルからデータを読み込みました: エントリ数=${Object.keys(fileData).length}, 更新時刻=${new Date(localFileTimestamp).toISOString()}`);
+			} else {
+				console.warn(`[Romecoin] ローカルファイルが空です`);
+			}
+		}
+	} catch (e) {
+		console.error('[Romecoin] ローカルファイルからの読み込みエラー:', e);
+	}
+	
+	// Discordクライアントが利用可能な場合、データベースチャンネルからも読み込んで比較
 	if (discordClient && discordClient.isReady()) {
 		try {
 			const db_channel = await discordClient.channels.fetch(DATABASE_CHANNEL_ID);
@@ -119,13 +138,35 @@ async function loadRomecoinData() {
 			}
 			
 			if (latestAttachment) {
-				console.log(`[Romecoin] データベースチャンネルから最新のromecoin_data.jsonを発見: メッセージID=${latestMessage.id}, タイムスタンプ=${latestTimestamp}`);
-				const fileContent = await downloadFileFromUrl(latestAttachment.url);
-				if (fileContent.trim() !== '') {
-					fileData = JSON.parse(fileContent);
-					console.log(`[Romecoin] データベースチャンネルからデータを読み込みました: エントリ数=${Object.keys(fileData).length}`);
+				discordFileTimestamp = latestMessage.createdTimestamp;
+				console.log(`[Romecoin] データベースチャンネルから最新のromecoin_data.jsonを発見: メッセージID=${latestMessage.id}, タイムスタンプ=${new Date(discordFileTimestamp).toISOString()}`);
+				
+				// ローカルファイルがない、またはデータベースチャンネルの方が新しい場合のみ読み込む
+				if (!fileData || discordFileTimestamp > localFileTimestamp) {
+					const fileContent = await downloadFileFromUrl(latestAttachment.url);
+					if (fileContent.trim() !== '') {
+						const discordData = JSON.parse(fileContent);
+						console.log(`[Romecoin] データベースチャンネルからデータを読み込みました: エントリ数=${Object.keys(discordData).length}`);
+						
+						// データベースチャンネルの方が新しい場合は、ローカルファイルも更新
+						if (discordFileTimestamp > localFileTimestamp) {
+							console.log(`[Romecoin] データベースチャンネルの方が新しいため、ローカルファイルを更新します`);
+							fileData = discordData;
+							// ローカルファイルに保存（次回の読み込みを高速化）
+							try {
+								fs.writeFileSync(ROMECOIN_DATA_FILE, JSON.stringify(discordData, null, 2), 'utf8');
+								console.log(`[Romecoin] ローカルファイルを更新しました`);
+							} catch (e) {
+								console.error('[Romecoin] ローカルファイルの更新エラー:', e);
+							}
+						} else {
+							console.log(`[Romecoin] ローカルファイルの方が新しいため、データベースチャンネルのデータは使用しません`);
+						}
+					} else {
+						console.warn(`[Romecoin] データベースチャンネルのファイルが空です`);
+					}
 				} else {
-					console.warn(`[Romecoin] データベースチャンネルのファイルが空です`);
+					console.log(`[Romecoin] ローカルファイルの方が新しいため、データベースチャンネルからの読み込みをスキップします`);
 				}
 			} else {
 				console.warn(`[Romecoin] データベースチャンネルにromecoin_data.jsonが見つかりませんでした`);
@@ -136,29 +177,6 @@ async function loadRomecoinData() {
 		}
 	} else {
 		console.warn(`[Romecoin] Discordクライアントが利用できません。データベースチャンネルからの読み込みをスキップします。`);
-	}
-	
-	// データベースチャンネルから読み込めなかった場合、ローカルファイルから読み込む（フォールバック）
-	if (!fileData) {
-		console.warn(`[Romecoin] データベースチャンネルからデータを読み込めませんでした。ローカルファイルから読み込みを試みます...`);
-		try {
-			if (fs.existsSync(ROMECOIN_DATA_FILE)) {
-				const localFileContent = fs.readFileSync(ROMECOIN_DATA_FILE, 'utf8');
-				if (localFileContent.trim() !== '') {
-					fileData = JSON.parse(localFileContent);
-					console.log(`[Romecoin] ローカルファイルからデータを読み込みました: エントリ数=${Object.keys(fileData).length}`);
-				} else {
-					console.warn(`[Romecoin] ローカルファイルが空です`);
-					fileData = {};
-				}
-			} else {
-				console.warn(`[Romecoin] ローカルファイルが存在しません`);
-				fileData = {};
-			}
-		} catch (e) {
-			console.error('[Romecoin] ローカルファイルからの読み込みエラー:', e);
-			fileData = {};
-		}
 	}
 	
 	// データが空の場合は空のオブジェクトを返す
