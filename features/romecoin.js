@@ -114,69 +114,62 @@ async function loadRomecoinData() {
 		console.error('[Romecoin] ローカルファイルからの読み込みエラー:', e);
 	}
 	
-	// Discordクライアントが利用可能な場合、データベースチャンネルからも読み込んで比較
-	if (discordClient && discordClient.isReady()) {
-		try {
-			const db_channel = await discordClient.channels.fetch(DATABASE_CHANNEL_ID);
-			const messages = await db_channel.messages.fetch({ limit: 100, cache: false });
-			
-			// romecoin_data.jsonの最新のメッセージを探す
-			let latestMessage = null;
-			let latestAttachment = null;
-			let latestTimestamp = 0;
-			
-			for (const [msgId, message] of messages) {
-				for (const [attachmentId, attachment] of message.attachments) {
-					if (attachment.name === 'romecoin_data.json') {
-						if (message.createdTimestamp > latestTimestamp) {
-							latestTimestamp = message.createdTimestamp;
-							latestMessage = message;
-							latestAttachment = attachment;
+	// ローカルファイルが存在する場合は、常にローカルファイルを優先（復元されたファイルを使用）
+	if (fileData && Object.keys(fileData).length > 0) {
+		console.log(`[Romecoin] ローカルファイルが存在するため、データベースチャンネルからの読み込みをスキップします（復元されたファイルを優先）`);
+	} else {
+		// ローカルファイルがない場合のみ、データベースチャンネルから読み込む
+		if (discordClient && discordClient.isReady()) {
+			try {
+				const db_channel = await discordClient.channels.fetch(DATABASE_CHANNEL_ID);
+				const messages = await db_channel.messages.fetch({ limit: 100, cache: false });
+				
+				// romecoin_data.jsonの最新のメッセージを探す
+				let latestMessage = null;
+				let latestAttachment = null;
+				let latestTimestamp = 0;
+				
+				for (const [msgId, message] of messages) {
+					for (const [attachmentId, attachment] of message.attachments) {
+						if (attachment.name === 'romecoin_data.json') {
+							if (message.createdTimestamp > latestTimestamp) {
+								latestTimestamp = message.createdTimestamp;
+								latestMessage = message;
+								latestAttachment = attachment;
+							}
 						}
 					}
 				}
-			}
-			
-			if (latestAttachment) {
-				discordFileTimestamp = latestMessage.createdTimestamp;
-				console.log(`[Romecoin] データベースチャンネルから最新のromecoin_data.jsonを発見: メッセージID=${latestMessage.id}, タイムスタンプ=${new Date(discordFileTimestamp).toISOString()}`);
 				
-				// ローカルファイルがない、またはデータベースチャンネルの方が新しい場合のみ読み込む
-				if (!fileData || discordFileTimestamp > localFileTimestamp) {
+				if (latestAttachment) {
+					discordFileTimestamp = latestMessage.createdTimestamp;
+					console.log(`[Romecoin] データベースチャンネルから最新のromecoin_data.jsonを発見: メッセージID=${latestMessage.id}, タイムスタンプ=${new Date(discordFileTimestamp).toISOString()}`);
+					
 					const fileContent = await downloadFileFromUrl(latestAttachment.url);
 					if (fileContent.trim() !== '') {
-						const discordData = JSON.parse(fileContent);
-						console.log(`[Romecoin] データベースチャンネルからデータを読み込みました: エントリ数=${Object.keys(discordData).length}`);
+						fileData = JSON.parse(fileContent);
+						console.log(`[Romecoin] データベースチャンネルからデータを読み込みました: エントリ数=${Object.keys(fileData).length}`);
 						
-						// データベースチャンネルの方が新しい場合は、ローカルファイルも更新
-						if (discordFileTimestamp > localFileTimestamp) {
-							console.log(`[Romecoin] データベースチャンネルの方が新しいため、ローカルファイルを更新します`);
-							fileData = discordData;
-							// ローカルファイルに保存（次回の読み込みを高速化）
-							try {
-								fs.writeFileSync(ROMECOIN_DATA_FILE, JSON.stringify(discordData, null, 2), 'utf8');
-								console.log(`[Romecoin] ローカルファイルを更新しました`);
-							} catch (e) {
-								console.error('[Romecoin] ローカルファイルの更新エラー:', e);
-							}
-						} else {
-							console.log(`[Romecoin] ローカルファイルの方が新しいため、データベースチャンネルのデータは使用しません`);
+						// ローカルファイルに保存（次回の読み込みを高速化）
+						try {
+							fs.writeFileSync(ROMECOIN_DATA_FILE, JSON.stringify(fileData, null, 2), 'utf8');
+							console.log(`[Romecoin] ローカルファイルに保存しました`);
+						} catch (e) {
+							console.error('[Romecoin] ローカルファイルの保存エラー:', e);
 						}
 					} else {
 						console.warn(`[Romecoin] データベースチャンネルのファイルが空です`);
 					}
 				} else {
-					console.log(`[Romecoin] ローカルファイルの方が新しいため、データベースチャンネルからの読み込みをスキップします`);
+					console.warn(`[Romecoin] データベースチャンネルにromecoin_data.jsonが見つかりませんでした`);
 				}
-			} else {
-				console.warn(`[Romecoin] データベースチャンネルにromecoin_data.jsonが見つかりませんでした`);
+			} catch (e) {
+				console.error('[Romecoin] データベースチャンネルからの読み込みエラー:', e);
+				console.error('[Romecoin] エラースタック:', e.stack);
 			}
-		} catch (e) {
-			console.error('[Romecoin] データベースチャンネルからの読み込みエラー:', e);
-			console.error('[Romecoin] エラースタック:', e.stack);
+		} else {
+			console.warn(`[Romecoin] Discordクライアントが利用できません。データベースチャンネルからの読み込みをスキップします。`);
 		}
-	} else {
-		console.warn(`[Romecoin] Discordクライアントが利用できません。データベースチャンネルからの読み込みをスキップします。`);
 	}
 	
 	// データが空の場合は空のオブジェクトを返す
