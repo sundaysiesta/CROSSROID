@@ -38,13 +38,30 @@ async function messageCreate(message) {
 		let webhook;
 		try {
 			const webhooks = await message.channel.fetchWebhooks();
-			webhook = webhooks.find((wh) => wh.name === 'CROSSROID');
-
-			if (!webhook) {
+			const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID');
+			
+			// 既存のwebhookがある場合は最初の1つを使用し、余分なものを削除
+			if (matchingWebhooks.length > 0) {
+				webhook = matchingWebhooks[0];
+				// 余分なwebhookを削除（最初の1つ以外）
+				if (matchingWebhooks.length > 1) {
+					console.log(`[代理投稿] 余分なwebhookを検出（${matchingWebhooks.length}個）。削除します。`);
+					for (let i = 1; i < matchingWebhooks.length; i++) {
+						try {
+							await matchingWebhooks[i].delete();
+							console.log(`[代理投稿] 余分なwebhookを削除: ${matchingWebhooks[i].id}`);
+						} catch (deleteError) {
+							console.error(`[代理投稿] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+						}
+					}
+				}
+			} else {
+				// webhookが存在しない場合のみ新規作成
 				webhook = await message.channel.createWebhook({
 					name: 'CROSSROID',
 					avatar: message.client.user.displayAvatarURL(),
 				});
+				console.log(`[代理投稿] 新しいwebhookを作成: ${webhook.id}`);
 			}
 		} catch (webhookError) {
 			console.error(`[代理投稿] Webhook取得/作成エラー: MessageID=${messageId}`, webhookError);

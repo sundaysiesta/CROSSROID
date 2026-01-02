@@ -109,12 +109,27 @@ async function handleCommands(interaction, client) {
 				const avatarURL = client.user.displayAvatarURL();
 
 				const webhooks = await interaction.channel.fetchWebhooks();
-				let webhook = webhooks.find((wh) => wh.name === 'CROSSROID Anonymous');
-				if (!webhook)
+				const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Anonymous');
+				let webhook;
+				
+				if (matchingWebhooks.length > 0) {
+					webhook = matchingWebhooks[0];
+					// 余分なwebhookを削除（最初の1つ以外）
+					if (matchingWebhooks.length > 1) {
+						for (let i = 1; i < matchingWebhooks.length; i++) {
+							try {
+								await matchingWebhooks[i].delete();
+							} catch (deleteError) {
+								console.error(`[Anonymous] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+							}
+						}
+					}
+				} else {
 					webhook = await interaction.channel.createWebhook({
 						name: 'CROSSROID Anonymous',
 						avatar: avatarURL,
 					});
+				}
 
 				await webhook.send({
 					content: content
