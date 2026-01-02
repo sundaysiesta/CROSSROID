@@ -58,7 +58,7 @@ function saveLoanData(data) {
 	}
 }
 
-// 利子計算
+// 利子計算（銀行預金用）
 function calculateInterest(principal, hours, rate) {
 	// NaNチェックと正規化
 	const safePrincipal = (isNaN(principal) || !isFinite(principal)) ? 0 : Number(principal);
@@ -71,6 +71,35 @@ function calculateInterest(principal, hours, rate) {
 	
 	const result = Math.round(safePrincipal * Math.pow(1 + safeRate, safeHours) - safePrincipal);
 	return (isNaN(result) || !isFinite(result)) ? 0 : result;
+}
+
+// 借金の利子計算（10日で最大50%まで）
+function calculateLoanInterest(principal, hours, rate) {
+	// NaNチェックと正規化
+	const safePrincipal = (isNaN(principal) || !isFinite(principal)) ? 0 : Number(principal);
+	const safeHours = (isNaN(hours) || !isFinite(hours) || hours < 0) ? 0 : Number(hours);
+	const safeRate = (isNaN(rate) || !isFinite(rate) || rate < 0) ? 0 : Number(rate);
+	
+	if (safePrincipal <= 0 || safeHours <= 0 || safeRate <= 0) {
+		return 0;
+	}
+	
+	// 10日（240時間）で最大50%（0.5倍）の利子に制限
+	const MAX_DAYS = 10;
+	const MAX_HOURS = MAX_DAYS * 24; // 240時間
+	const MAX_INTEREST_RATIO = 0.5; // 50%
+	const maxInterest = safePrincipal * MAX_INTEREST_RATIO;
+	
+	// 10日を超える場合は、10日分の利子を上限とする
+	const effectiveHours = Math.min(safeHours, MAX_HOURS);
+	
+	// 利子計算（10日を超える場合は10日分のみ計算）
+	const calculatedInterest = safePrincipal * Math.pow(1 + safeRate, effectiveHours) - safePrincipal;
+	
+	// 50%を超えないように制限
+	const result = Math.min(calculatedInterest, maxInterest);
+	
+	return Math.round((isNaN(result) || !isFinite(result)) ? 0 : result);
 }
 
 // 借金キーを生成（Notion連携対応）
@@ -720,7 +749,7 @@ async function handleLoanRepay(interaction, client) {
 			if (isNaN(interestRatePerHour) || !isFinite(interestRatePerHour) || interestRatePerHour <= 0) {
 				interestRatePerHour = LOAN_INTEREST_RATE_PER_HOUR;
 			}
-			const additionalInterest = calculateInterest(safePrincipal, hoursPassed, interestRatePerHour);
+			const additionalInterest = calculateLoanInterest(safePrincipal, hoursPassed, interestRatePerHour);
 			if (isFinite(additionalInterest) && !isNaN(additionalInterest)) {
 				safeInterest += additionalInterest;
 			}
@@ -904,7 +933,7 @@ async function handleLoanInfo(interaction, client) {
 				
 				const hoursPassed = (now - safeLastInterestTime) / INTEREST_INTERVAL_MS;
 				if (hoursPassed > 0 && safePrincipal > 0 && isFinite(hoursPassed)) {
-					const additionalInterest = calculateInterest(safePrincipal, hoursPassed, interestRatePerHour);
+					const additionalInterest = calculateLoanInterest(safePrincipal, hoursPassed, interestRatePerHour);
 					if (isFinite(additionalInterest) && !isNaN(additionalInterest)) {
 						safeInterest += additionalInterest;
 					}
@@ -940,7 +969,7 @@ async function handleLoanInfo(interaction, client) {
 				
 				const hoursPassed = (now - safeLastInterestTime) / INTEREST_INTERVAL_MS;
 				if (hoursPassed > 0 && safePrincipal > 0 && isFinite(hoursPassed)) {
-					const additionalInterest = calculateInterest(safePrincipal, hoursPassed, interestRatePerHour);
+					const additionalInterest = calculateLoanInterest(safePrincipal, hoursPassed, interestRatePerHour);
 					if (isFinite(additionalInterest) && !isNaN(additionalInterest)) {
 						safeInterest += additionalInterest;
 					}
@@ -1045,7 +1074,7 @@ async function forceRepayLoan(loanKey, loan, client) {
 		const hoursPassed = (now - loan.lastInterestTime) / INTEREST_INTERVAL_MS;
 		if (hoursPassed > 0) {
 			const interestRatePerHour = loan.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
-			const interest = calculateInterest(loan.principal, hoursPassed, interestRatePerHour);
+			const interest = calculateLoanInterest(loan.principal, hoursPassed, interestRatePerHour);
 			loan.interest += interest;
 			loan.lastInterestTime = now;
 		}
@@ -1273,7 +1302,7 @@ async function processLoanAgreement(interaction, client, requestId, request, day
 		const interestRatePerHour = request.interestRatePerHour || LOAN_INTEREST_RATE_PER_HOUR;
 
 		// 借りた時点で利息を計算（1時間分の利息を初期値として設定）
-		const initialInterest = calculateInterest(request.amount, 1, interestRatePerHour);
+		const initialInterest = calculateLoanInterest(request.amount, 1, interestRatePerHour);
 
 		// 借金を作成
 		loanData[loanKey] = {
