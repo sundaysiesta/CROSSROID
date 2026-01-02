@@ -25,9 +25,6 @@ const updateLocks = new Map();
 let saveLock = false;
 let saveQueue = [];
 
-// 正規化処理が実行済みかどうかを記録（一度だけ実行するため）
-let normalizationDone = false;
-
 // ランキングコマンドのクールダウン
 let romecoin_ranking_cooldowns = new Map();
 
@@ -164,151 +161,15 @@ async function loadRomecoinData() {
 		}
 	}
 	
-	// データが空の場合は正規化処理をスキップ
+	// データが空の場合は空のオブジェクトを返す
 	if (!fileData || Object.keys(fileData).length === 0) {
-		console.warn(`[Romecoin] データが空です。正規化処理をスキップします。`);
+		console.warn(`[Romecoin] データが空です。`);
 		return {};
 	}
 	
-	// 正規化処理は一度だけ実行する（データ消失を防ぐため）
-	// ただし、データにスペース付きキーやNotion名キーが存在する場合は正規化が必要
-	let needsNormalization = false;
-	const notionManager = require('./notion');
-	for (const key of Object.keys(fileData)) {
-		if (typeof key === 'string' && key.trim() !== key) {
-			needsNormalization = true;
-			break;
-		}
-		// 空のキーや無効なキーが存在する場合も正規化が必要
-		if (!key || (typeof key === 'string' && key.trim() === '')) {
-			needsNormalization = true;
-			break;
-		}
-		// Notion名のキー（数字のみでない）が存在する場合も正規化が必要
-		if (typeof key === 'string' && !/^\d+$/.test(key.trim())) {
-			needsNormalization = true;
-			break;
-		}
-	}
-	
-	// 正規化が必要で、まだ実行されていない場合のみ実行
-	if (!needsNormalization || normalizationDone) {
-		if (normalizationDone) {
-			console.log(`[Romecoin] 正規化処理は既に実行済みです。スキップします。`);
-		}
-		return fileData;
-	}
-	
-	console.log(`[Romecoin] 正規化処理を開始します...`);
-	
-	// キーの正規化（スペースをトリムして統合）
-	let normalizedData = {};
-	let mergedCount = 0;
-	let skippedCount = 0;
-	let hasChanges = false;
-	
-	try {
-		for (const [key, value] of Object.entries(fileData)) {
-			// キーの検証と正規化
-			if (!key || typeof key !== 'string') {
-				console.warn(`[Romecoin] 無効なキータイプをスキップ: ${typeof key}`);
-				skippedCount++;
-				hasChanges = true;
-				continue;
-			}
-			
-			const trimmedKey = key.trim();
-			
-			// 空のキーはスキップ
-			if (trimmedKey === '') {
-				console.warn(`[Romecoin] 空のキーをスキップ（値: ${value}）`);
-				skippedCount++;
-				hasChanges = true;
-				continue;
-			}
-			
-			// 値の検証
-			const numValue = Number(value);
-			if (isNaN(numValue) || !isFinite(numValue) || numValue < 0) {
-				console.warn(`[Romecoin] 無効な値をスキップ: key="${trimmedKey}", value=${value}`);
-				skippedCount++;
-				hasChanges = true;
-				continue;
-			}
-			
-			const safeValue = Math.max(0, Math.min(MAX_SAFE_VALUE, numValue));
-			
-			// Notion名からDiscord IDへの変換
-			let finalKey = trimmedKey;
-			if (!/^\d+$/.test(trimmedKey)) {
-				// 数字のみでない場合はNotion名の可能性がある
-				const discordId = await notionManager.getDiscordId(trimmedKey);
-				if (discordId) {
-					console.log(`[Romecoin] Notion名からDiscord IDへ変換: "${trimmedKey}" -> "${discordId}"`);
-					finalKey = discordId;
-					hasChanges = true;
-				} else {
-					// Discord IDが見つからない場合はスキップ（無効なキー）
-					console.warn(`[Romecoin] Notion名に対応するDiscord IDが見つかりません: "${trimmedKey}"`);
-					skippedCount++;
-					hasChanges = true;
-					continue;
-				}
-			} else if (trimmedKey !== key) {
-				// スペース付きのDiscord IDキー
-				console.log(`[Romecoin] キーを正規化: "${key}" -> "${trimmedKey}"`);
-				hasChanges = true;
-			}
-			
-			if (normalizedData[finalKey] !== undefined) {
-				// 既に同じキーが存在する場合、値を統合
-				console.log(`[Romecoin] キーを統合: "${finalKey}" (既存値: ${normalizedData[finalKey]}, 新規値: ${safeValue})`);
-				const existingValue = Number(normalizedData[finalKey]) || 0;
-				normalizedData[finalKey] = Math.min(MAX_SAFE_VALUE, existingValue + safeValue);
-				mergedCount++;
-				hasChanges = true;
-			} else {
-				normalizedData[finalKey] = safeValue;
-			}
-		}
-		
-		if (mergedCount > 0) {
-			console.log(`[Romecoin] キー統合完了: ${mergedCount}件のキーを統合しました`);
-		}
-		if (skippedCount > 0) {
-			console.log(`[Romecoin] スキップされたエントリ: ${skippedCount}件`);
-		}
-		
-		const originalCount = Object.keys(fileData).length;
-		const normalizedCount = Object.keys(normalizedData).length;
-		
-		console.log(`[Romecoin] 正規化結果: ${originalCount}件 -> ${normalizedCount}件 (統合: ${mergedCount}件, スキップ: ${skippedCount}件)`);
-		
-		// 正規化でデータが空になった場合は元のデータを返す（データ消失を防ぐ）
-		if (normalizedCount === 0 && originalCount > 0) {
-			console.error(`[Romecoin] ⚠️ 警告: 正規化処理でデータが空になりました。元のデータを返します。`);
-			return fileData;
-		}
-		
-		// 正規化されたデータを保存（変更があった場合のみ、かつデータが空でない場合のみ）
-		if (hasChanges && normalizedCount > 0) {
-			console.log(`[Romecoin] 正規化されたデータを保存します... (エントリ数: ${normalizedCount})`);
-			await saveRomecoinData(normalizedData);
-			normalizationDone = true; // 正規化完了フラグを設定
-		} else {
-			normalizationDone = true; // 正規化不要だった場合もフラグを設定
-		}
-	} catch (e) {
-		console.error('[Romecoin] 正規化処理エラー:', e);
-		console.error('[Romecoin] エラースタック:', e.stack);
-		// エラーが発生した場合は元のデータを返す
-		console.warn(`[Romecoin] 正規化処理でエラーが発生したため、元のデータを返します`);
-		return fileData;
-	}
-	
-	// データを設定（グローバル変数は使わない）
-	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${Object.keys(normalizedData).length}`);
-	return normalizedData;
+	// データをそのまま返す（正規化処理は削除、移行はmigrateDataで個別に処理）
+	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${Object.keys(fileData).length}`);
+	return fileData;
 }
 
 // データ保存（アトミック書き込みとロック機能付き）
