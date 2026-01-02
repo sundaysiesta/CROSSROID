@@ -36,6 +36,7 @@ const activityTracker = require('./features/activityTracker');
 const abuseProtocol = require('./features/abuseProtocol');
 const daily = require('./features/daily');
 const bank = require('./features/bank');
+const webhookDuplicateRemover = require('./features/webhookDuplicateRemover');
 
 // Command Handler
 const { handleCommands } = require('./commands');
@@ -1004,6 +1005,7 @@ client.once('clientReady', async (client) => {
 	imageLog.setup(client);
 	roleAward.setup(client);
 	legacyMigration.setup(client);
+	webhookDuplicateRemover.setup(client);
 	// データ復元を先に実行（保存処理の前に）
 	await persistence.restore(client);
 	// データ復元後に即座にDiscordに送信して最新状態を確保（Koyebでの再起動対策）
