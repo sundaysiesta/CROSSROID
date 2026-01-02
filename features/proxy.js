@@ -16,11 +16,13 @@ async function messageCreate(message) {
 	if (message.author.bot || message.webhookId || message.system) return;
 
 	// フィルタリングワードが含まれていたら代理投稿処理（画像代行機能は削除済み）
-	const hasFilteredWords = containsFilteredWords(message.content);
-	if (hasFilteredWords) {
-		// クールダウン中だったら代理投稿しない
-		const lastProxiedAt = messageProxyCooldowns.get(message.author.id) || 0;
-		if (Date.now() - lastProxiedAt < PROXY_COOLDOWN_MS) return;
+	try {
+		const hasFilteredWords = containsFilteredWords(message.content);
+		if (hasFilteredWords) {
+			console.log(`[ワードフィルター] 検出: MessageID=${message.id}, Author=${message.author.id}, Content="${message.content?.substring(0, 100)}"`);
+			// クールダウン中だったら代理投稿しない
+			const lastProxiedAt = messageProxyCooldowns.get(message.author.id) || 0;
+			if (Date.now() - lastProxiedAt < PROXY_COOLDOWN_MS) return;
 
 		const messageId = message.id;
 
@@ -125,6 +127,9 @@ async function messageCreate(message) {
 			// クールダウンを更新（送信成功時のみ）
 			messageProxyCooldowns.set(messageAuthorId, Date.now());
 		}
+		}
+	} catch (error) {
+		console.error(`[ワードフィルター] 処理エラー: MessageID=${message.id}`, error);
 	}
 }
 
