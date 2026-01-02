@@ -6,7 +6,9 @@ const notionManager = require('./notion');
  * @returns {Promise<string>} 保存用キー（Notion名またはDiscord ID）
  */
 async function getDataKey(discordId) {
-	return await notionManager.getDataKey(discordId);
+	const key = await notionManager.getDataKey(discordId);
+	// キーの前後のスペースをトリム（文字化け防止）
+	return typeof key === 'string' ? key.trim() : key;
 }
 
 /**
@@ -16,7 +18,38 @@ async function getDataKey(discordId) {
  * @returns {Promise<string|null>} 見つかったキー、存在しない場合はnull
  */
 async function findDataKey(discordId, data) {
-	return await notionManager.findDataKey(discordId, data);
+	// まず通常の検索を実行
+	let key = await notionManager.findDataKey(discordId, data);
+	
+	// キーが見つかった場合、トリムして返す
+	if (key) {
+		const trimmedKey = typeof key === 'string' ? key.trim() : key;
+		// スペース付きのキーが見つかった場合、トリム済みのキーも確認
+		if (key !== trimmedKey && data[trimmedKey] !== undefined) {
+			// トリム済みのキーが存在する場合は、そちらを優先
+			return trimmedKey;
+		}
+		return trimmedKey;
+	}
+	
+	// キーが見つからない場合、スペース付きのキーも検索
+	const notionName = await notionManager.getNotionName(discordId);
+	if (notionName) {
+		// トリム済みのキーで検索
+		const trimmedName = notionName.trim();
+		if (data[trimmedName] !== undefined) {
+			return trimmedName;
+		}
+		// スペース付きのキーで検索
+		if (data[notionName] !== undefined) {
+			return notionName;
+		}
+	}
+	// Discord IDで検索
+	if (data[discordId] !== undefined) {
+		return discordId;
+	}
+	return null;
 }
 
 /**
@@ -44,8 +77,13 @@ async function setData(discordId, data, value) {
 	// まず移行を試みる
 	await migrateData(discordId, data);
 	const key = await getDataKey(discordId);
-	data[key] = value;
-	return key;
+	const trimmedKey = typeof key === 'string' ? key.trim() : key;
+	// 古いキー（スペース付き）を削除
+	if (key !== trimmedKey && data[key]) {
+		delete data[key];
+	}
+	data[trimmedKey] = value;
+	return trimmedKey;
 }
 
 /**
@@ -65,14 +103,19 @@ async function updateData(discordId, data, updateFn, defaultValue = null) {
 
 	// Notion名があればNotion名で保存、なければDiscord IDで保存
 	const newKey = await getDataKey(discordId);
+	const trimmedNewKey = typeof newKey === 'string' ? newKey.trim() : newKey;
 
-	// キーが変わった場合（ID → Notion名への移行）、古いキーを削除
-	if (existingKey && existingKey !== newKey) {
+	// キーが変わった場合（ID → Notion名への移行、またはスペース付き → トリム済みへの移行）、古いキーを削除
+	if (existingKey && existingKey !== trimmedNewKey) {
 		delete data[existingKey];
 	}
+	// スペース付きのキーも削除
+	if (newKey !== trimmedNewKey && data[newKey]) {
+		delete data[newKey];
+	}
 
-	data[newKey] = newValue;
-	return newKey;
+	data[trimmedNewKey] = newValue;
+	return trimmedNewKey;
 }
 
 /**

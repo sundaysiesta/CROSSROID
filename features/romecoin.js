@@ -144,9 +144,44 @@ async function loadRomecoinData() {
 		fileData = {};
 	}
 	
+	// キーの正規化（スペースをトリムして統合）
+	const normalizedData = {};
+	let mergedCount = 0;
+	for (const [key, value] of Object.entries(fileData)) {
+		const trimmedKey = typeof key === 'string' ? key.trim() : key;
+		if (trimmedKey !== key) {
+			// スペース付きのキーが見つかった
+			console.log(`[Romecoin] キーを正規化: "${key}" -> "${trimmedKey}"`);
+		}
+		if (normalizedData[trimmedKey] !== undefined) {
+			// 既に同じキー（トリム後）が存在する場合、値を統合
+			console.log(`[Romecoin] キーを統合: "${trimmedKey}" (既存値: ${normalizedData[trimmedKey]}, 新規値: ${value})`);
+			normalizedData[trimmedKey] = Math.max(0, Math.min(MAX_SAFE_VALUE, Number(normalizedData[trimmedKey]) || 0) + Math.max(0, Math.min(MAX_SAFE_VALUE, Number(value) || 0)));
+			mergedCount++;
+		} else {
+			normalizedData[trimmedKey] = value;
+		}
+	}
+	
+	if (mergedCount > 0) {
+		console.log(`[Romecoin] キー統合完了: ${mergedCount}件のキーを統合しました`);
+	}
+	
+	const originalCount = Object.keys(fileData).length;
+	const normalizedCount = Object.keys(normalizedData).length;
+	if (originalCount !== normalizedCount) {
+		console.log(`[Romecoin] キー正規化: ${originalCount}件 -> ${normalizedCount}件`);
+	}
+	
+	// 正規化されたデータを保存（変更があった場合のみ）
+	if (mergedCount > 0 || originalCount !== normalizedCount) {
+		console.log(`[Romecoin] 正規化されたデータを保存します...`);
+		await saveRomecoinData(normalizedData);
+	}
+	
 	// データを設定（グローバル変数は使わない）
-	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${Object.keys(fileData).length}`);
-	return fileData;
+	console.log(`[Romecoin] loadRomecoinData: データ読み込み完了: エントリ数=${normalizedCount}`);
+	return normalizedData;
 }
 
 // データ保存（アトミック書き込みとロック機能付き）

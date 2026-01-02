@@ -1,3 +1,4 @@
+const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const { PROXY_COOLDOWN_MS } = require('../constants');
 const { containsFilteredWords } = require('../utils');
 
@@ -15,14 +16,12 @@ async function clientReady(client) {
 async function messageCreate(message) {
 	if (message.author.bot || message.webhookId || message.system) return;
 
-	// フィルタリングワードが含まれていたら代理投稿処理（画像代行機能は削除済み）
-	try {
-		const hasFilteredWords = containsFilteredWords(message.content);
-		if (hasFilteredWords) {
-			console.log(`[ワードフィルター] 検出: MessageID=${message.id}, Author=${message.author.id}, Content="${message.content?.substring(0, 100)}"`);
-			// クールダウン中だったら代理投稿しない
-			const lastProxiedAt = messageProxyCooldowns.get(message.author.id) || 0;
-			if (Date.now() - lastProxiedAt < PROXY_COOLDOWN_MS) return;
+	// フィルタリングワードが含まれていたら代理投稿処理（画像代行機能は削除）
+	const hasFilteredWords = containsFilteredWords(message.content);
+	if (hasFilteredWords) {
+		// クールダウン中だったら代理投稿しない
+		const lastProxiedAt = messageProxyCooldowns.get(message.author.id) || 0;
+		if (Date.now() - lastProxiedAt < PROXY_COOLDOWN_MS) return;
 
 		const messageId = message.id;
 
@@ -70,6 +69,14 @@ async function messageCreate(message) {
 			return;
 		}
 
+		// 削除ボタンを事前に準備
+		const deleteButton = new ButtonBuilder()
+			.setCustomId(`delete_${messageAuthorId}_${Date.now()}`)
+			.setLabel('削除')
+			.setStyle(ButtonStyle.Danger)
+			.setEmoji('🗑️');
+		const row = new ActionRowBuilder().addComponents(deleteButton);
+
 		// ワードフィルターの場合、元のメッセージを即座に削除（BAN回避のため）
 		try {
 			await message.delete();
@@ -80,7 +87,7 @@ async function messageCreate(message) {
 			return;
 		}
 
-		// 代理投稿を送信（削除後に実行、画像は含めない）
+		// 代理投稿を送信（削除後に実行）
 		let proxiedMessage;
 		try {
 			// Discordのメッセージ長制限（2000文字）をチェック
@@ -99,6 +106,7 @@ async function messageCreate(message) {
 				content: finalContent,
 				username: displayName,
 				avatarURL: avatarURL,
+				components: [row],
 				allowedMentions: { parse: [] },
 			});
 			console.log(`[代理投稿] Webhook送信成功: MessageID=${messageId}, WebhookMessageID=${proxiedMessage.id}`);
@@ -127,9 +135,6 @@ async function messageCreate(message) {
 			// クールダウンを更新（送信成功時のみ）
 			messageProxyCooldowns.set(messageAuthorId, Date.now());
 		}
-		}
-	} catch (error) {
-		console.error(`[ワードフィルター] 処理エラー: MessageID=${message.id}`, error);
 	}
 }
 

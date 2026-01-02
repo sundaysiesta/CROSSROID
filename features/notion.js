@@ -100,7 +100,7 @@ class NotionManager {
 						props['名前'] || props['Name'] || Object.values(props).find((p) => p.type === 'title');
 
 					if (nameProp && nameProp.title && nameProp.title.length > 0) {
-						name = nameProp.title[0].plain_text;
+						name = nameProp.title[0].plain_text.trim();
 					}
 
 					// 2. Find Discord ID (Rich Text)
@@ -235,11 +235,19 @@ class NotionManager {
 	async findDataKey(discordId, data) {
 		// まずNotion名で検索
 		const notionName = await this.getNotionName(discordId);
-		if (notionName && data[notionName]) {
-			return notionName;
+		if (notionName) {
+			// トリム済みのキーで検索（優先）
+			const trimmedName = notionName.trim();
+			if (data[trimmedName] !== undefined) {
+				return trimmedName;
+			}
+			// スペース付きのキーで検索（後方互換性のため）
+			if (data[notionName] !== undefined) {
+				return notionName;
+			}
 		}
 		// Notion名が見つからない、またはデータが存在しない場合はDiscord IDで検索
-		if (data[discordId]) {
+		if (data[discordId] !== undefined) {
 			return discordId;
 		}
 		return null;
