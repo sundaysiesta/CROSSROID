@@ -1,38 +1,28 @@
 const notionManager = require('./notion');
 
 /**
- * データ保存用のキーを取得（Notion名があればNotion名、なければDiscord ID）
+ * データ保存用のキーを取得（常にDiscord IDを使用、文字化け防止のため）
  * @param {string} discordId - DiscordユーザーID
- * @returns {Promise<string>} 保存用キー（Notion名またはDiscord ID）
+ * @returns {Promise<string>} 保存用キー（Discord ID）
  */
 async function getDataKey(discordId) {
-	const key = await notionManager.getDataKey(discordId);
-	// キーの前後のスペースをトリム（文字化け防止）
-	return typeof key === 'string' ? key.trim() : key;
+	// 常にDiscord IDを使用（Notion名は文字化けする可能性があるため）
+	return discordId;
 }
 
 /**
- * データ読み込み用のキーを取得（Notion名とDiscord IDの両方をチェック）
+ * データ読み込み用のキーを取得（Discord IDを優先、後方互換性のためNotion名も検索）
  * @param {string} discordId - DiscordユーザーID
  * @param {Object} data - データオブジェクト
  * @returns {Promise<string|null>} 見つかったキー、存在しない場合はnull
  */
 async function findDataKey(discordId, data) {
-	// まず通常の検索を実行
-	let key = await notionManager.findDataKey(discordId, data);
-	
-	// キーが見つかった場合、トリムして返す
-	if (key) {
-		const trimmedKey = typeof key === 'string' ? key.trim() : key;
-		// スペース付きのキーが見つかった場合、トリム済みのキーも確認
-		if (key !== trimmedKey && data[trimmedKey] !== undefined) {
-			// トリム済みのキーが存在する場合は、そちらを優先
-			return trimmedKey;
-		}
-		return trimmedKey;
+	// まずDiscord IDで検索（優先）
+	if (data[discordId] !== undefined) {
+		return discordId;
 	}
 	
-	// キーが見つからない場合、スペース付きのキーも検索
+	// 後方互換性のため、Notion名でも検索（既存データの移行用）
 	const notionName = await notionManager.getNotionName(discordId);
 	if (notionName) {
 		// トリム済みのキーで検索
@@ -45,10 +35,7 @@ async function findDataKey(discordId, data) {
 			return notionName;
 		}
 	}
-	// Discord IDで検索
-	if (data[discordId] !== undefined) {
-		return discordId;
-	}
+	
 	return null;
 }
 
@@ -67,23 +54,31 @@ async function getData(discordId, data, defaultValue = null) {
 }
 
 /**
- * データを設定（Notion名があればNotion名、なければDiscord IDで保存）
+ * データを設定（常にDiscord IDで保存、文字化け防止のため）
  * @param {string} discordId - DiscordユーザーID
  * @param {Object} data - データオブジェクト
  * @param {*} value - 設定する値
  * @returns {Promise<string>} 使用されたキー
  */
 async function setData(discordId, data, value) {
-	// まず移行を試みる
+	// まず移行を試みる（Notion名からDiscord IDへ）
 	await migrateData(discordId, data);
-	const key = await getDataKey(discordId);
-	const trimmedKey = typeof key === 'string' ? key.trim() : key;
-	// 古いキー（スペース付き）を削除
-	if (key !== trimmedKey && data[key]) {
-		delete data[key];
+	const key = await getDataKey(discordId); // 常にDiscord ID
+	
+	// 古いNotion名キーを削除（移行用）
+	const notionName = await notionManager.getNotionName(discordId);
+	if (notionName) {
+		const trimmedNotionKey = notionName.trim();
+		if (data[trimmedNotionKey] !== undefined && trimmedNotionKey !== key) {
+			delete data[trimmedNotionKey];
+		}
+		if (data[notionName] !== undefined && notionName !== key) {
+			delete data[notionName];
+		}
 	}
-	data[trimmedKey] = value;
-	return trimmedKey;
+	
+	data[key] = value;
+	return key;
 }
 
 /**
@@ -95,27 +90,34 @@ async function setData(discordId, data, value) {
  * @returns {Promise<string>} 使用されたキー
  */
 async function updateData(discordId, data, updateFn, defaultValue = null) {
-	// まず移行を試みる
+	// まず移行を試みる（Notion名からDiscord IDへ）
 	await migrateData(discordId, data);
 	const existingKey = await findDataKey(discordId, data);
 	const existingValue = existingKey ? data[existingKey] : defaultValue;
 	const newValue = updateFn(existingValue);
 
-	// Notion名があればNotion名で保存、なければDiscord IDで保存
-	const newKey = await getDataKey(discordId);
-	const trimmedNewKey = typeof newKey === 'string' ? newKey.trim() : newKey;
+	// 常にDiscord IDで保存
+	const newKey = await getDataKey(discordId); // 常にDiscord ID
 
-	// キーが変わった場合（ID → Notion名への移行、またはスペース付き → トリム済みへの移行）、古いキーを削除
-	if (existingKey && existingKey !== trimmedNewKey) {
+	// キーが変わった場合（Notion名 → Discord IDへの移行）、古いキーを削除
+	if (existingKey && existingKey !== newKey) {
 		delete data[existingKey];
 	}
-	// スペース付きのキーも削除
-	if (newKey !== trimmedNewKey && data[newKey]) {
-		delete data[newKey];
+	
+	// 古いNotion名キーも削除（移行用）
+	const notionName = await notionManager.getNotionName(discordId);
+	if (notionName) {
+		const trimmedNotionKey = notionName.trim();
+		if (data[trimmedNotionKey] !== undefined && trimmedNotionKey !== newKey) {
+			delete data[trimmedNotionKey];
+		}
+		if (data[notionName] !== undefined && notionName !== newKey) {
+			delete data[notionName];
+		}
 	}
 
-	data[trimmedNewKey] = newValue;
-	return trimmedNewKey;
+	data[newKey] = newValue;
+	return newKey;
 }
 
 /**
@@ -134,7 +136,7 @@ async function deleteData(discordId, data) {
 }
 
 /**
- * Discord IDベースのデータをNotion名ベースに引き継ぐ
+ * Notion名ベースのデータをDiscord IDベースに引き継ぐ（文字化け防止のため）
  * @param {string} discordId - DiscordユーザーID
  * @param {Object} data - データオブジェクト
  * @param {string} prefix - キーのプレフィックス（オプション、例: "battle_"）
@@ -142,23 +144,30 @@ async function deleteData(discordId, data) {
  */
 async function migrateData(discordId, data, prefix = '') {
 	const notionName = await notionManager.getNotionName(discordId);
-	if (!notionName) {
-		return false; // Notionに登録されていない
-	}
-
-	const oldKey = `${prefix}${discordId}`;
-	const newKey = `${prefix}${notionName}`;
-
-	// 既にNotion名でデータがある場合は引き継ぎ不要
-	if (data[newKey]) {
+	const newKey = `${prefix}${discordId}`;
+	
+	// 既にDiscord IDでデータがある場合は引き継ぎ不要
+	if (data[newKey] !== undefined) {
 		return false;
 	}
 
-	// Discord IDでデータがある場合は引き継ぎ
-	if (data[oldKey]) {
-		data[newKey] = data[oldKey];
-		delete data[oldKey];
-		return true;
+	// Notion名でデータがある場合はDiscord IDに移行
+	if (notionName) {
+		const notionKey = `${prefix}${notionName}`;
+		const trimmedNotionKey = `${prefix}${notionName.trim()}`;
+		
+		// トリム済みのキーを優先
+		if (data[trimmedNotionKey] !== undefined) {
+			data[newKey] = data[trimmedNotionKey];
+			delete data[trimmedNotionKey];
+			return true;
+		}
+		// スペース付きのキーも確認
+		if (data[notionKey] !== undefined) {
+			data[newKey] = data[notionKey];
+			delete data[notionKey];
+			return true;
+		}
 	}
 
 	return false;
@@ -173,22 +182,26 @@ async function migrateData(discordId, data, prefix = '') {
  * @returns {Promise<*>} データ値
  */
 async function getDataWithPrefix(discordId, data, prefix, defaultValue = null) {
-	// まず移行を試みる
+	// まず移行を試みる（Notion名からDiscord IDへ）
 	await migrateData(discordId, data, prefix);
-	const notionName = await notionManager.getNotionName(discordId);
+	
+	// Discord IDで検索（優先）
+	const idKey = `${prefix}${discordId}`;
+	if (data[idKey] !== undefined) {
+		return data[idKey];
+	}
 
-	// まずNotion名で検索
+	// 後方互換性のため、Notion名でも検索
+	const notionName = await notionManager.getNotionName(discordId);
 	if (notionName) {
+		const trimmedNotionKey = `${prefix}${notionName.trim()}`;
+		if (data[trimmedNotionKey] !== undefined) {
+			return data[trimmedNotionKey];
+		}
 		const notionKey = `${prefix}${notionName}`;
 		if (data[notionKey] !== undefined) {
 			return data[notionKey];
 		}
-	}
-
-	// Notion名が見つからない、またはデータが存在しない場合はDiscord IDで検索
-	const idKey = `${prefix}${discordId}`;
-	if (data[idKey] !== undefined) {
-		return data[idKey];
 	}
 
 	return defaultValue;
@@ -203,17 +216,21 @@ async function getDataWithPrefix(discordId, data, prefix, defaultValue = null) {
  * @returns {Promise<string>} 使用されたキー
  */
 async function setDataWithPrefix(discordId, data, prefix, value) {
-	// まず移行を試みる
+	// まず移行を試みる（Notion名からDiscord IDへ）
 	await migrateData(discordId, data, prefix);
-	const key = await getDataKey(discordId);
+	const key = await getDataKey(discordId); // 常にDiscord ID
 	const fullKey = `${prefix}${key}`;
 
-	// 古いキーを削除（ID → Notion名への移行時）
+	// 古いNotion名キーを削除（移行用）
 	const notionName = await notionManager.getNotionName(discordId);
-	if (notionName && key === notionName) {
-		const oldKey = `${prefix}${discordId}`;
-		if (data[oldKey] !== undefined && oldKey !== fullKey) {
-			delete data[oldKey];
+	if (notionName) {
+		const trimmedNotionKey = `${prefix}${notionName.trim()}`;
+		if (data[trimmedNotionKey] !== undefined && trimmedNotionKey !== fullKey) {
+			delete data[trimmedNotionKey];
+		}
+		const notionKey = `${prefix}${notionName}`;
+		if (data[notionKey] !== undefined && notionKey !== fullKey) {
+			delete data[notionKey];
 		}
 	}
 

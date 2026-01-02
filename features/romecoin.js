@@ -171,8 +171,9 @@ async function loadRomecoinData() {
 	}
 	
 	// 正規化処理は一度だけ実行する（データ消失を防ぐため）
-	// ただし、データにスペース付きキーが存在する場合は正規化が必要
+	// ただし、データにスペース付きキーやNotion名キーが存在する場合は正規化が必要
 	let needsNormalization = false;
+	const notionManager = require('./notion');
 	for (const key of Object.keys(fileData)) {
 		if (typeof key === 'string' && key.trim() !== key) {
 			needsNormalization = true;
@@ -180,6 +181,11 @@ async function loadRomecoinData() {
 		}
 		// 空のキーや無効なキーが存在する場合も正規化が必要
 		if (!key || (typeof key === 'string' && key.trim() === '')) {
+			needsNormalization = true;
+			break;
+		}
+		// Notion名のキー（数字のみでない）が存在する場合も正規化が必要
+		if (typeof key === 'string' && !/^\d+$/.test(key.trim())) {
 			needsNormalization = true;
 			break;
 		}
@@ -213,7 +219,7 @@ async function loadRomecoinData() {
 			
 			const trimmedKey = key.trim();
 			
-			// 空のキーはスキップ（ただし値は保持するため、特別なキーに保存）
+			// 空のキーはスキップ
 			if (trimmedKey === '') {
 				console.warn(`[Romecoin] 空のキーをスキップ（値: ${value}）`);
 				skippedCount++;
@@ -232,21 +238,37 @@ async function loadRomecoinData() {
 			
 			const safeValue = Math.max(0, Math.min(MAX_SAFE_VALUE, numValue));
 			
-			if (trimmedKey !== key) {
-				// スペース付きのキーが見つかった
+			// Notion名からDiscord IDへの変換
+			let finalKey = trimmedKey;
+			if (!/^\d+$/.test(trimmedKey)) {
+				// 数字のみでない場合はNotion名の可能性がある
+				const discordId = await notionManager.getDiscordId(trimmedKey);
+				if (discordId) {
+					console.log(`[Romecoin] Notion名からDiscord IDへ変換: "${trimmedKey}" -> "${discordId}"`);
+					finalKey = discordId;
+					hasChanges = true;
+				} else {
+					// Discord IDが見つからない場合はスキップ（無効なキー）
+					console.warn(`[Romecoin] Notion名に対応するDiscord IDが見つかりません: "${trimmedKey}"`);
+					skippedCount++;
+					hasChanges = true;
+					continue;
+				}
+			} else if (trimmedKey !== key) {
+				// スペース付きのDiscord IDキー
 				console.log(`[Romecoin] キーを正規化: "${key}" -> "${trimmedKey}"`);
 				hasChanges = true;
 			}
 			
-			if (normalizedData[trimmedKey] !== undefined) {
-				// 既に同じキー（トリム後）が存在する場合、値を統合
-				console.log(`[Romecoin] キーを統合: "${trimmedKey}" (既存値: ${normalizedData[trimmedKey]}, 新規値: ${safeValue})`);
-				const existingValue = Number(normalizedData[trimmedKey]) || 0;
-				normalizedData[trimmedKey] = Math.min(MAX_SAFE_VALUE, existingValue + safeValue);
+			if (normalizedData[finalKey] !== undefined) {
+				// 既に同じキーが存在する場合、値を統合
+				console.log(`[Romecoin] キーを統合: "${finalKey}" (既存値: ${normalizedData[finalKey]}, 新規値: ${safeValue})`);
+				const existingValue = Number(normalizedData[finalKey]) || 0;
+				normalizedData[finalKey] = Math.min(MAX_SAFE_VALUE, existingValue + safeValue);
 				mergedCount++;
 				hasChanges = true;
 			} else {
-				normalizedData[trimmedKey] = safeValue;
+				normalizedData[finalKey] = safeValue;
 			}
 		}
 		
