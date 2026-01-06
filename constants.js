@@ -178,9 +178,6 @@ const FILTERED_WORDS = [
 	'*都*',
 	'*町*',
 	'*台*',
-	'*080*',
-	'*090*',
-	'*070*',
 	'*大麻*',
 ];
 
@@ -224,7 +221,7 @@ const SHOP_LOG_VIEWER_ROLE_ID = '1431905155913089132';
 // ショップロールID（絵文字作成権限）
 const SHOP_EMOJI_CREATOR_ROLE_ID = '1431905155913089131';
 // ショップロールID（サーバータグ変更権限）
-const SHOP_NICKNAME_CHANGE_ROLE_ID = '1431905155913089130'; // TODO: 実際のロールIDに置き換える必要があります
+const SHOP_NICKNAME_CHANGE_ROLE_ID = '1431905155913089125'; // TODO: 実際のロールIDに置き換える必要があります
 
 // メインチャンネルID (ロメダメイン雑談)
 const MAIN_CHANNEL_ID = '1451866555750158460';

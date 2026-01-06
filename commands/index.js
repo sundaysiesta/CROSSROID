@@ -43,6 +43,11 @@ const randomMentionCooldowns = new Map();
 const shopBuyCooldowns = new Map(); // サーバー間クールダウン（30秒）
 const processingCommands = new Set();
 
+// Webhookキャッシュ（チャンネルごとにwebhookオブジェクトを保存、トークンを含む）
+// key: channelId, value: { webhook, timestamp }
+const anonymousWebhookCache = new Map();
+const ANONYMOUS_WEBHOOK_CACHE_TTL = 24 * 60 * 60 * 1000; // 24時間
+
 // じゃんけんの進行状況管理
 // key: progressId (userId or userId_opponentId), value: { challengerId, opponentId, bet, challengerChoice, opponentChoice, messageId }
 const jankenProgress = new Map();
@@ -108,59 +113,138 @@ async function handleCommands(interaction, client) {
 				const displayName = `${uglyName} ID:${dailyId}`;
 				const avatarURL = client.user.displayAvatarURL();
 
-				// Webhookを取得または作成（重複を防ぐ）
+				// Webhookを取得または作成（キャッシュから再利用、トークンを含む）
+				const channelId = interaction.channel.id;
 				let webhook;
-				try {
-					const webhooks = await interaction.channel.fetchWebhooks();
-					const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Anonymous');
-					
-					if (matchingWebhooks.length > 0) {
-						// 既存のwebhookを使用（最初の1つ）
-						webhook = matchingWebhooks[0];
-						console.log(`[Anonymous] 既存のwebhookを使用: ${webhook.id}`);
+				
+				// キャッシュから取得を試みる
+				const cached = anonymousWebhookCache.get(channelId);
+				if (cached && (Date.now() - cached.timestamp < ANONYMOUS_WEBHOOK_CACHE_TTL)) {
+					try {
+						// キャッシュされたwebhookがまだ有効か確認
+						await cached.webhook.fetch();
+						webhook = cached.webhook;
+						console.log(`[Anonymous] キャッシュからwebhookを取得: ${webhook.id}`);
+					} catch (fetchError) {
+						// キャッシュが無効な場合は削除
+						console.log(`[Anonymous] キャッシュされたwebhookが無効です。削除します。`);
+						anonymousWebhookCache.delete(channelId);
+					}
+				}
+				
+				// キャッシュにない場合、既存のwebhookを探す
+				if (!webhook) {
+					try {
+						const webhooks = await interaction.channel.fetchWebhooks();
+						const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Anonymous');
 						
-						// 余分なwebhookを削除（最初の1つ以外）
-						if (matchingWebhooks.length > 1) {
-							console.log(`[Anonymous] 余分なwebhookを検出（${matchingWebhooks.length}個）。削除します。`);
-							for (let i = 1; i < matchingWebhooks.length; i++) {
-								try {
-									await matchingWebhooks[i].delete();
-									console.log(`[Anonymous] 余分なwebhookを削除: ${matchingWebhooks[i].id}`);
-								} catch (deleteError) {
-									console.error(`[Anonymous] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
-									// 削除に失敗しても処理は続行
+						if (matchingWebhooks.length > 0) {
+							// 既存のwebhookを確認：自分が作成したもの（トークンがあるもの）を優先的に使用
+							const webhookWithToken = matchingWebhooks.find((wh) => wh.token);
+							
+							if (webhookWithToken) {
+								// 自分が作成したwebhookが見つかった場合、それを使用
+								webhook = webhookWithToken;
+								console.log(`[Anonymous] 既存のwebhook（自分が作成したもの）を使用: ${webhook.id}`);
+								
+								// キャッシュに保存
+								anonymousWebhookCache.set(channelId, {
+									webhook: webhook,
+									timestamp: Date.now()
+								});
+								
+								// 余分なwebhookを削除（使用するもの以外）
+								for (const wh of matchingWebhooks) {
+									if (wh.id !== webhook.id) {
+										try {
+											await wh.delete();
+											console.log(`[Anonymous] 余分なwebhookを削除: ${wh.id}`);
+										} catch (deleteError) {
+											console.error(`[Anonymous] webhook削除エラー: ${wh.id}`, deleteError);
+										}
+									}
+								}
+							} else {
+								// トークンがない既存のwebhook（以前からすでにあるもの）を削除
+								console.log(`[Anonymous] 既存のwebhookが見つかりましたが、トークンがないため削除します（${matchingWebhooks.length}個）。`);
+								for (const wh of matchingWebhooks) {
+									try {
+										await wh.delete();
+										console.log(`[Anonymous] 既存のwebhookを削除: ${wh.id}`);
+									} catch (deleteError) {
+										console.error(`[Anonymous] webhook削除エラー: ${wh.id}`, deleteError);
+									}
 								}
 							}
 						}
-					} else {
-						// webhookが存在しない場合のみ新規作成
-						try {
-							webhook = await interaction.channel.createWebhook({
-								name: 'CROSSROID Anonymous',
-								avatar: avatarURL,
-							});
-							console.log(`[Anonymous] 新しいwebhookを作成: ${webhook.id}`);
-						} catch (createError) {
+						
+						// webhookがまだ見つかっていない場合、新しいwebhookを作成（トークンが含まれる）
+						if (!webhook) {
+							try {
+								webhook = await interaction.channel.createWebhook({
+									name: 'CROSSROID Anonymous',
+									avatar: avatarURL,
+								});
+								console.log(`[Anonymous] 新しいwebhookを作成: ${webhook.id}`);
+								
+								// キャッシュに保存（トークンを含む）
+								anonymousWebhookCache.set(channelId, {
+									webhook: webhook,
+									timestamp: Date.now()
+								});
+							} catch (createError) {
 							// webhook作成エラー（上限に達している可能性）
 							if (createError.code === 30007) {
-								console.error(`[Anonymous] ⚠️ Webhookの上限に達しています。既存のwebhookを探します...`);
-								// すべてのwebhookを取得して、使用可能なものを探す
+								console.error(`[Anonymous] ⚠️ Webhookの上限に達しています。`);
+								console.error(`[Anonymous] ⚠️ 既存のwebhookを削除してから再試行します...`);
+								
+								// すべてのwebhookを削除してから再試行
 								const allWebhooks = await interaction.channel.fetchWebhooks();
 								if (allWebhooks.size > 0) {
-									// 最初のwebhookを使用（名前を変更できないため、そのまま使用）
-									webhook = Array.from(allWebhooks.values())[0];
-									console.log(`[Anonymous] 既存のwebhookを使用（名前変更なし）: ${webhook.id}`);
+									console.log(`[Anonymous] すべてのwebhook（${allWebhooks.size}個）を削除します...`);
+									for (const wh of allWebhooks.values()) {
+										try {
+											await wh.delete();
+											console.log(`[Anonymous] webhookを削除: ${wh.id}`);
+										} catch (deleteError) {
+											console.error(`[Anonymous] webhook削除エラー: ${wh.id}`, deleteError);
+										}
+									}
+									
+									// キャッシュもクリア
+									anonymousWebhookCache.delete(channelId);
+									
+									// 少し待ってから再作成
+									await new Promise(resolve => setTimeout(resolve, 1000));
+									
+									try {
+										webhook = await interaction.channel.createWebhook({
+											name: 'CROSSROID Anonymous',
+											avatar: avatarURL,
+										});
+										console.log(`[Anonymous] 新しいwebhookを作成（再試行成功）: ${webhook.id}`);
+										
+										// キャッシュに保存
+										anonymousWebhookCache.set(channelId, {
+											webhook: webhook,
+											timestamp: Date.now()
+										});
+									} catch (retryError) {
+										console.error(`[Anonymous] ⚠️ Webhookの再作成に失敗しました:`, retryError);
+										throw new Error('Webhookの作成に失敗しました');
+									}
 								} else {
 									throw new Error('Webhookの作成に失敗し、使用可能なwebhookもありません');
 								}
 							} else {
 								throw createError;
 							}
+							}
 						}
+					} catch (webhookError) {
+						console.error(`[Anonymous] Webhook取得/作成エラー:`, webhookError);
+						throw webhookError;
 					}
-				} catch (webhookError) {
-					console.error(`[Anonymous] Webhook取得/作成エラー:`, webhookError);
-					throw webhookError;
 				}
 
 				await webhook.send({

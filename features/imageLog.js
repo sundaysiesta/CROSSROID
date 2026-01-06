@@ -3,6 +3,11 @@ const { IMAGE_DELETE_LOG_CHANNEL_ID } = require('../constants');
 const { isImageOrVideo } = require('../utils');
 const { deletedMessageInfo } = require('./proxy'); // Import from proxy module
 
+// Webhookキャッシュ（チャンネルごとにwebhookオブジェクトを保存、トークンを含む）
+// key: channelId, value: { webhook, timestamp }
+const imageLogWebhookCache = new Map();
+const IMAGE_LOG_WEBHOOK_CACHE_TTL = 24 * 60 * 60 * 1000; // 24時間
+
 function setup(client) {
 	// 画像削除ログ機能：画像メッセージが削除された際にログチャンネルに投稿
 	client.on('messageDelete', async (message) => {
@@ -23,30 +28,67 @@ function setup(client) {
 				const logChannel = client.channels.cache.get(IMAGE_DELETE_LOG_CHANNEL_ID);
 				if (logChannel) {
 					let webhook;
-					try {
-						const webhooks = await logChannel.fetchWebhooks();
-						const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Image Log');
-						
-						if (matchingWebhooks.length > 0) {
-							webhook = matchingWebhooks[0];
-							// 余分なwebhookを削除（最初の1つ以外）
-							if (matchingWebhooks.length > 1) {
-								for (let i = 1; i < matchingWebhooks.length; i++) {
-									try {
-										await matchingWebhooks[i].delete();
-									} catch (deleteError) {
-										console.error(`[ImageLog] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+					const channelId = logChannel.id;
+					
+					// キャッシュから取得を試みる
+					const cached = imageLogWebhookCache.get(channelId);
+					if (cached && (Date.now() - cached.timestamp < IMAGE_LOG_WEBHOOK_CACHE_TTL)) {
+						try {
+							// キャッシュされたwebhookがまだ有効か確認
+							await cached.webhook.fetch();
+							webhook = cached.webhook;
+							console.log(`[ImageLog] キャッシュからwebhookを取得: ${webhook.id}`);
+						} catch (fetchError) {
+							// キャッシュが無効な場合は削除
+							console.log(`[ImageLog] キャッシュされたwebhookが無効です。削除します。`);
+							imageLogWebhookCache.delete(channelId);
+						}
+					}
+					
+					// キャッシュにない場合、既存のwebhookを探す
+					if (!webhook) {
+						try {
+							const webhooks = await logChannel.fetchWebhooks();
+							const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Image Log');
+							
+							if (matchingWebhooks.length > 0) {
+								// 余分なwebhookを削除（最初の1つ以外）
+								if (matchingWebhooks.length > 1) {
+									console.log(`[ImageLog] 余分なwebhookを検出（${matchingWebhooks.length}個）。削除します。`);
+									for (let i = 1; i < matchingWebhooks.length; i++) {
+										try {
+											await matchingWebhooks[i].delete();
+											console.log(`[ImageLog] 余分なwebhookを削除: ${matchingWebhooks[i].id}`);
+										} catch (deleteError) {
+											console.error(`[ImageLog] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+										}
 									}
 								}
+								
+								// 既存のwebhookを削除してから新しいものを作成（トークンが必要なため）
+								try {
+									await matchingWebhooks[0].delete();
+									console.log(`[ImageLog] 既存のwebhookを削除（トークンがないため）: ${matchingWebhooks[0].id}`);
+								} catch (deleteError) {
+									console.error(`[ImageLog] webhook削除エラー: ${matchingWebhooks[0].id}`, deleteError);
+								}
 							}
-						} else {
+							
+							// 新しいwebhookを作成（トークンが含まれる）
 							webhook = await logChannel.createWebhook({
 								name: 'CROSSROID Image Log',
 								avatar: client.user.displayAvatarURL(),
 							});
+							console.log(`[ImageLog] 新しいwebhookを作成: ${webhook.id}`);
+							
+							// キャッシュに保存（トークンを含む）
+							imageLogWebhookCache.set(channelId, {
+								webhook: webhook,
+								timestamp: Date.now()
+							});
+						} catch (webhookError) {
+							console.error('[ImageLog] webhookの取得/作成に失敗:', webhookError);
 						}
-					} catch (webhookError) {
-						console.error('webhookの取得/作成に失敗:', webhookError);
 					}
 
 					if (webhook) {
@@ -129,29 +171,68 @@ function setup(client) {
 					const logChannel = client.channels.cache.get(IMAGE_DELETE_LOG_CHANNEL_ID);
 					if (logChannel) {
 						let webhook;
-						try {
-							const webhooks = await logChannel.fetchWebhooks();
-							const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Image Log');
-							
-							if (matchingWebhooks.length > 0) {
-								webhook = matchingWebhooks[0];
-								// 余分なwebhookを削除（最初の1つ以外）
-								if (matchingWebhooks.length > 1) {
-									for (let i = 1; i < matchingWebhooks.length; i++) {
-										try {
-											await matchingWebhooks[i].delete();
-										} catch (deleteError) {
-											console.error(`[ImageLog] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+						const channelId = logChannel.id;
+						
+						// キャッシュから取得を試みる
+						const cached = imageLogWebhookCache.get(channelId);
+						if (cached && (Date.now() - cached.timestamp < IMAGE_LOG_WEBHOOK_CACHE_TTL)) {
+							try {
+								// キャッシュされたwebhookがまだ有効か確認
+								await cached.webhook.fetch();
+								webhook = cached.webhook;
+								console.log(`[ImageLog] キャッシュからwebhookを取得: ${webhook.id}`);
+							} catch (fetchError) {
+								// キャッシュが無効な場合は削除
+								console.log(`[ImageLog] キャッシュされたwebhookが無効です。削除します。`);
+								imageLogWebhookCache.delete(channelId);
+							}
+						}
+						
+						// キャッシュにない場合、既存のwebhookを探す
+						if (!webhook) {
+							try {
+								const webhooks = await logChannel.fetchWebhooks();
+								const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Image Log');
+								
+								if (matchingWebhooks.length > 0) {
+									// 余分なwebhookを削除（最初の1つ以外）
+									if (matchingWebhooks.length > 1) {
+										console.log(`[ImageLog] 余分なwebhookを検出（${matchingWebhooks.length}個）。削除します。`);
+										for (let i = 1; i < matchingWebhooks.length; i++) {
+											try {
+												await matchingWebhooks[i].delete();
+												console.log(`[ImageLog] 余分なwebhookを削除: ${matchingWebhooks[i].id}`);
+											} catch (deleteError) {
+												console.error(`[ImageLog] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+											}
 										}
 									}
+									
+									// 既存のwebhookを削除してから新しいものを作成（トークンが必要なため）
+									try {
+										await matchingWebhooks[0].delete();
+										console.log(`[ImageLog] 既存のwebhookを削除（トークンがないため）: ${matchingWebhooks[0].id}`);
+									} catch (deleteError) {
+										console.error(`[ImageLog] webhook削除エラー: ${matchingWebhooks[0].id}`, deleteError);
+									}
 								}
-							} else {
+								
+								// 新しいwebhookを作成（トークンが含まれる）
 								webhook = await logChannel.createWebhook({
 									name: 'CROSSROID Image Log',
 									avatar: client.user.displayAvatarURL(),
 								});
+								console.log(`[ImageLog] 新しいwebhookを作成: ${webhook.id}`);
+								
+								// キャッシュに保存（トークンを含む）
+								imageLogWebhookCache.set(channelId, {
+									webhook: webhook,
+									timestamp: Date.now()
+								});
+							} catch (e) {
+								console.error('[ImageLog] webhookの取得/作成に失敗:', e);
 							}
-						} catch (e) {}
+						}
 
 						if (webhook) {
 							const embed = new EmbedBuilder()
