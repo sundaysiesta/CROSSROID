@@ -34,15 +34,17 @@ async function messageCreate(message) {
 		const displayName = message.member?.nickname || message.author.displayName;
 		const avatarURL = message.author.displayAvatarURL();
 
-		// Webhookを取得または作成（削除前に準備）
+		// Webhookを取得または作成（削除前に準備、既存のものを優先）
 		let webhook;
 		try {
 			const webhooks = await message.channel.fetchWebhooks();
 			const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID');
 			
-			// 既存のwebhookがある場合は最初の1つを使用し、余分なものを削除
 			if (matchingWebhooks.length > 0) {
+				// 既存のwebhookを使用（最初の1つ）
 				webhook = matchingWebhooks[0];
+				console.log(`[代理投稿] 既存のwebhookを使用: ${webhook.id}`);
+				
 				// 余分なwebhookを削除（最初の1つ以外）
 				if (matchingWebhooks.length > 1) {
 					console.log(`[代理投稿] 余分なwebhookを検出（${matchingWebhooks.length}個）。削除します。`);
@@ -52,16 +54,39 @@ async function messageCreate(message) {
 							console.log(`[代理投稿] 余分なwebhookを削除: ${matchingWebhooks[i].id}`);
 						} catch (deleteError) {
 							console.error(`[代理投稿] webhook削除エラー: ${matchingWebhooks[i].id}`, deleteError);
+							// 削除に失敗しても処理は続行
 						}
 					}
 				}
 			} else {
 				// webhookが存在しない場合のみ新規作成
-				webhook = await message.channel.createWebhook({
-					name: 'CROSSROID',
-					avatar: message.client.user.displayAvatarURL(),
-				});
-				console.log(`[代理投稿] 新しいwebhookを作成: ${webhook.id}`);
+				try {
+					webhook = await message.channel.createWebhook({
+						name: 'CROSSROID',
+						avatar: message.client.user.displayAvatarURL(),
+					});
+					console.log(`[代理投稿] 新しいwebhookを作成: ${webhook.id}`);
+				} catch (createError) {
+					// webhook作成エラー（上限に達している可能性）
+					if (createError.code === 30007) {
+						console.error(`[代理投稿] ⚠️ Webhookの上限に達しています。既存のwebhookを探します...`);
+						// すべてのwebhookを取得して、使用可能なものを探す
+						const allWebhooks = await message.channel.fetchWebhooks();
+						if (allWebhooks.size > 0) {
+							// 最初のwebhookを使用（名前を変更できないため、そのまま使用）
+							webhook = Array.from(allWebhooks.values())[0];
+							console.log(`[代理投稿] 既存のwebhookを使用（名前変更なし）: ${webhook.id}`);
+						} else {
+							console.error(`[代理投稿] ⚠️ 使用可能なwebhookがありません。処理を中断します。`);
+							// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
+							return;
+						}
+					} else {
+						console.error(`[代理投稿] Webhook作成エラー:`, createError);
+						// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
+						return;
+					}
+				}
 			}
 		} catch (webhookError) {
 			console.error(`[代理投稿] Webhook取得/作成エラー: MessageID=${messageId}`, webhookError);
