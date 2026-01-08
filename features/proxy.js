@@ -247,9 +247,16 @@ async function messageCreate(message) {
 				}
 			} catch (webhookError) {
 				console.error(`[代理投稿] Webhook取得/作成エラー: MessageID=${messageId}`, webhookError);
+				console.error(`[代理投稿] エラー詳細:`, webhookError.stack || webhookError);
 				// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
 				return;
 			}
+		}
+
+		// webhookが取得できていない場合は処理を中断
+		if (!webhook) {
+			console.error(`[代理投稿] Webhookが取得できませんでした: MessageID=${messageId}`);
+			return;
 		}
 
 		// 削除ボタンを事前に準備
