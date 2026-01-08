@@ -194,54 +194,55 @@ async function messageCreate(message) {
 								}
 							}
 						} catch (createError) {
-					// webhook作成エラー（上限に達している可能性）
-					if (createError.code === 30007) {
-						console.error(`[代理投稿] ⚠️ Webhookの上限に達しています。`);
-						console.error(`[代理投稿] ⚠️ 既存のwebhookを削除してから再試行します...`);
-						
-						// 「CROSSROID」という名前のwebhookをすべて削除
-						const allWebhooks = await message.channel.fetchWebhooks();
-						const crossroidWebhooks = Array.from(allWebhooks.values()).filter((wh) => wh.name === 'CROSSROID');
-						if (crossroidWebhooks.length > 0) {
-							console.log(`[代理投稿] 「CROSSROID」webhook（${crossroidWebhooks.length}個）を削除します...`);
-							for (const wh of crossroidWebhooks) {
-								try {
-									await wh.delete();
-									console.log(`[代理投稿] webhookを削除: ${wh.id}`);
-								} catch (deleteError) {
-									console.error(`[代理投稿] webhook削除エラー: ${wh.id}`, deleteError);
+							// webhook作成エラー（上限に達している可能性）
+							if (createError.code === 30007) {
+								console.error(`[代理投稿] ⚠️ Webhookの上限に達しています。`);
+								console.error(`[代理投稿] ⚠️ 既存のwebhookを削除してから再試行します...`);
+								
+								// 「CROSSROID」という名前のwebhookをすべて削除
+								const allWebhooks = await message.channel.fetchWebhooks();
+								const crossroidWebhooks = Array.from(allWebhooks.values()).filter((wh) => wh.name === 'CROSSROID');
+								if (crossroidWebhooks.length > 0) {
+									console.log(`[代理投稿] 「CROSSROID」webhook（${crossroidWebhooks.length}個）を削除します...`);
+									for (const wh of crossroidWebhooks) {
+										try {
+											await wh.delete();
+											console.log(`[代理投稿] webhookを削除: ${wh.id}`);
+										} catch (deleteError) {
+											console.error(`[代理投稿] webhook削除エラー: ${wh.id}`, deleteError);
+										}
+									}
 								}
+								
+								// キャッシュもクリア
+								webhookCache.delete(channelId);
+								
+								// 少し待ってから再作成
+								await new Promise(resolve => setTimeout(resolve, 1000));
+								
+								try {
+									webhook = await message.channel.createWebhook({
+										name: 'CROSSROID',
+										avatar: message.client.user.displayAvatarURL(),
+									});
+									console.log(`[代理投稿] 新しいwebhookを作成（再試行成功）: ${webhook.id}`);
+									
+									// キャッシュに保存
+									webhookCache.set(channelId, {
+										webhook: webhook,
+										timestamp: Date.now()
+									});
+								} catch (retryError) {
+									console.error(`[代理投稿] ⚠️ Webhookの再作成に失敗しました:`, retryError);
+									// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
+									return;
+								}
+							} else {
+								console.error(`[代理投稿] Webhook作成エラー:`, createError);
+								// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
+								return;
 							}
 						}
-						
-						// キャッシュもクリア
-						webhookCache.delete(channelId);
-						
-						// 少し待ってから再作成
-						await new Promise(resolve => setTimeout(resolve, 1000));
-						
-						try {
-							webhook = await message.channel.createWebhook({
-								name: 'CROSSROID',
-								avatar: message.client.user.displayAvatarURL(),
-							});
-							console.log(`[代理投稿] 新しいwebhookを作成（再試行成功）: ${webhook.id}`);
-							
-							// キャッシュに保存
-							webhookCache.set(channelId, {
-								webhook: webhook,
-								timestamp: Date.now()
-							});
-						} catch (retryError) {
-							console.error(`[代理投稿] ⚠️ Webhookの再作成に失敗しました:`, retryError);
-							// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
-							return;
-						}
-					} else {
-						console.error(`[代理投稿] Webhook作成エラー:`, createError);
-						// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
-						return;
-					}
 					}
 				}
 			} catch (webhookError) {
