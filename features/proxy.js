@@ -65,13 +65,17 @@ async function messageCreate(message) {
 				const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID');
 				
 				if (matchingWebhooks.length > 0) {
-					// 既存のwebhookを確認：自分が作成したもの（トークンがあるもの）を優先的に使用
-					const webhookWithToken = matchingWebhooks.find((wh) => wh.token);
+					// トークンがあるwebhookをすべて取得
+					const webhooksWithToken = matchingWebhooks.filter((wh) => wh.token);
 					
-					if (webhookWithToken) {
-						// 自分が作成したwebhookが見つかった場合、それを使用
-						webhook = webhookWithToken;
-						console.log(`[代理投稿] 既存のwebhook（自分が作成したもの）を使用: ${webhook.id}`);
+					if (webhooksWithToken.length > 0) {
+						// トークンがあるwebhookが複数ある場合、最新の1つ（IDが最大）を使用し、他は削除
+						// IDが大きいほど新しいwebhook
+						webhook = webhooksWithToken.reduce((latest, current) => {
+							return BigInt(current.id) > BigInt(latest.id) ? current : latest;
+						});
+						
+						console.log(`[代理投稿] 既存のwebhook（自分が作成したもの）を使用: ${webhook.id} (${matchingWebhooks.length}個中から選択)`);
 						
 						// キャッシュに保存
 						webhookCache.set(channelId, {
@@ -79,7 +83,7 @@ async function messageCreate(message) {
 							timestamp: Date.now()
 						});
 						
-						// 余分なwebhookを削除（使用するもの以外）
+						// 余分なwebhookをすべて削除（使用するもの以外）
 						for (const wh of matchingWebhooks) {
 							if (wh.id !== webhook.id) {
 								try {
@@ -91,7 +95,7 @@ async function messageCreate(message) {
 							}
 						}
 					} else {
-						// トークンがない既存のwebhook（以前からすでにあるもの）を削除
+						// トークンがない既存のwebhook（以前からすでにあるもの）をすべて削除
 						console.log(`[代理投稿] 既存のwebhookが見つかりましたが、トークンがないため削除します（${matchingWebhooks.length}個）。`);
 						for (const wh of matchingWebhooks) {
 							try {
@@ -118,17 +122,47 @@ async function messageCreate(message) {
 							webhook: webhook,
 							timestamp: Date.now()
 						});
+						
+						// 作成後に再度確認して、並行処理で複数作成された場合は余分なものを削除
+						const webhooksAfterCreate = await message.channel.fetchWebhooks();
+						const matchingAfterCreate = webhooksAfterCreate.filter((wh) => wh.name === 'CROSSROID');
+						if (matchingAfterCreate.length > 1) {
+							console.log(`[代理投稿] 並行処理で複数のwebhookが作成されました（${matchingAfterCreate.length}個）。最新の1つだけを残します。`);
+							// 最新の1つ（IDが最大）を特定
+							const latestWebhook = matchingAfterCreate.reduce((latest, current) => {
+								return BigInt(current.id) > BigInt(latest.id) ? current : latest;
+							});
+							// 最新のものをwebhookとして使用
+							webhook = latestWebhook;
+							// キャッシュを更新
+							webhookCache.set(channelId, {
+								webhook: webhook,
+								timestamp: Date.now()
+							});
+							// 余分なものを削除
+							for (const wh of matchingAfterCreate) {
+								if (wh.id !== webhook.id) {
+									try {
+										await wh.delete();
+										console.log(`[代理投稿] 並行処理で作成された余分なwebhookを削除: ${wh.id}`);
+									} catch (deleteError) {
+										console.error(`[代理投稿] webhook削除エラー: ${wh.id}`, deleteError);
+									}
+								}
+							}
+						}
 					} catch (createError) {
 					// webhook作成エラー（上限に達している可能性）
 					if (createError.code === 30007) {
 						console.error(`[代理投稿] ⚠️ Webhookの上限に達しています。`);
 						console.error(`[代理投稿] ⚠️ 既存のwebhookを削除してから再試行します...`);
 						
-						// すべてのwebhookを削除してから再試行
+						// 「CROSSROID」という名前のwebhookをすべて削除
 						const allWebhooks = await message.channel.fetchWebhooks();
-						if (allWebhooks.size > 0) {
-							console.log(`[代理投稿] すべてのwebhook（${allWebhooks.size}個）を削除します...`);
-							for (const wh of allWebhooks.values()) {
+						const crossroidWebhooks = Array.from(allWebhooks.values()).filter((wh) => wh.name === 'CROSSROID');
+						if (crossroidWebhooks.length > 0) {
+							console.log(`[代理投稿] 「CROSSROID」webhook（${crossroidWebhooks.length}個）を削除します...`);
+							for (const wh of crossroidWebhooks) {
 								try {
 									await wh.delete();
 									console.log(`[代理投稿] webhookを削除: ${wh.id}`);
@@ -136,32 +170,28 @@ async function messageCreate(message) {
 									console.error(`[代理投稿] webhook削除エラー: ${wh.id}`, deleteError);
 								}
 							}
+						}
+						
+						// キャッシュもクリア
+						webhookCache.delete(channelId);
+						
+						// 少し待ってから再作成
+						await new Promise(resolve => setTimeout(resolve, 1000));
+						
+						try {
+							webhook = await message.channel.createWebhook({
+								name: 'CROSSROID',
+								avatar: message.client.user.displayAvatarURL(),
+							});
+							console.log(`[代理投稿] 新しいwebhookを作成（再試行成功）: ${webhook.id}`);
 							
-							// キャッシュもクリア
-							webhookCache.delete(channelId);
-							
-							// 少し待ってから再作成
-							await new Promise(resolve => setTimeout(resolve, 1000));
-							
-							try {
-								webhook = await message.channel.createWebhook({
-									name: 'CROSSROID',
-									avatar: message.client.user.displayAvatarURL(),
-								});
-								console.log(`[代理投稿] 新しいwebhookを作成（再試行成功）: ${webhook.id}`);
-								
-								// キャッシュに保存
-								webhookCache.set(channelId, {
-									webhook: webhook,
-									timestamp: Date.now()
-								});
-							} catch (retryError) {
-								console.error(`[代理投稿] ⚠️ Webhookの再作成に失敗しました:`, retryError);
-								// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
-								return;
-							}
-						} else {
-							console.error(`[代理投稿] ⚠️ 使用可能なwebhookがありません。処理を中断します。`);
+							// キャッシュに保存
+							webhookCache.set(channelId, {
+								webhook: webhook,
+								timestamp: Date.now()
+							});
+						} catch (retryError) {
+							console.error(`[代理投稿] ⚠️ Webhookの再作成に失敗しました:`, retryError);
 							// Webhookの準備に失敗した場合は処理を中断（元メッセージは削除しない）
 							return;
 						}
