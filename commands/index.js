@@ -26,6 +26,7 @@ const {
 	SHOP_EMOJI_CREATOR_ROLE_ID,
 	SHOP_NICKNAME_CHANGE_ROLE_ID,
 } = require('../constants');
+const { getOrCreateWebhook } = require('../features/proxy');
 const fs = require('fs');
 const path = require('path');
 const { checkAdmin } = require('../utils');
@@ -109,35 +110,18 @@ async function handleCommands(interaction, client) {
 				const displayName = `${uglyName} ID:${dailyId}`;
 				const avatarURL = client.user.displayAvatarURL();
 
-				// Webhookを取得または作成
+				// Webhookを取得または作成（画像代行・ワードフィルターと同じwebhookを使用）
 				let webhook;
 				
 				try {
-					// 既存のwebhookを探す
-					const webhooks = await interaction.channel.fetchWebhooks();
-					const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID Anonymous');
-					
-					// トークンがあるwebhookを優先的に使用
-					if (matchingWebhooks.length > 0) {
-						const webhookWithToken = matchingWebhooks.find((wh) => wh.token);
-						if (webhookWithToken) {
-							webhook = webhookWithToken;
-						} else {
-							// トークンがない場合は最初の1つを使用
-							webhook = matchingWebhooks[0];
-						}
-					}
-					
-					// webhookが見つからない場合は作成
-					if (!webhook) {
-						webhook = await interaction.channel.createWebhook({
-							name: 'CROSSROID Anonymous',
-							avatar: avatarURL,
-						});
-					}
+					webhook = await getOrCreateWebhook(interaction.channel);
 				} catch (webhookError) {
 					console.error(`[Anonymous] Webhook取得/作成エラー:`, webhookError);
 					throw webhookError;
+				}
+
+				if (!webhook) {
+					throw new Error('Webhookが取得できませんでした');
 				}
 
 				await webhook.send({
@@ -2469,19 +2453,12 @@ async function handleCommands(interaction, client) {
 				if (member && (member.roles.cache.has(OWNER_ROLE_ID) || member.roles.cache.has(TECHTEAM_ROLE_ID))) {
 					if (interaction.targetMessage.webhookId != null) {
 						const webhook = await interaction.targetMessage.fetchWebhook().catch(() => null);
-						if (webhook && webhook.name === 'CROSSROID Anonymous') {
-							// Parse Info using Regex (Robust against format changes)
-							const username = interaction.targetMessage.author.username;
-							const idMatch = username.match(/ID:([a-z0-9]+)/i);
-
-							const targetId = idMatch ? idMatch[1] : null;
-
-							if (!targetId) {
-								return await interaction.followUp({
-									content: '❌ メッセージからIDを読み取れませんでした。',
-									flags: MessageFlags.Ephemeral,
-								});
-							}
+						// webhook名が「CROSSROID」で、ユーザー名に「ID:」が含まれている場合はanonymousメッセージ
+						const username = interaction.targetMessage.author.username;
+						const idMatch = username.match(/ID:([a-z0-9]+)/i);
+						
+						if (webhook && webhook.name === 'CROSSROID' && idMatch) {
+							const targetId = idMatch[1];
 
 							const { generateDailyUserIdForDate } = require('../utils');
 							const msgDate = interaction.targetMessage.createdAt;
