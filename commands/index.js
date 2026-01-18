@@ -162,6 +162,25 @@ async function handleCommands(interaction, client) {
 					embeds: [new EmbedBuilder().setColor(0xffa500).setDescription('⏳ クールダウン中')],
 					flags: MessageFlags.Ephemeral,
 				});
+			
+			// メインチャンネルにbumpメッセージを送信
+			try {
+				const mainChannel = await client.channels.fetch(MAIN_CHANNEL_ID);
+				if (mainChannel) {
+					const channelMention = interaction.channel ? `<#${interaction.channel.id}>` : 'このチャンネル';
+					await mainChannel.send({
+						embeds: [
+							new EmbedBuilder()
+								.setColor(0x5865f2)
+								.setDescription(`👊 ${interaction.user} が ${channelMention} を宣伝しました！`)
+								.setTimestamp(),
+						],
+					});
+				}
+			} catch (error) {
+				console.error('[Bump] メインチャンネルへの送信エラー:', error);
+			}
+			
 			bumpCooldowns.set(userId, now);
 			await interaction.reply({
 				embeds: [new EmbedBuilder().setColor(0x00ff00).setDescription('👊 Bumpしました')],
