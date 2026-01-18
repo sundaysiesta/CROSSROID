@@ -166,16 +166,56 @@ async function handleCommands(interaction, client) {
 			// メインチャンネルにbumpメッセージを送信
 			try {
 				const mainChannel = await client.channels.fetch(MAIN_CHANNEL_ID);
-				if (mainChannel) {
-					const channelMention = interaction.channel ? `<#${interaction.channel.id}>` : 'このチャンネル';
-					await mainChannel.send({
-						embeds: [
-							new EmbedBuilder()
-								.setColor(0x5865f2)
-								.setDescription(`👊 ${interaction.user} が ${channelMention} を宣伝しました！`)
-								.setTimestamp(),
-						],
-					});
+				if (mainChannel && interaction.channel) {
+					// チャンネル情報を取得
+					const clubChannel = interaction.channel;
+					const clubName = clubChannel.name || '部活名不明';
+					const clubTopic = clubChannel.topic || '活動内容が設定されていません';
+					
+					// トピックから部長情報を抽出（「部長:」や「部長 @」などの形式を想定）
+					let clubLeader = '未設定';
+					const topicLines = clubTopic.split('\n');
+					for (const line of topicLines) {
+						if (line.includes('部長')) {
+							// メンション形式を抽出
+							const mentionMatch = line.match(/<@(\d+)>/);
+							if (mentionMatch) {
+								try {
+									const leaderUser = await client.users.fetch(mentionMatch[1]);
+									clubLeader = leaderUser.username;
+								} catch (e) {
+									clubLeader = line.replace(/.*部長[：:]\s*/, '').trim();
+								}
+							} else {
+								// メンション形式でない場合、部長の後に続くテキストを取得
+								clubLeader = line.replace(/.*部長[：:]\s*/, '').trim() || '未設定';
+							}
+							break;
+						}
+					}
+					
+					// 活動内容（トピック全体から部長行を除く）
+					let activityContent = clubTopic;
+					if (clubLeader !== '未設定') {
+						activityContent = topicLines.filter(line => !line.includes('部長')).join('\n').trim() || clubTopic;
+					}
+					
+					const embed = new EmbedBuilder()
+						.setColor(0x5865f2)
+						.setTitle(`👊 部活宣伝: ${clubName}`)
+						.addFields(
+							{ name: '部長', value: clubLeader, inline: true },
+							{ name: 'チャンネル', value: `<#${clubChannel.id}>`, inline: true }
+						)
+						.setTimestamp();
+					
+					if (activityContent && activityContent !== '活動内容が設定されていません') {
+						embed.setDescription(activityContent.length > 4096 ? activityContent.substring(0, 4093) + '...' : activityContent);
+					}
+					
+					embed.setFooter({ text: `宣伝者: ${interaction.user.tag}` });
+					
+					await mainChannel.send({ embeds: [embed] });
 				}
 			} catch (error) {
 				console.error('[Bump] メインチャンネルへの送信エラー:', error);
