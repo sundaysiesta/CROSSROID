@@ -13,9 +13,12 @@ const WEBHOOK_CACHE_TTL = 24 * 60 * 60 * 1000; // 24時間
 
 // 30分ごとにクールダウンをクリア
 async function clientReady(client) {
-	setInterval(() => {
-		messageProxyCooldowns = new Map();
-	}, 30 * 60 * 1000);
+	setInterval(
+		() => {
+			messageProxyCooldowns = new Map();
+		},
+		30 * 60 * 1000,
+	);
 }
 
 async function messageCreate(message) {
@@ -56,13 +59,19 @@ async function messageCreate(message) {
 			return;
 		}
 
+		// 編集ボタン
+		const editButton = new ButtonBuilder()
+			.setCustomId(`edit_${messageAuthorId}_${Date.now()}`)
+			.setLabel('編集')
+			.setStyle(ButtonStyle.Primary)
+			.setEmoji('✏️');
 		// 削除ボタンを事前に準備
 		const deleteButton = new ButtonBuilder()
 			.setCustomId(`delete_${messageAuthorId}_${Date.now()}`)
 			.setLabel('削除')
 			.setStyle(ButtonStyle.Danger)
 			.setEmoji('🗑️');
-		const row = new ActionRowBuilder().addComponents(deleteButton);
+		const row = new ActionRowBuilder().addComponents(deleteButton, editButton);
 
 		// ワードフィルターの場合、元のメッセージを即座に削除（BAN回避のため）
 		try {
@@ -80,14 +89,16 @@ async function messageCreate(message) {
 			// Discordのメッセージ長制限（2000文字）をチェック
 			const MAX_CONTENT_LENGTH = 2000;
 			let finalContent = messageContent || '';
-			
+
 			// 2000文字を超える場合は切り詰める
 			if (finalContent.length > MAX_CONTENT_LENGTH) {
 				const truncatedContent = finalContent.substring(0, MAX_CONTENT_LENGTH - 20); // 省略メッセージ用に20文字確保
 				finalContent = truncatedContent + '\n\n...（文字数制限により省略）';
-				console.log(`[代理投稿] メッセージを切り詰めました: ${messageContent.length}文字 → ${finalContent.length}文字`);
+				console.log(
+					`[代理投稿] メッセージを切り詰めました: ${messageContent.length}文字 → ${finalContent.length}文字`,
+				);
 			}
-			
+
 			console.log(`[代理投稿] Webhook送信開始: MessageID=${messageId}, contentLength=${finalContent.length}文字`);
 			proxiedMessage = await webhook.send({
 				content: finalContent,
@@ -129,10 +140,10 @@ async function messageCreate(message) {
 async function getOrCreateWebhook(channel) {
 	const channelId = channel.id;
 	let webhook;
-	
+
 	// キャッシュから取得を試みる
 	const cached = webhookCache.get(channelId);
-	if (cached && (Date.now() - cached.timestamp < WEBHOOK_CACHE_TTL)) {
+	if (cached && Date.now() - cached.timestamp < WEBHOOK_CACHE_TTL) {
 		try {
 			// キャッシュされたwebhookがまだ有効か確認
 			await cached.webhook.fetch();
@@ -148,39 +159,43 @@ async function getOrCreateWebhook(channel) {
 				console.log(`[Webhook] 無効なwebhookを削除: ${cached.webhook.id}`);
 			} catch (deleteError) {
 				// 削除に失敗しても続行（既に削除されている可能性がある）
-				console.log(`[Webhook] webhook削除を試みましたが、既に存在しない可能性があります: ${cached.webhook.id}`);
+				console.log(
+					`[Webhook] webhook削除を試みましたが、既に存在しない可能性があります: ${cached.webhook.id}`,
+				);
 			}
 		}
 	}
-	
+
 	// キャッシュにない場合、既存のwebhookを探す
 	if (!webhook) {
 		try {
 			// まず既存のwebhookをすべて取得
 			const webhooks = await channel.fetchWebhooks();
 			const matchingWebhooks = webhooks.filter((wh) => wh.name === 'CROSSROID');
-			
+
 			if (matchingWebhooks.length > 0) {
 				console.log(`[Webhook] 既存の「CROSSROID」webhookを${matchingWebhooks.length}個発見しました。`);
-				
+
 				// トークンがあるwebhookをすべて取得
 				const webhooksWithToken = matchingWebhooks.filter((wh) => wh.token);
-				
+
 				if (webhooksWithToken.length > 0) {
 					// トークンがあるwebhookが複数ある場合、最新の1つ（IDが最大）を使用し、他は削除
 					// IDが大きいほど新しいwebhook
 					webhook = webhooksWithToken.reduce((latest, current) => {
 						return BigInt(current.id) > BigInt(latest.id) ? current : latest;
 					});
-					
-					console.log(`[Webhook] 既存のwebhook（自分が作成したもの）を使用: ${webhook.id} (${matchingWebhooks.length}個中から選択)`);
-					
+
+					console.log(
+						`[Webhook] 既存のwebhook（自分が作成したもの）を使用: ${webhook.id} (${matchingWebhooks.length}個中から選択)`,
+					);
+
 					// キャッシュに保存
 					webhookCache.set(channelId, {
 						webhook: webhook,
-						timestamp: Date.now()
+						timestamp: Date.now(),
 					});
-					
+
 					// 余分なwebhookをすべて削除（使用するもの以外）
 					for (const wh of matchingWebhooks) {
 						if (wh.id !== webhook.id) {
@@ -194,7 +209,9 @@ async function getOrCreateWebhook(channel) {
 					}
 				} else {
 					// トークンがない既存のwebhook（以前からすでにあるもの）をすべて削除
-					console.log(`[Webhook] 既存のwebhookが見つかりましたが、トークンがないため削除します（${matchingWebhooks.length}個）。`);
+					console.log(
+						`[Webhook] 既存のwebhookが見つかりましたが、トークンがないため削除します（${matchingWebhooks.length}個）。`,
+					);
 					for (const wh of matchingWebhooks) {
 						try {
 							await wh.delete();
@@ -205,7 +222,7 @@ async function getOrCreateWebhook(channel) {
 					}
 				}
 			}
-			
+
 			// webhookがまだ見つかっていない場合、新しいwebhookを作成（トークンが含まれる）
 			if (!webhook) {
 				// 作成前に再度確認（並行処理対策）
@@ -221,7 +238,7 @@ async function getOrCreateWebhook(channel) {
 						console.log(`[Webhook] 既存のwebhookを使用: ${webhook.id}`);
 						webhookCache.set(channelId, {
 							webhook: webhook,
-							timestamp: Date.now()
+							timestamp: Date.now(),
 						});
 						// 余分なものを削除
 						for (const wh of matchingBeforeCreate) {
@@ -236,7 +253,7 @@ async function getOrCreateWebhook(channel) {
 						}
 					}
 				}
-				
+
 				// それでもwebhookが見つからない場合のみ作成
 				if (!webhook) {
 					try {
@@ -245,18 +262,20 @@ async function getOrCreateWebhook(channel) {
 							avatar: channel.client.user.displayAvatarURL(),
 						});
 						console.log(`[Webhook] 新しいwebhookを作成: ${webhook.id}`);
-						
+
 						// キャッシュに保存（トークンを含む）
 						webhookCache.set(channelId, {
 							webhook: webhook,
-							timestamp: Date.now()
+							timestamp: Date.now(),
 						});
-						
+
 						// 作成後に再度確認して、並行処理で複数作成された場合は余分なものを削除
 						const webhooksAfterCreate = await channel.fetchWebhooks();
 						const matchingAfterCreate = webhooksAfterCreate.filter((wh) => wh.name === 'CROSSROID');
 						if (matchingAfterCreate.length > 1) {
-							console.log(`[Webhook] 並行処理で複数のwebhookが作成されました（${matchingAfterCreate.length}個）。最新の1つだけを残します。`);
+							console.log(
+								`[Webhook] 並行処理で複数のwebhookが作成されました（${matchingAfterCreate.length}個）。最新の1つだけを残します。`,
+							);
 							// 最新の1つ（IDが最大）を特定
 							const latestWebhook = matchingAfterCreate.reduce((latest, current) => {
 								return BigInt(current.id) > BigInt(latest.id) ? current : latest;
@@ -266,7 +285,7 @@ async function getOrCreateWebhook(channel) {
 							// キャッシュを更新
 							webhookCache.set(channelId, {
 								webhook: webhook,
-								timestamp: Date.now()
+								timestamp: Date.now(),
 							});
 							// 余分なものを削除
 							for (const wh of matchingAfterCreate) {
@@ -285,12 +304,16 @@ async function getOrCreateWebhook(channel) {
 						if (createError.code === 30007) {
 							console.error(`[Webhook] ⚠️ Webhookの上限に達しています。`);
 							console.error(`[Webhook] ⚠️ 既存のwebhookを削除してから再試行します...`);
-							
+
 							// 「CROSSROID」という名前のwebhookをすべて削除
 							const allWebhooks = await channel.fetchWebhooks();
-							const crossroidWebhooks = Array.from(allWebhooks.values()).filter((wh) => wh.name === 'CROSSROID');
+							const crossroidWebhooks = Array.from(allWebhooks.values()).filter(
+								(wh) => wh.name === 'CROSSROID',
+							);
 							if (crossroidWebhooks.length > 0) {
-								console.log(`[Webhook] 「CROSSROID」webhook（${crossroidWebhooks.length}個）を削除します...`);
+								console.log(
+									`[Webhook] 「CROSSROID」webhook（${crossroidWebhooks.length}個）を削除します...`,
+								);
 								for (const wh of crossroidWebhooks) {
 									try {
 										await wh.delete();
@@ -300,24 +323,24 @@ async function getOrCreateWebhook(channel) {
 									}
 								}
 							}
-							
+
 							// キャッシュもクリア
 							webhookCache.delete(channelId);
-							
+
 							// 少し待ってから再作成
-							await new Promise(resolve => setTimeout(resolve, 1000));
-							
+							await new Promise((resolve) => setTimeout(resolve, 1000));
+
 							try {
 								webhook = await channel.createWebhook({
 									name: 'CROSSROID',
 									avatar: channel.client.user.displayAvatarURL(),
 								});
 								console.log(`[Webhook] 新しいwebhookを作成（再試行成功）: ${webhook.id}`);
-								
+
 								// キャッシュに保存
 								webhookCache.set(channelId, {
 									webhook: webhook,
-									timestamp: Date.now()
+									timestamp: Date.now(),
 								});
 							} catch (retryError) {
 								console.error(`[Webhook] ⚠️ Webhookの再作成に失敗しました:`, retryError);
@@ -335,7 +358,7 @@ async function getOrCreateWebhook(channel) {
 			throw webhookError;
 		}
 	}
-	
+
 	return webhook;
 }
 
