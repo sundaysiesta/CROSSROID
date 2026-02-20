@@ -150,7 +150,7 @@ function setup(client) {
 		if (interaction.isButton()) {
 			// 編集ボタン
 			if (interaction.customId.startsWith('edit_')) {
-				const customIdParts = interaction.customId.replace('delete_', '').split('_');
+				const customIdParts = interaction.customId.replace('edit_', '').split('_');
 				const authorId = customIdParts[0];
 
 				if (interaction.user.id !== authorId) {
