@@ -159,7 +159,8 @@ function setup(client) {
 						.setCustomId('content')
 						.setStyle(TextInputStyle.Paragraph)
 						.setRequired(false)
-						.setValue(interaction.message.content || '');
+						.setValue(interaction.message.content || '')
+						.setMaxLength(2000);
 					const label = new LabelBuilder().setLabel('内容').setTextInputComponent(input);
 					modal.addLabelComponents(label);
 					await interaction.showModal(modal);
