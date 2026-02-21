@@ -63,15 +63,15 @@ async function messageCreate(message) {
 		const editButton = new ButtonBuilder()
 			.setCustomId(`edit_${messageAuthorId}_${Date.now()}`)
 			.setLabel('編集')
-			.setStyle(ButtonStyle.Primary)
+			.setStyle(ButtonStyle.Success)
 			.setEmoji('✏️');
-		// 削除ボタンを事前に準備
+		// 削除ボタン
 		const deleteButton = new ButtonBuilder()
 			.setCustomId(`delete_${messageAuthorId}_${Date.now()}`)
 			.setLabel('削除')
 			.setStyle(ButtonStyle.Danger)
 			.setEmoji('🗑️');
-		const row = new ActionRowBuilder().addComponents(deleteButton, editButton);
+		const row = new ActionRowBuilder().addComponents(editButton, deleteButton);
 
 		// ワードフィルターの場合、元のメッセージを即座に削除（BAN回避のため）
 		try {
