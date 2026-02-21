@@ -1,4 +1,4 @@
-const { EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder } = require('discord.js');
 const { IMAGE_DELETE_LOG_CHANNEL_ID } = require('../constants');
 const { isImageOrVideo } = require('../utils');
 const { deletedMessageInfo } = require('./proxy'); // Import from proxy module
@@ -153,20 +153,19 @@ function setup(client) {
 				const customIdParts = interaction.customId.replace('edit_', '').split('_');
 				const authorId = customIdParts[0];
 
-				if (interaction.user.id !== authorId) {
+				if (interaction.user.id === authorId) {
+					const modal = new ModalBuilder().setCustomId('editmodal').setTitle('メッセージを編集');
+					const input = new TextInputBuilder()
+						.setCustomId('content')
+						.setStyle(TextInputStyle.Paragraph)
+						.setRequired(false)
+						.setValue(interaction.message.content || '');
+					const label = new LabelBuilder().setLabel('内容').setTextInputComponent(input);
+					modal.addLabelComponents(label);
+					await interaction.showModal(modal);
+				} else {
 					return interaction.reply({ content: 'このメッセージは投稿者本人のみが編集できます。', flags: 64 }); // 64 = MessageFlags.Ephemeral
 				}
-
-				const modal = new ModalBuilder().setCustomId('editmodal').setTitle('メッセージを編集');
-
-				const contentInput = new TextInputBuilder()
-					.setCustomId('content')
-					.setLabel('内容')
-					.setStyle(TextInputStyle.Paragraph)
-					.setRequired(false)
-					.setValue(interaction.message.content || '');
-				modal.addTextDisplayComponents(contentInput);
-				await interaction.showModal(modal);
 			} else if (interaction.customId.startsWith('delete_')) {
 				// 削除ボタン
 				const customIdParts = interaction.customId.replace('delete_', '').split('_');
@@ -334,11 +333,16 @@ function setup(client) {
 				const content = interaction.fields.getTextInputValue('content');
 				const webhooks = await interaction.channel.fetchWebhooks();
 				if (interaction.message.webhookId && !webhooks.has(interaction.message.webhookId)) {
-					return interaction.reply({ content: 'このメッセージは削除されたため編集できません。', flags: 64 });
+					return interaction.reply({
+						content: 'このメッセージが送信されたWebhookが削除されたため編集できません。',
+						flags: 64,
+					});
 				} else {
-					await webhooks.get(interaction.message.webhookId).editMessage(interaction.message.id, {
+					const webhook = webhooks.get(interaction.message.webhookId);
+					await webhook.editMessage(interaction.message.id, {
 						content: content,
 					});
+					await interaction.reply({ content: 'メッセージを編集しました', flags: 64 });
 				}
 			}
 		}
